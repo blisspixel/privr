@@ -6,7 +6,7 @@ Please report security vulnerabilities privately through GitHub Security
 Advisories for this repository, using the "Report a vulnerability" button on the
 Security tab.
 
-If private advisories are unavailable to you, email `security@pueo.io` instead.
+If private advisories are unavailable to you, email `nick@pueo.io` instead.
 Do not open a public issue for a vulnerability that could enable code execution,
 privilege escalation, policy injection, journal disclosure, unsafe rollback, or
 destructive system changes.

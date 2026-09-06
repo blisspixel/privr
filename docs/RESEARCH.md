@@ -74,6 +74,82 @@ Primary catalogue references:
 - [Privacy policy CSP](https://learn.microsoft.com/windows/client-management/mdm/policy-csp-privacy)
 - [System policy CSP](https://learn.microsoft.com/windows/client-management/mdm/policy-csp-system)
 
+### Documented collection
+
+Microsoft publishes more detail than is generally assumed, and vendor
+documentation is stronger material than community folklore. The optional
+diagnostic data documentation enumerates data types with field-level lists, and
+its own wording is the most useful evidence available:
+
+- "Available SSIDs and BSSIDs"
+- "OEM details, manufacturer, model, and serial number"
+- "Text typed in Address bar and Search box"
+- "User-generated files that are indicated as a potential cause for a crash"
+- crash dumps that can include "All the physical memory used by Windows at the
+  point of the crash"
+
+Source: [Windows diagnostic data](https://learn.microsoft.com/windows/privacy/windows-diagnostic-data).
+
+Two findings follow that shape how `privr` describes posture.
+
+**The required tier is not anonymous.** At the Required level, published census
+events include the OEM serial number, the user-set device name, the TPM
+manufacturer identifier, IMEI on equipped devices, the OEM product key, and the
+key management host address. The common belief that the default level is
+aggregate and non-identifying does not match the published field lists. Source:
+[Required diagnostic data events and fields](https://learn.microsoft.com/windows/privacy/required-windows-diagnostic-data-events-and-fields).
+
+**The configuration itself is reported.** Census events carry the current
+telemetry level and the authority that set it, described as group policy, device
+management, or the user, and privacy-setting events encode each consent value
+together with the authority that set it. Changing these settings is therefore an
+observable event. `privr` must never imply that hardening confers invisibility.
+See [SAFETY.md](SAFETY.md).
+
+**Windows Error Reporting is architecturally separate from the telemetry
+service**, with its own endpoints and its own policy precedence chain. Crash
+data, including memory and file attachments, flows through error reporting rather
+than through the telemetry service, and the two are configured independently.
+
+### Claims investigated and rejected
+
+The project's evidence standard applies to its own prose. These claims circulate
+widely, were checked against primary vendor documentation, and are not used:
+
+| Claim | Verdict |
+|---|---|
+| Inking and typing personalization performs contact harvesting through a setting so named | **Not vendor-documented.** The string appears in community tooling only. The documented controls are restricted implicit text collection, restricted implicit ink collection, and linguistic data collection. |
+| Taskbar and Start search transmit keystrokes in real time to a named API endpoint | **Unverified.** That hostname does not appear in Microsoft's published Windows endpoint list. Web search from the taskbar is documented; per-keystroke transmission is not. |
+| The telemetry service streams event traces, crash data, hardware identifiers, and memory heaps | **Substantially supported, with a correction.** Crash data is collected by Windows Error Reporting, not the telemetry service. Heap collection is documented through the dump-collection limit policy. |
+| Registry paths circulated in debloat scripts are effective on Windows Home | **False.** See the edition-gating rule below. |
+
+Recording rejected claims is deliberate. A project whose pitch is citation
+discipline should be able to show what it declined to assert.
+
+### The edition-gating rule
+
+A policy value that reads back correctly is not evidence that it took effect.
+
+Microsoft documents that the lowest diagnostic data value applies only to
+Enterprise, Education, and Server, and that using it elsewhere is "equivalent to
+setting the value of 1"
+([System policy CSP](https://learn.microsoft.com/windows/client-management/mdm/policy-csp-system)).
+Home appears in no policy applicability table, and several policies exclude Pro
+as well. The write succeeds, the value reads back as written, and the effective
+behavior is unchanged.
+
+Every surveyed tool reports a pass in that situation. This is the most common
+false pass in the category and the clearest single justification for the project.
+
+Three related traps become catalogue rules:
+
+- Value names differ from policy names, so a control binds the value the system
+  actually reads.
+- Polarity is inconsistent. Some security-related values use `1` for the
+  protective state, so no adapter may assume zero means private.
+- Some writes are silently discarded, notably under anti-tampering protection,
+  which is why every write is verified by re-reading effective state.
+
 ### Safe MVP remediation candidates
 
 | Control | Privacy-first state | Source |
@@ -144,10 +220,42 @@ Sources:
 - [Apple device-management restrictions](https://developer.apple.com/documentation/devicemanagement/restrictions)
 - [Privacy Preferences Policy Control](https://support.apple.com/guide/deployment/privacy-preferences-policy-control-payload-settings-dep38df53c2a/web)
 
+### macOS reading mechanism
+
+The maintained government baseline for macOS uses the `defaults` command in two
+of its several hundred checks, and reads through the preferences API in over a
+hundred. The reason is documented: the preferences daemon holds values in memory
+and can overwrite direct file edits, and `defaults` does not observe managed
+values at all.
+
+`privr` therefore reads through the CoreFoundation preferences API, and uses the
+forced-value API as the management source signal. Shelling out to `defaults` or
+parsing preference files directly is excluded.
+
+Many widely circulated `defaults` commands are inert, deprecated, or apply to a
+different Apple operating system entirely. Appearing in a hardening guide is not
+evidence that a command does anything.
+
+### The enforcement-mechanism trap
+
+Roughly forty percent of the rules in the most credible macOS baseline verify
+that an enforcing configuration profile is installed rather than verifying the
+setting. Its firewall rule reads a preference key rather than the firewall, and
+the assessment command for Gatekeeper appears nowhere in the corpus.
+
+The consequence is that a user who has correctly configured every option by hand
+fails the benchmark. This is the same class of error as the Windows edition
+gating above, in the most institutionally credible content in the space.
+
+`privr` verifies effective state. Where only the enforcement mechanism is
+readable, the result is `review`, never `pass`. Readability tiers and what each
+permits are in [PLATFORM_SUPPORT.md](PLATFORM_SUPPORT.md).
+
 Product implications:
 
 - There is no supported public CLI for reliably reading and changing every
-  unmanaged Mac toggle.
+  unmanaged Mac toggle. Unmanaged macOS is largely a guided-review product, and
+  the documentation says so rather than implying broader coverage.
 - Private `defaults` keys and direct TCC database edits are not an acceptable
   foundation.
 - Unmanaged settings without a supported interface should use outcome `review`
@@ -162,7 +270,27 @@ Product implications:
 
 Linux support must discover `/etc/os-release`, the active desktop, available
 GSettings schemas, installed packages, and service manager before choosing
-checks. Unsupported environments must not receive a false `pass`.
+checks. Unsupported environments must not receive a false `pass`. The full
+ordered detection sequence is in [PLATFORM_SUPPORT.md](PLATFORM_SUPPORT.md).
+
+### Two Linux false-pass sources
+
+**A settings write can report success while changing nothing.** Performed as root
+against a user's session, `gsettings set` exits zero and the user's value is
+unchanged. Of the tools surveyed, none acts correctly on a user session from
+root, and two silently report success. Every write is therefore verified out of
+band, and settings are applied inside the target user's live session rather than
+a root session created only for elevation.
+
+**A main configuration file can be overridden per component.** On Fedora,
+disabling the package-manager counting option in `/etc/dnf/dnf.conf` does not
+disable it, because per-repository entries in `/etc/yum.repos.d/` take
+precedence. A check that reads only the main configuration file passes on a
+stock system where the behavior is still active.
+
+Both are worked examples of the same failure: a value that reads back as desired
+while the effective behavior is unchanged. They are the Linux equivalents of the
+Windows edition-gating rule and the macOS enforcement-mechanism trap.
 
 ### GNOME
 

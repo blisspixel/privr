@@ -58,8 +58,11 @@
 
 - Keep formatting and Clippy clean with warnings denied.
 - Add tests for new behavior, failure paths, and rollback paths.
-- Maintain at least 80 percent line coverage. Treat coverage as a floor, not
-  evidence that a privacy control is correct.
+- Maintain the coverage ratchet. Treat coverage as a floor, never as evidence
+  that a privacy control is correct: a line returning a pass where it should
+  return unknown is fully covered and wrong.
+- Add a false-pass guard for every state that must never be reported as
+  compliant.
 - Keep Windows, macOS, and Linux CI passing.
 - Keep the minimum supported Rust version job passing.
 - Run dependency advisory, license, ban, and source checks.

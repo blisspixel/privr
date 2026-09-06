@@ -10,10 +10,36 @@ The engine resolves semantic values such as `required_only`, `disabled`, or
 commands, executable names, Registry paths, service names, arbitrary file paths,
 or dynamically loaded code.
 
-## Built-in policy
+## Built-in profiles
 
-The first built-in policy is `privacy-first`. It minimizes low-breakage optional
-collection and personalization while preserving:
+Three built-in profiles form an ordered ladder. Each is a strict superset of the
+one below, which is what makes moving between them coherent and makes
+`check --profile strict` a useful read-only preview of a deeper level.
+
+| Profile | Intent |
+|---|---|
+| `baseline` | The default and the recommended setting |
+| `strict` | Meaningful privacy gains with real, disclosed tradeoffs |
+| `restrictive` | Substantial convenience or functionality cost, always review |
+
+`baseline` is deliberately the useful setting rather than the cautious one. The
+line that makes it defensible per control is the distinction between collection
+and features:
+
+- **Passive continuous collection is disabled in `baseline`.** Data flows that
+  occur whether or not the operator uses anything: diagnostic transmission,
+  advertising identifiers, activity history upload, tailored experiences, input
+  and typing personalization, background usage reporting. These are not features
+  an operator invokes, and disabling them costs essentially nothing.
+- **Features an operator may actively want default to review.** Cloud clipboard
+  sync, location services, cloud search, peer update delivery, and voice
+  services are things someone may use on purpose. `baseline` surfaces them with
+  their tradeoff and the mitigation, and lets the operator decide.
+
+A control is never held back from `baseline` because it sounds aggressive, only
+because the operator might be using the thing.
+
+Every profile in the ladder preserves:
 
 - security and operating-system updates;
 - disk encryption and recovery;
@@ -22,12 +48,28 @@ collection and personalization while preserving:
 - local crash diagnosis;
 - explicitly selected synchronization features.
 
-Location, cloud sync, sensitive permissions, security sample submission, and
-other contextual choices default to review rather than blanket enforcement.
+## What the ladder never contains
 
-Security-reducing or destructive policy packs are deferred. If introduced,
-they must be separately installed or selected, clearly named, and protected by
-specific risk acceptance. They are not variants of the default policy.
+Escalating privacy must not silently escalate exposure. No profile in the ladder
+contains a control that reduces security, and choosing `restrictive` can never
+disable malware protection, reputation services, sample submission, update
+delivery, encryption, or recovery.
+
+Two sets sit outside the ladder and are never reached by selecting a higher
+profile:
+
+- **Security tradeoffs.** Clearly named, selected deliberately, and requiring
+  per-control risk acceptance.
+- **Erasure of local privacy residue.** Irreversible, behind its own verb, never
+  part of an ordinary apply.
+
+Profile membership derives from a control's declared risk, breakage, and
+reversibility metadata rather than being assigned by hand, so `baseline` cannot
+silently accumulate breaking controls as the catalogue grows. Each profile's
+disclosure warns at the level of its highest-risk member.
+
+Built-in profiles are generated data, validated at build time, and carry the
+same digest treatment as the rest of the catalogue.
 
 ## Control modes
 
@@ -46,7 +88,7 @@ and can be constrained to a small schema.
 
 ```toml
 schema = 1
-extends = "builtin:privacy-first@0.1"
+extends = "builtin:baseline@0.1"
 
 [controls."windows.defender.sample-submission"]
 mode = "review"
@@ -77,10 +119,16 @@ The schema must reject:
 An exception accepts one named state for one control. It never means "accept
 whatever is currently present."
 
-`privr` continues to evaluate and display excepted controls. Active exceptions
-are counted separately. An expired exception becomes drift again. Future team
-metadata may record an approver, but it must not change the local evaluation
-semantics.
+An exception may change the remediation decision and how a control is presented
+in an aggregate. **It never changes the finding.** A control that drifts still
+reports `drift` while exempted, with its exception state carried as a separate
+field. Comparable tools let an exemption suppress the finding itself, which
+loses the ability to distinguish an accepted risk from an absent one.
+
+Exceptions require an expiry. `privr` continues to evaluate and display excepted
+controls, active exceptions are counted separately, and an expired exception
+becomes drift again. Future team metadata may record an approver, but it must
+not change the local evaluation semantics.
 
 ## Identity and versioning
 

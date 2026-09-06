@@ -2,222 +2,146 @@
 
 Privacy settings you can verify.
 
-`privr` is a local-first privacy posture CLI. It checks which optional
-data-sharing settings are enabled, explains the evidence and tradeoffs, safely
-applies a policy, and detects drift.
+`privr` is a local-first privacy posture CLI. It reads which optional
+data-sharing settings are actually in effect, explains the evidence and the
+tradeoffs, applies a policy in reviewable steps, and can reverse what it
+changed.
 
-Windows is the first implementation target. macOS and named Linux environments
-are planned behind the same policy and reporting model.
+It is built for people who run sensitive work on their own machines, and for the
+agent harnesses they increasingly work through. Every command produces stable
+text and versioned JSON, and nothing requires network access.
+
+## Status
+
+This repository is a researched concept with a compiling Rust skeleton. It does
+not yet inspect or change any operating-system setting.
+
+Every command returns exit code `3` and sets `complete: false`. That is
+deliberate. Until real platform probes exist, the tool must never imply that a
+machine passed.
+
+What exists today is the design: the product and CLI contract, a Windows-first
+control candidate matrix, macOS and Linux support boundaries, a typed and
+allowlisted privilege architecture, exact rollback and drift semantics, and
+cross-platform CI with dependency, MSRV, and coverage gates.
+
+See [ROADMAP.md](ROADMAP.md) for what ships first, and
+[docs/DECISIONS.md](docs/DECISIONS.md) for the decisions that constrain it.
+
+## Why this exists
+
+Consider a setting that many Windows privacy tools change.
+
+`AllowTelemetry = 0` is documented by Microsoft as applying only to Enterprise,
+Education, and Server editions. On Home and Pro, Microsoft states that using it
+is "equivalent to setting the value of 1"
+([Policy CSP - System](https://learn.microsoft.com/windows/client-management/mdm/policy-csp-system)).
+
+So on the most common editions of Windows the write succeeds, the value reads
+back as `0`, every tool that checks it reports success, and the effective
+behavior is unchanged. The machine audits as hardened and is not.
+
+That is not an unusual case. Several widely applied policy values are silently
+inert outside Enterprise and Education, and comparable traps exist on the other
+platforms: a macOS preference read without the right permission can return a
+value from a stale file rather than failing, and a Fedora setting written in the
+main configuration file is overridden per repository.
+
+`privr` exists to answer four questions without guessing:
+
+1. What is this machine configured to share?
+2. Which settings differ from the policy I selected?
+3. What does each choice cost me in privacy, security, and functionality?
+4. Can a change be applied and reversed without surprises?
+
+The goal is not the longest list of tweaks. It is a smaller catalogue that is
+cited, version-aware, and honest about what it does not know.
+
+## Install
+
+Building from source is currently the only path, and the binary does not yet do
+anything useful. Rust 1.85 or later:
+
+```bash
+git clone https://github.com/blisspixel/privr
+cd privr
+cargo build --locked --release
+```
+
+One-line installers and package manager entries ship with the first signed
+release. The installer will place an unprivileged binary and nothing else;
+`privr` requests elevation only at apply time, after showing you the plan.
+
+## Workflow
+
+```text
+check -> explain -> plan -> apply -> verify -> rollback
+```
 
 ```text
 privr check
-privr explain windows.error-reporting.transmission
+privr explain windows.advertising.id
 privr plan
 privr apply
 privr rollback <transaction-id>
 ```
 
-## Current status
-
-This repository is a researched concept with a compiling Rust CLI skeleton. It
-does not yet inspect or change operating-system settings.
-
-The skeleton deliberately returns exit code `3` for incomplete commands and
-sets `complete: false` in JSON. It must not imply that a machine passed before
-real platform probes exist.
-
-The current work establishes:
-
-- the product and CLI contract;
-- a Windows-first control candidate matrix;
-- macOS and Linux support boundaries;
-- a typed, allowlisted privilege architecture;
-- exact rollback and drift semantics;
-- threat, testing, and supply-chain requirements;
-- cross-platform CI, an MSRV check, dependency policy, and an 80 percent
-  coverage gate.
-
-See [ROADMAP.md](ROADMAP.md) for implementation milestones.
-
-## Why this exists
-
-Operating systems expose meaningful privacy choices, but those choices are
-often spread across settings pages, policy stores, services, and application
-preferences. Their behavior can vary by release, edition, management state,
-desktop environment, and account type.
-
-Modern platforms frequently bundle helpful user features with continuous
-background data collection. What documentation frames as quality improvement
-or personalization often functions as persistent observation.
-
-| Platform | Vendor framing | Technical mechanism |
-|---|---|---|
-| Windows | "Personalized inking and typing dictionary to give you better suggestions" | Extracts local address book contacts (`HarvestContacts`) and streams typing telemetry to cloud endpoints. |
-| Windows | "Search the web and Windows from your taskbar" | Transmits local Start Menu keystrokes and search queries in real time to Bing (`api.bing.com`). |
-| Windows | "Diagnostic data to keep Windows secure, up to date, and working" | Streams event traces, process crash data, hardware identifiers, and optional memory heaps via `DiagTrack`. |
-| macOS | "Help Apple improve products by sending diagnostic and usage data" | Transmits crash logs, loaded dynamic libraries, and system traces via `diagnosticd` and `SubmitDiagInfo`. |
-| macOS | "Location Services to gather and use information based on current location" | Scans nearby Wi-Fi router BSSIDs and transmits them to Apple servers to resolve coordinates without hardware GPS. |
-| Linux | "Help improve Ubuntu by sending system information once" | Generates system hardware profiles via `ubuntu-report` and uploads crash core dumps via `whoopsie` and `apport`. |
-
-Your workstation should work exclusively for you. In an era where developers
-and power users execute local language models, autonomous coding agents, and
-sensitive source code on their machines, unmonitored background telemetry
-represents an unmanaged operational risk.
-
-`privr` establishes a deterministic, auditable baseline by answering four
-practical questions:
-
-1. What is this machine configured to share?
-2. Which settings differ from my selected policy?
-3. What privacy, security, and functionality tradeoffs does each choice have?
-4. Can a supported change be applied and reversed without guessing?
-
-The project is not trying to have the largest tweak list. It is trying to make
-a smaller supported catalogue verifiable, automatable, and safe to maintain
-over time.
-
-## Canonical workflow
-
-```text
-check -> explain -> plan -> apply -> verify -> rollback -> check again
-```
-
-- `check` reads effective state and compares it with a policy. `audit` is an
-  alias.
+- `check` reads effective state and compares it against a policy.
 - `explain` shows evidence, applicability, management source, and tradeoffs.
 - `plan` is read-only and shows the exact eligible change set.
-- `apply` recomputes the plan, confirms it, captures prior state, applies typed
-  operations, and verifies each result.
-- `rollback` accepts an internal transaction ID and restores exact preimages
-  only when conflict checks pass. `restore` is an alias.
+- `apply` re-plans from fresh state, groups changes into sections, and asks for
+  approval section by section. Stopping partway is a normal outcome, not a
+  failure.
+- `rollback` restores exact prior values, and only when current state still
+  matches what was recorded.
 
-The proposed complete CLI and exit-code contract are in
-[docs/CLI.md](docs/CLI.md).
+The full command and exit-code contract is in [docs/CLI.md](docs/CLI.md).
 
-## Privacy-first policy
+## Agents
 
-The initial built-in policy is `privacy-first`. It minimizes optional vendor
-collection and personalization while preserving updates, encryption, malware
-protection, reputation services, local crash diagnosis, and core recovery.
+`privr` is designed to be driven by an agent harness from the first release,
+whether that is a coding assistant, a hosted model, or a local one.
 
-Low-breakage choices can use `enforce` mode. Contextual choices such as
-location, cloud sync, sensitive app permissions, and security sample submission
-default to `review`. Unsupported or deliberately excluded controls use
-`ignore`.
+- Read-only tool access over stdio, so an agent can inspect and propose without
+  being able to change anything.
+- Mutating tools are absent from discovery unless explicitly enabled, and
+  approval cannot be granted through a tool call.
+- Result objects are self-contained and ordered deterministically, with
+  verbosity tiers so a full report fits a small context window.
+- Reports carry no stable machine identifier, so a report is safe to hand to a
+  model.
 
-Security-reducing, destructive, and major functionality changes do not belong
-in the default policy. They may later live in separately reviewed experimental
-packs with explicit risk acceptance.
+`privr` never calls a language model itself. The model is always the caller,
+never a dependency, and normal operation stays offline.
 
-See [docs/POLICY.md](docs/POLICY.md).
+## Safety
 
-## Safety promises
+- No product telemetry, and no network requirement for normal operation.
+- No arbitrary shell commands in profiles or catalogue data.
+- No mutation without a fresh plan and a check immediately before each write.
+- No rollback that silently overwrites a later external change.
+- No unknown, unreadable, or unsupported result reported as a pass.
+- No clearing of logs, deleting of cloud data, disabling of updates, or removal
+  of encryption as ordinary remediation.
+- No promise of anonymity. Configuring a machine for minimal sharing does not
+  make it unobserved, and on some platforms the configuration state itself is
+  reported.
 
-`privr` is designed around these boundaries:
+See [docs/SAFETY.md](docs/SAFETY.md) and
+[docs/THREAT_MODEL.md](docs/THREAT_MODEL.md).
 
-- no product telemetry or background network activity;
-- normal check, plan, apply, rollback, and report workflows work offline;
-- no arbitrary shell commands in profiles or downloaded catalogue data;
-- no user-supplied registry paths, service names, executable paths, or elevated
-  file targets;
-- no elevated background service;
-- no mutation without a fresh plan and immediate compare-before-write check;
-- no rollback that silently overwrites a later external change;
-- no unknown, unreadable, unsupported, or manual result reported as a pass;
-- no ordinary remediation that clears logs, deletes cloud data, disables
-  updates, removes encryption, or unlinks accounts;
-- no promise of anonymity or of eliminating traffic the operating system
-  requires for enabled services.
+## Documentation
 
-Windows machine-scope changes will be handled by a short-lived elevated helper
-with a compiled operation allowlist. User-scope and machine-scope plans remain
-separate because an elevation prompt can run under a different administrator
-account.
-
-See [docs/SAFETY.md](docs/SAFETY.md),
-[docs/THREAT_MODEL.md](docs/THREAT_MODEL.md), and
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-
-## Planned platform scope
-
-| Platform | Initial credible scope | Important boundary |
-|---|---|---|
-| Windows | Diagnostic data, crash reporting, advertising, personalization, activity, cloud search, clipboard sync, and peer delivery | Respect build, edition, Registry view, Group Policy, and MDM behavior |
-| macOS | Analytics, personalized advertising, Siri and Dictation sharing, location, and protected app permissions | Use guided checks when unmanaged settings lack a documented stable API |
-| Linux | GNOME privacy settings, Ubuntu Insights, Fedora ABRT, Debian popularity-contest, and KDE UserFeedback | Detect the distribution, desktop, schema, session, and management state first |
-
-The detailed candidates, exclusions, version notes, and primary vendor sources
-are in [docs/PLATFORM_SUPPORT.md](docs/PLATFORM_SUPPORT.md). Every entry is
-planned, not implemented, until it passes the control maturity gates.
-
-## Result model
-
-Results keep separate facts separate. A control has an evaluation outcome such
-as `pass`, `drift`, `review`, `unknown`, `not_applicable`, or `error`. Independent
-fields record support, remediation mode, management source, pending effect, and
-policy exceptions.
-
-This prevents misleading states such as treating `managed` as an alternative to
-either compliant or drifting. Reports also include a `complete` flag, catalogue
-and policy digests, and no stable machine identifier.
-
-See [docs/RESULTS.md](docs/RESULTS.md).
-
-## Rust and architecture
-
-Rust is a strong fit for a small native cross-platform CLI, typed operations,
-explicit error handling, constrained process execution, and separately
-testable platform adapters. Rust does not make operating-system policy portable,
-so correctness still depends on version-gated platform research and native VM
-tests.
-
-The planned Windows design separates an unprivileged CLI from a short-lived
-elevated helper. Catalogue data selects compiled adapter IDs and semantic desired
-states. It cannot introduce new privileged behavior.
-
-## Automation and agent readiness
-
-`privr` is designed to be consumed by human operators, automated scripts, and
-local autonomous AI agents alike.
-
-- **Structured output:** All commands support machine-readable JSON via
-  `--format json` with versioned schemas and deterministic exit codes.
-- **Verification before mutation:** Agents can inspect effective state (`check`)
-  and verify proposals (`plan`) without risking unverified modifications.
-- **Model Context Protocol (MCP):** A native stdio MCP server interface
-  allows desktop agents and coding assistants to query and remediate system
-  privacy posture safely. The five canonical stages (`privr_check`,
-  `privr_explain`, `privr_plan`, `privr_apply`, `privr_rollback`) map directly
-  to typed agent tool calls.
-- **Separation of concerns:** `privr` core handles deterministic operating-system
-  verification and rollback. Higher-level agent plugins and skills (such as
-  developer-tool telemetry audits, package update tracking, and storage
-  reclamation) coordinate on top of `privr` without diluting its safety model.
-
-## Build the concept
-
-Rust 1.85 or later is required.
-
-```bash
-cargo build --locked
-cargo run -- check
-cargo run -- plan
-cargo test --workspace --all-features
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-```
-
-`check` and `plan` currently print the concept notice and exit `3`. Use
-`cargo run -- --help` to inspect the current command surface.
-
-## Project documents
-
+- [Design decisions](docs/DECISIONS.md)
 - [Product definition](docs/PRODUCT.md)
 - [CLI contract](docs/CLI.md)
+- [Agent interface](docs/AGENT_INTERFACE.md)
 - [Policy model](docs/POLICY.md)
 - [Result and drift model](docs/RESULTS.md)
 - [Control contribution standard](docs/CONTROL_STANDARD.md)
 - [Platform findings](docs/PLATFORM_SUPPORT.md)
 - [Architecture](docs/ARCHITECTURE.md)
+- [Maintenance policy](docs/MAINTENANCE.md)
 - [Safety model](docs/SAFETY.md)
 - [Threat model](docs/THREAT_MODEL.md)
 - [Privacy behavior](docs/PRIVACY.md)
@@ -230,11 +154,11 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 
 Early contributions should improve evidence and correctness: primary vendor
 sources, compatibility findings, redacted fixtures, effective-state logic,
-failure tests, and rollback tests. A setting does not become mutable merely
-because it appears in a tweak script.
+failure tests, and rollback tests. A setting does not become supported because
+it appears in a tweak script.
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md) and the repository instructions before
-making changes.
+Read [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md) before making
+changes.
 
 ## License
 

@@ -24,6 +24,34 @@ otherwise.
 
 ## Windows
 
+### The edition-gating rule
+
+A policy value that reads back correctly is not evidence that it took effect.
+
+Many documented policies apply only to specific editions. Home appears in no
+policy applicability table, and several policies exclude Pro as well. Writing
+such a value on an unsupported edition succeeds, reads back as written, and
+changes nothing. The most widely copied example is the lowest diagnostic data
+value, which Microsoft documents as equivalent to the next level up outside
+Enterprise, Education, and Server.
+
+Every surveyed tool reports a pass in that situation. It is the most common false
+pass in this category and the clearest reason this project exists.
+
+The rule every Windows control follows: resolve whether the value can take effect
+on this edition and build, and report a value that cannot as `not_applicable`,
+never as `pass`. In general, non-policy setting values take effect on Home while
+values under the policy branches do not.
+
+Three related traps are encoded as catalogue rules:
+
+- Value names differ from policy names, so a control binds the value name the
+  system actually reads, not the name in the policy user interface.
+- Polarity is inconsistent. Some security-related values use `1` to mean the
+  protective state, so no adapter may assume zero means private.
+- Some writes are silently discarded, notably under anti-tampering protection.
+  Every write is verified by re-reading effective state.
+
 ### Privacy-first MVP candidates
 
 | Control ID | Desired behavior | Capability | Scope and constraints | Primary source |
@@ -97,23 +125,81 @@ preference keys and direct TCC database writes are excluded.
 | `macos.permissions.*` | Review sensitive app grants | guided, managed | Never write TCC database directly | [Privacy Preferences Policy Control](https://support.apple.com/guide/deployment/privacy-preferences-policy-control-payload-settings-dep38df53c2a/web) |
 | `macos.siri.history` | Separate user-selected deletion | exclude from profile apply | Networked and irreversible; does not change consent | [Delete Siri and Dictation history](https://support.apple.com/guide/mac-help/delete-siri-and-dictation-history-mchlf55961c0/mac) |
 
+### macOS readability tiers
+
+How a setting is read determines what `privr` can honestly report. Four tiers:
+
+| Tier | Meaning | Outcome available |
+|---|---|---|
+| Unprivileged effective state | Readable without elevation through a documented interface | `pass` or `drift` |
+| Privileged effective state | Readable, but requires elevation or a granted permission | `pass` or `drift` when granted, otherwise `unknown` |
+| Managed payload only | Observable only where a management payload exists | `review` on unmanaged Macs |
+| Not readable | No supported read interface, such as per-application permission grants | `review`, never `pass` |
+
+Consequences for the roadmap: **unmanaged macOS is largely a guided-review
+product**, and the documentation says so rather than implying broader coverage.
+Managed Macs are where verification is genuinely possible.
+
+### macOS reading rules
+
+- Read through the CoreFoundation preferences API. Do not shell out to the
+  `defaults` command, which does not observe managed values, and do not parse
+  preference files directly, because the preferences daemon holds values in
+  memory and can overwrite direct edits.
+- Use the forced-value API for the management source field.
+- **The presence of an enforcing profile is not evidence that a setting holds.**
+  The most credible macOS baseline in existence checks for an installed payload
+  in roughly forty percent of its rules, which fails a user who has correctly
+  configured every option by hand. Where only the enforcement mechanism is
+  readable, report `review`.
+- Many widely circulated `defaults` commands are inert, deprecated, or apply to a
+  different operating system entirely. A command appearing in a hardening guide
+  is not evidence that it does anything.
+
 The initial macOS release should be useful as a guided checker even if it applies
 few unmanaged settings.
 
 ## Linux platform discovery
 
-Before choosing checks, the Linux adapter identifies:
+Linux is where a naive check most easily produces a false pass. Discovery runs as
+an ordered sequence, and **each stage can only lower confidence, never raise
+it.**
 
-- distribution and version from `/etc/os-release`;
-- active desktop session;
-- available GSettings schemas;
-- systemd or another service manager;
-- installed reporting packages and commands;
-- explicit user values versus inherited defaults;
-- current user context when desktop settings are read.
+1. Invoking identity. Resolve the target user through the elevation environment
+   and the account database, never by assuming a home directory path.
+2. Filesystem writability, including an actual write-and-rename probe rather than
+   inferring from mount flags alone.
+3. Operating-system identity and write model: mutable, image-based, declarative,
+   or transactional. A declarative system cannot be remediated by editing files.
+4. Container and virtualization context.
+5. Service manager presence.
+6. Mandatory access control state, where an indeterminate result is `unknown`
+   rather than absent.
+7. The target user's live session, and ownership of their configuration
+   directory.
+8. Session type and desktop environment, read from the session rather than from
+   an ambient variable alone.
+9. Schema presence, backend sanity, and lock state.
+10. Package and unit state.
+
+Only then is a control read, in the target user's context.
+
+**Every write is verified out of band.** A settings write can report success while
+changing nothing, most notably when performed as root against a user's session.
+Of the tools surveyed, none acts correctly on a user session from root and two
+silently report success.
+
+A setting that stops local collection is distinguished from one that stops remote
+submission, everywhere. Preserving local crash capture while disabling upload is
+usually the correct default.
 
 An unsupported combination returns `not_applicable` with support metadata, not
-`pass`.
+`pass`. An undetermined stage returns `unknown`.
+
+Linux ships audit-first. That is the aggregate consequence of per-control
+maturity rather than a platform-wide rule, so an individual control can be
+promoted to remediation on evidence. The first candidates for promotion are plain
+machine-scope settings with documented defaults and trivial prior values.
 
 ## GNOME
 

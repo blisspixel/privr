@@ -2,13 +2,58 @@
 
 ## Quality is layered
 
-Line coverage is a useful floor, not evidence that a privacy control is correct.
-Each control needs pure evaluator tests, captured fixtures, native integration
-tests, and compatibility evidence.
+Line coverage is not evidence that a privacy control is correct. Each control
+needs pure evaluator tests, captured fixtures, native integration tests, and
+compatibility evidence.
 
-The repository requires at least 80 percent line coverage together with clean
-formatting, Clippy warnings denied, dependency policy checks, the minimum
-supported Rust version, and Windows, macOS, and Linux CI.
+The repository requires clean formatting, Clippy warnings denied, dependency
+policy checks, the minimum supported Rust version, and Windows, macOS, and Linux
+CI.
+
+### On coverage specifically
+
+A line coverage floor is the wrong primary gate here, and the current
+configuration demonstrates why:
+
+- It counts test bodies. A large share of covered lines in the concept build are
+  the tests themselves.
+- It runs on one operating system, so platform-gated code is absent from the
+  denominator rather than counted as missed.
+- A line that returns `pass` where it should return `unknown` is fully covered
+  and wrong. Coverage cannot see the failure this project exists to prevent.
+
+Coverage is therefore measured as merged region coverage across all three
+operating systems, gated per crate with a ratchet rather than a fixed threshold.
+
+The metrics that actually track confidence are:
+
+- mutation testing, because it asks whether a test would notice a wrong answer;
+- fixture completeness per control against the required state list below;
+- false-pass guard completeness, meaning every state that must not become `pass`
+  has a test asserting it does not.
+
+## Structure
+
+The evaluation engine is a pure function from catalogue, policy, host facts, and
+observations to a report.
+
+Fixtures are values of the same observation type the real probe produces. There
+is no separate fake at that layer, so a fake cannot drift from reality. That
+divergence risk moves to the probe layer, where it is handled by capture and
+replay rather than hand-written mocks: a recording wrapper captures real probe
+output, and a differential test replays recordings on every supported operating
+system asserting byte-identical reports.
+
+Structural rules:
+
+- Closed-enum dispatch for host context and probes rather than trait objects, so
+  exhaustiveness checking still applies.
+- `cfg` appears only inside adapter bodies, never in the engine.
+- The operation set is a closed enum, which makes the inverse operation and the
+  preview renderer compile errors when a variant is added. Rollback completeness
+  is a compile-time property, not a review checklist item.
+- A documented read-only root-redirection option, refused by every mutating
+  command, gives full-pipeline determinism on any runner.
 
 ## Pure engine tests
 
@@ -38,9 +83,33 @@ The core evaluator and planner should run without touching the host. Test:
 - successful apply, second apply no-op, and exact rollback;
 - current-state conflict before apply and before rollback.
 
+### Fixture format
+
+One file per state, carrying:
+
+- provenance: what was captured, from which platform version, when, and by whom;
+- host facts, including an injected clock so staleness is deterministic;
+- observations recorded as exact type plus raw bytes, never a decoded value,
+  because a decoded value silently discards the type confusion the tests exist to
+  catch;
+- hand-written expectations.
+
+Snapshots capture rendering; expectations capture intent. Accepting a snapshot
+without reading it still fails the expectation, which is what keeps snapshot
+testing from becoming a rubber stamp.
+
+Capture happens downstream of the probe's reduction, so a fixture cannot
+physically contain an enrollment, tenant, or security identifier. Redaction
+substitutes canaries rather than deleting, which turns the privacy promises into
+positive tests: a canary appearing in output is a failing test.
+
 Fixtures contain only synthetic, redacted data. Windows fixtures include exact
 Registry value types and views. File fixtures preserve bytes, owner, mode, ACL,
 and SELinux context where relevant.
+
+Fixtures are checked for shape drift against real machines, and every control
+carries a fixture for a platform beyond its verified range, so staleness handling
+is exercised rather than assumed.
 
 ## Native VM sequence
 
@@ -124,6 +193,37 @@ changed. Running as root must never silently target root's database.
 - process termination, power-loss simulation, disk full, and UAC cancellation;
 - helper and journal version mismatch;
 - overlapping and out-of-order rollback attempts.
+
+## Sectioned apply and staleness
+
+- A plan groups into sections deterministically.
+- Approving a subset of sections and stopping exits `0`, journals only the
+  approved work, and records the operation as complete rather than interrupted.
+- Section-granular rollback restores one section without disturbing another.
+- Dependency edges never cross a section boundary forward, so a partial apply
+  cannot leave a dependency pointing into unapplied work.
+- A refusal that changes nothing is distinguishable from a failure that changed
+  something, by exit code and by journal state.
+- Staleness is a pure function of the injected clock. A control past its reviewed
+  platform range degrades to `unknown` and `audit_only`, and cannot report
+  `pass`. The deterministic portion runs on every change; the time-dependent
+  portion runs on a schedule and as a release gate, never on the per-change path,
+  so a pull request never fails because the calendar advanced.
+
+## Network isolation
+
+The offline guarantee is enforced, not asserted. A dependency denylist alone is
+insufficient because the standard library opens sockets with no crate at all.
+Four layers:
+
+1. Dependency allowlisting, with target filtering deliberately left unset so a
+   platform-specific network dependency cannot hide from a single-platform job.
+2. A lint forbidding the standard networking types outside any permitted module.
+3. A golden import-table assertion on **library names**, not symbol names,
+   because the relevant Windows socket symbols import by ordinal and a
+   symbol-name check passes while sockets work.
+4. Runtime proof: network namespaces with syscall tracing, sandbox profiles,
+   scoped firewall rules, and virtual machines with no adapter.
 
 ## Privacy tests
 

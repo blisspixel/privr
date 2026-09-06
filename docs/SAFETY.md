@@ -6,9 +6,28 @@
 rollback, and reporting workflows do not require network access and do not emit
 product telemetry.
 
-The default `privacy-first` policy preserves updates, encryption, malware
-protection, reputation services, local diagnostic capability, and recovery.
-Uncertainty fails closed and remains visible.
+The default `baseline` profile preserves updates, encryption, malware protection,
+reputation services, local diagnostic capability, and recovery. Uncertainty fails
+closed and remains visible.
+
+## What `privr` does not claim
+
+`privr` reduces optional data sharing. It does not make a machine unobserved, and
+it must never imply otherwise.
+
+Three limits are stated plainly wherever posture is reported:
+
+- **Required platform traffic continues.** Updates, certificate services, time
+  synchronization, and licensing are not optional and are not telemetry merely
+  because they contact a server.
+- **The configuration itself can be reported.** Platform diagnostic schemas
+  include the current consent state and the authority that set it, so changing
+  these settings is itself an observable event. Hardening does not confer
+  invisibility.
+- **Operating-system posture is not application posture.** A compliant system
+  configuration proves nothing about what individual applications collect.
+
+No anonymity claim, no zero-telemetry claim, and no single score.
 
 ## Remediation classes
 
@@ -44,10 +63,28 @@ ever supported.
 
 ### Destructive
 
-Deletes local or remote data or creates a side effect that exact rollback cannot
-reverse. Examples include clearing history, deleting Recall snapshots, removing
-cloud data, or unlinking an account. These operations are guided or excluded,
-not part of normal apply.
+Deletes local or remote data, or creates a side effect that exact rollback cannot
+reverse. Examples include clearing history, deleting captured screen snapshots,
+removing cloud data, or unlinking an account.
+
+These operations are never part of normal apply. Where supported at all, they
+live behind a separate verb, require the specific control to be named, and are
+never reachable from a blanket confirmation flag.
+
+**`privr` does not delete files. It invokes documented vendor erasure
+mechanisms.** That single rule excludes anti-forensic behavior and undocumented
+edits without a separate prohibition list, and keeps erasure in the same evidence
+class as every check. Where no vendor mechanism exists, the artifact is
+audit-only.
+
+Staging deletions into a quarantine area is rejected. The desktop trash
+specification requires a per-item record of original path and deletion date,
+which manufactures an index of exactly what the operator considered sensitive. It
+converts one exposure into two while letting the tool report success.
+
+An irreversible action still writes a normal journal entry recording that
+rollback is unavailable and why, so a later rollback attempt fails loudly rather
+than appearing to succeed.
 
 ## Eligibility before mutation
 
@@ -81,8 +118,15 @@ For every typed operation:
 8. stop immediately on conflict or failure.
 
 An operating system cannot provide one global transaction across Registry,
-preferences, services, profiles, and files. `privr` reports partial state
-instead of presenting best-effort work as atomic success.
+preferences, services, profiles, and files. `privr` reports partial state instead
+of presenting best-effort work as atomic success.
+
+Partial state has two distinct causes and they are never conflated. An operator
+who approves some sections and stops has completed a successful operation in
+which every approved change was verified. An apply that failed or was interrupted
+has left state the operator did not choose. The exit contract, the journal, and
+the reported message distinguish the two, and a refusal that changed nothing is
+distinguishable from both.
 
 ## Windows elevation
 

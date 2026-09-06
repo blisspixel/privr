@@ -59,6 +59,32 @@ Every control contains:
 | `sources` | Primary documentation URLs |
 | `reviewed` | Last review date and verified OS builds |
 | `fixtures` | Positive, drift, missing, unsupported, denied, managed, and malformed cases |
+| `section` | The one section this control belongs to, from the closed section list |
+| `reversibility` | Exact, irreversible, or remote effect |
+| `maturity` | Automated, partial, or manual, as a fact about the control rather than the host |
+| `tradeoffs` | What the operator loses, in one line, shown at the decision point |
+| `mitigation` | How to preserve the affected capability, where a way exists |
+| `remediation_reason` | Required when remediation is `none`, from a closed set |
+| `agent` | Intents, aliases, keywords, and negative examples for routing |
+
+Notes on the fields added above:
+
+- `section` is required because sections drive reporting grouping and, later,
+  stepwise approval. Dependency edges may only point within a section or to an
+  earlier-ordered one.
+- `reversibility` is independent of `remediation`. A control can be automatically
+  remediable and still irreversible.
+- `maturity` says whether the control can be evaluated programmatically at all.
+  It is not the same as this host's outcome, and collapsing the two loses the
+  ability to state that a manual check has not been performed.
+- `mitigation` is the most valuable field on a `review` control. A tradeoff
+  stated without a remedy is less useful than it looks: "location off, and the
+  weather application needs a city set once" is a materially different
+  recommendation from "location off, weather breaks". A mitigation never affects
+  a result, never has an adapter binding, and may only address a consequence its
+  own control causes. See [AGENT_INTERFACE.md](AGENT_INTERFACE.md).
+- `agent` exists so a model can route a plain-English request to the right
+  control from a bounded candidate set rather than memorizing identifiers.
 
 ## Semantic values
 

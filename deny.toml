@@ -1,3 +1,20 @@
+# Dependency policy.
+#
+# `privr` makes no network requests during normal operation. That promise is
+# enforced in four layers, of which this file is the first:
+#
+#   1. this dependency policy;
+#   2. a lint forbidding the standard networking types outside permitted modules;
+#   3. a golden import-table assertion on linked library names;
+#   4. runtime proof under network namespaces, sandboxes, and adapterless VMs.
+#
+# A dependency denylist alone is insufficient, because the standard library
+# opens sockets with no crate at all. See docs/TESTING.md.
+
+# `targets` is deliberately left unset. Pinning it would evaluate only the
+# listed platforms, allowing a Windows-only or macOS-only network dependency to
+# pass unseen in a Linux job.
+
 [advisories]
 version = 2
 yanked = "deny"
@@ -15,10 +32,37 @@ confidence-threshold = 0.93
 
 [bans]
 multiple-versions = "warn"
-wildcards = "allow"
+wildcards = "deny"
 highlight = "all"
 workspace-default-features = "allow"
 external-default-features = "allow"
+
+# Networking, TLS, and asynchronous runtime crates have no place in this
+# dependency graph. `privr` is synchronous and offline. Adding any of these is a
+# design change that must be argued in docs/DECISIONS.md before this list is
+# relaxed.
+deny = [
+    { crate = "tokio", reason = "privr is synchronous; see docs/DECISIONS.md decision 2" },
+    { crate = "async-std", reason = "privr is synchronous" },
+    { crate = "smol", reason = "privr is synchronous" },
+    { crate = "reqwest", reason = "privr makes no network requests" },
+    { crate = "hyper", reason = "privr makes no network requests" },
+    { crate = "ureq", reason = "privr makes no network requests" },
+    { crate = "curl", reason = "privr makes no network requests" },
+    { crate = "curl-sys", reason = "privr makes no network requests" },
+    { crate = "isahc", reason = "privr makes no network requests" },
+    { crate = "attohttpc", reason = "privr makes no network requests" },
+    { crate = "socket2", reason = "privr opens no sockets" },
+    { crate = "mio", reason = "privr opens no sockets" },
+    { crate = "tungstenite", reason = "privr opens no sockets" },
+    { crate = "quinn", reason = "privr opens no sockets" },
+    { crate = "rustls", reason = "no transport security is needed offline" },
+    { crate = "native-tls", reason = "no transport security is needed offline" },
+    { crate = "openssl", reason = "no transport security is needed offline" },
+    { crate = "openssl-sys", reason = "no transport security is needed offline" },
+    { crate = "trust-dns-resolver", reason = "privr resolves no names" },
+    { crate = "hickory-resolver", reason = "privr resolves no names" },
+]
 
 [sources]
 unknown-registry = "deny"

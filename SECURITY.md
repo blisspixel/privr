@@ -3,9 +3,17 @@
 ## Reporting a vulnerability
 
 Please report security vulnerabilities privately through GitHub Security
-Advisories for this repository. Do not open a public issue for a vulnerability
-that could enable code execution, privilege escalation, policy injection,
-journal disclosure, unsafe rollback, or destructive system changes.
+Advisories for this repository, using the "Report a vulnerability" button on the
+Security tab.
+
+If private advisories are unavailable to you, email `security@pueo.io` instead.
+Do not open a public issue for a vulnerability that could enable code execution,
+privilege escalation, policy injection, journal disclosure, unsafe rollback, or
+destructive system changes.
+
+Expect an acknowledgement within seven days. Please allow ninety days for a fix
+before public disclosure, and tell us if you intend to disclose sooner so we can
+coordinate.
 
 Include:
 

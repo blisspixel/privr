@@ -28,6 +28,23 @@ cross-platform CI with dependency, MSRV, and coverage gates.
 See [ROADMAP.md](ROADMAP.md) for what ships first, and
 [docs/DECISIONS.md](docs/DECISIONS.md) for the decisions that constrain it.
 
+## What it looks like
+
+Both images below are mockups of the target output. **Nothing here is
+implemented yet**, and neither image is a capture of a real machine.
+
+`privr check` on Windows. Note the third result: a policy value that many tools
+write and report as a success, which Microsoft documents as having no effect on
+this edition.
+
+![privr check on Windows, showing drift, an edition-gated control reported as not applicable, a review item with a mitigation, and an honest unknown](docs/assets/check-windows.svg)
+
+`privr plan` on Linux. Changes are grouped into sections you approve one at a
+time, every tradeoff is paired with a way to keep the capability, and a plan
+never changes anything.
+
+![privr plan on Ubuntu, showing changes grouped into sections, a tradeoff paired with a mitigation, and confirmation that nothing has been changed](docs/assets/plan-linux.svg)
+
 ## Why this exists
 
 Consider a setting that many Windows privacy tools change.

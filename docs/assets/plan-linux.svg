@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="590" viewBox="0 0 820 590" role="img" aria-label="Illustrative privr plan output on Ubuntu, showing changes grouped into sections, a tradeoff paired with a mitigation, and confirmation that nothing has been changed.">
+  <rect x="0" y="0" width="820" height="590" rx="10" fill="#241f31"/>
+  <rect x="0" y="0" width="820" height="34" rx="10" fill="#332b45"/>
+  <rect x="0" y="24" width="820" height="10" fill="#332b45"/>
+  <circle cx="20" cy="17" r="5" fill="#5a5068"/>
+  <circle cx="38" cy="17" r="5" fill="#5a5068"/>
+  <circle cx="56" cy="17" r="5" fill="#5a5068"/>
+  <text x="410" y="22" font-family="'Ubuntu Mono', 'DejaVu Sans Mono', 'Liberation Mono', monospace" font-size="12" fill="#b5aec4" text-anchor="middle">user@workstation: ~</text>
+  <g font-family="'Ubuntu Mono', 'DejaVu Sans Mono', 'Liberation Mono', monospace" font-size="14">
+    <text x="24" y="66"><tspan fill="#8ae234">user@workstation</tspan><tspan fill="#b5aec4">:</tspan><tspan fill="#729fcf">~</tspan><tspan fill="#b5aec4">$</tspan><tspan fill="#eeeeec" xml:space="preserve"> privr plan --profile strict</tspan></text>
+    <text x="24" y="106" fill="#a9a1b8">Profile<tspan fill="#eeeeec" xml:space="preserve">    strict@0.1</tspan></text>
+    <text x="24" y="126" fill="#a9a1b8">Platform<tspan fill="#eeeeec" xml:space="preserve">   Ubuntu 24.04 LTS, GNOME 46, Wayland session</tspan></text>
+    <text x="24" y="146" fill="#a9a1b8">Result<tspan fill="#8ae234" xml:space="preserve">     complete</tspan></text>
+    <text x="24" y="180"><tspan fill="#eeeeec">3 sections</tspan><tspan fill="#a9a1b8" xml:space="preserve">   </tspan><tspan fill="#eeeeec">4 changes</tspan><tspan fill="#a9a1b8" xml:space="preserve">   </tspan><tspan fill="#8ae234">all exactly reversible</tspan></text>
+    <text x="24" y="214"><tspan fill="#fcaf3e">Diagnostics</tspan><tspan fill="#a9a1b8" xml:space="preserve">                                        2 changes</tspan></text>
+    <text x="24" y="238" fill="#eeeeec" xml:space="preserve">  ubuntu.whoopsie.upload</text>
+    <text x="24" y="258" xml:space="preserve"><tspan fill="#a9a1b8">    automatic crash upload  </tspan><tspan fill="#fcaf3e">-&gt;</tspan><tspan fill="#eeeeec">  submission disabled</tspan></text>
+    <text x="24" y="278" fill="#a9a1b8" xml:space="preserve">    Local crash capture is retained.</text>
+    <text x="24" y="302" fill="#eeeeec" xml:space="preserve">  ubuntu.apport.report-prompt</text>
+    <text x="24" y="322" xml:space="preserve"><tspan fill="#a9a1b8">    prompt on crash  </tspan><tspan fill="#fcaf3e">-&gt;</tspan><tspan fill="#eeeeec">  no prompt</tspan></text>
+    <text x="24" y="356"><tspan fill="#fcaf3e">Activity</tspan><tspan fill="#a9a1b8" xml:space="preserve">                                            1 change</tspan></text>
+    <text x="24" y="380" fill="#eeeeec" xml:space="preserve">  gnome.history.recent-files</text>
+    <text x="24" y="400" xml:space="preserve"><tspan fill="#a9a1b8">    remember  </tspan><tspan fill="#fcaf3e">-&gt;</tspan><tspan fill="#eeeeec">  do not remember</tspan></text>
+    <text x="24" y="420" fill="#a9a1b8" xml:space="preserve">    Tradeoff     the recent files list stops updating</text>
+    <text x="24" y="440" xml:space="preserve"><tspan fill="#a9a1b8">    Mitigation   </tspan><tspan fill="#8ae234">pin frequently used folders in Files</tspan></text>
+    <text x="24" y="474"><tspan fill="#fcaf3e">Telemetry</tspan><tspan fill="#a9a1b8" xml:space="preserve">                                           1 change</tspan></text>
+    <text x="24" y="498" fill="#eeeeec" xml:space="preserve">  ubuntu.insights.consent</text>
+    <text x="24" y="518" xml:space="preserve"><tspan fill="#a9a1b8">    opted in  </tspan><tspan fill="#fcaf3e">-&gt;</tspan><tspan fill="#eeeeec">  opted out</tspan></text>
+    <text x="24" y="558"><tspan fill="#8ae234">Nothing has been changed.</tspan><tspan fill="#a9a1b8" xml:space="preserve">  Run privr apply to approve by section.</tspan></text>
+  </g>
+</svg>

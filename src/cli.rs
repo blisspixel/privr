@@ -6,7 +6,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 #[command(
     name = "privr",
     version,
-    about = "Audit privacy settings, detect drift, apply a privacy-first baseline, and roll it back",
+    about = "Audit privacy settings, detect drift, apply a reviewed baseline, and roll it back",
     long_about = None
 )]
 pub struct Cli {
@@ -74,7 +74,7 @@ pub enum Command {
         #[arg(long)]
         yes: bool,
     },
-    /// List checks and their privacy-first expected values.
+    /// List the catalogue: every control, its risk, and its applicability.
     List {
         /// Platform catalogue to list. Defaults to the current platform.
         #[arg(long, value_enum)]
@@ -96,17 +96,27 @@ pub enum OutputFormat {
     Json,
 }
 
+/// Built-in profiles, ordered. Each is a strict superset of the one before it.
+///
+/// No profile in this ladder contains a control that reduces security. Security
+/// tradeoffs are selected deliberately and acknowledged per control.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
 pub enum Profile {
-    /// Disable optional collection while retaining core security protections.
+    /// Disable passive collection while retaining features and security protections.
     #[default]
-    PrivacyFirst,
+    Baseline,
+    /// Add controls with real, disclosed functionality tradeoffs.
+    Strict,
+    /// Add controls with substantial convenience or functionality cost.
+    Restrictive,
 }
 
 impl Profile {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::PrivacyFirst => "privacy-first",
+            Self::Baseline => "baseline",
+            Self::Strict => "strict",
+            Self::Restrictive => "restrictive",
         }
     }
 }

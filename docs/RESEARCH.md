@@ -60,7 +60,7 @@ putting sensitive values in process arguments.
 Windows should be the first operational adapter. It has the broadest documented
 policy surface, but support varies by edition, build, scope, and management
 state. Windows Pro cannot reach diagnostic-data value `0`; on typical consumer
-editions the privacy-first floor is required diagnostic data, value `1`.
+editions the practical floor is required diagnostic data, value `1`.
 
 The MVP must detect Windows build and edition, elevation, domain or Entra join,
 MDM enrollment, and policy precedence before evaluating a control. A missing

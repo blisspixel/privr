@@ -20,7 +20,7 @@ struct ConceptResponse<'a> {
 pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
     let format = cli.format;
     match cli.command.unwrap_or(Command::Check {
-        profile: Some(Profile::PrivacyFirst),
+        profile: Some(Profile::Baseline),
         policy: None,
         controls: Vec::new(),
         all: false,
@@ -294,7 +294,7 @@ mod tests {
     #[test]
     fn apply_requires_explicit_consent() {
         let (code, stdout, stderr) = run_for_test(Some(Command::Apply {
-            profile: Some(Profile::PrivacyFirst),
+            profile: Some(Profile::Baseline),
             policy: None,
             dry_run: false,
             yes: false,
@@ -308,7 +308,7 @@ mod tests {
     #[test]
     fn plan_is_safe_and_reports_incomplete() {
         let (code, stdout, _) = run_for_test(Some(Command::Plan {
-            profile: Some(Profile::PrivacyFirst),
+            profile: Some(Profile::Baseline),
             policy: None,
             controls: vec!["windows.telemetry".to_owned()],
         }));
@@ -321,7 +321,7 @@ mod tests {
     #[test]
     fn apply_dry_run_aliases_plan() {
         let (code, stdout, _) = run_for_test(Some(Command::Apply {
-            profile: Some(Profile::PrivacyFirst),
+            profile: Some(Profile::Baseline),
             policy: None,
             dry_run: true,
             yes: false,
@@ -363,7 +363,7 @@ mod tests {
     #[test]
     fn check_reports_selected_control_prefixes() {
         let (code, stdout, _) = run_for_test(Some(Command::Check {
-            profile: Some(Profile::PrivacyFirst),
+            profile: Some(Profile::Baseline),
             policy: None,
             controls: vec!["windows.diagnostics".to_owned(), "windows.wer".to_owned()],
             all: false,
@@ -431,7 +431,10 @@ mod tests {
 
     #[test]
     fn platform_and_profile_names_are_stable() {
-        assert_eq!(Profile::PrivacyFirst.as_str(), "privacy-first");
+        assert_eq!(Profile::Baseline.as_str(), "baseline");
+        assert_eq!(Profile::Strict.as_str(), "strict");
+        assert_eq!(Profile::Restrictive.as_str(), "restrictive");
+        assert_eq!(Profile::default(), Profile::Baseline);
         assert_eq!(Platform::Auto.as_str(), "auto");
         assert_eq!(Platform::Windows.as_str(), "windows");
         assert_eq!(Platform::Macos.as_str(), "macos");

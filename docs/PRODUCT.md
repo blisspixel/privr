@@ -109,21 +109,40 @@ partial rollback honestly.
 
 ## Policy strategy
 
-### `privacy-first`
+### The profile ladder
 
-Default profile. It minimizes optional collection and personalization while
-retaining core security and common functionality.
+Three built-in profiles, ordered, each a strict superset of the one below:
+`baseline` (the default), `strict`, and `restrictive`.
 
-Examples:
+`baseline` is the recommended setting, not a cautious floor. What separates it
+from the deeper levels is the distinction between collection and features:
 
-- optional diagnostics off or at the lowest supported level;
+- **Passive continuous collection is disabled.** Data flows that occur whether or
+  not the operator uses anything: diagnostic transmission, advertising
+  identifiers, activity history upload, tailored experiences, typing
+  personalization, background usage reporting. These are not features anyone
+  invokes, and disabling them costs essentially nothing.
+- **Features the operator may actively want default to review.** Cloud clipboard
+  sync, location, cloud search, peer update delivery, and voice services are
+  things someone may use on purpose. `baseline` shows the tradeoff and the
+  mitigation, then lets the operator decide.
+
+A control is never held back from `baseline` because it sounds aggressive, only
+because the operator might be using the thing.
+
+Examples at `baseline`:
+
+- optional diagnostics at the lowest level the edition actually honors;
 - automatic crash-report transmission off while local diagnostics remain;
 - advertising and tailored experiences off;
 - typing-improvement collection off;
-- cloud search and cross-device activity off;
-- Defender automatic sample submission changed to prompt, not disabled;
-- cloud storage and sensitive permissions reported for review, not blanket
-  disabled.
+- cross-device activity off;
+- Defender automatic sample submission changed to prompt, never disabled;
+- location, cloud storage, and sensitive permissions reported for review.
+
+No profile in the ladder contains a control that reduces security. Security
+tradeoffs and irreversible erasure are selected deliberately, outside the ladder,
+with per-control acknowledgement. See [POLICY.md](POLICY.md).
 
 ### Custom
 
@@ -132,7 +151,7 @@ documented exceptions.
 
 ```toml
 schema = 1
-extends = "builtin:privacy-first@0.1"
+extends = "builtin:baseline@0.1"
 
 [controls."windows.location-services"]
 mode = "enforce"

@@ -175,6 +175,14 @@ pub struct ControlResult {
     pub maturity: Maturity,
     pub effect: Effect,
     pub exception: Exception,
+    /// A fact about this finding the operator must be told.
+    ///
+    /// Carried in the result rather than left to the renderer, because the
+    /// contract is that a result is self-contained and that the tool supplies
+    /// the sentence which must be stated. A caller cannot be relied upon to
+    /// notice a caveat and add one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }
 
 impl ControlResult {
@@ -285,6 +293,7 @@ mod tests {
             maturity: Maturity::Automated,
             effect: Effect::Active,
             exception: Exception::None,
+            note: None,
         }
     }
 

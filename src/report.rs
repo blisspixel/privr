@@ -142,6 +142,14 @@ impl Report {
                 out.push_str(&ui.paint(style::MUTED, &format!("            {}", result.id)));
                 out.push('\n');
 
+                // A note is printed even on a pass, because the case it exists
+                // for is precisely a finding that looks fine and is not what
+                // the operator configured.
+                if let Some(note) = &result.note {
+                    out.push_str(&ui.paint(style::CAVEAT, &ui.wrap(note, 12)));
+                    out.push('\n');
+                }
+
                 // Uncertainty is stated in words at the point of the finding,
                 // never left to be inferred from a colour.
                 if result.outcome.conceals_state() {

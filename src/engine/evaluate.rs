@@ -67,6 +67,13 @@ pub struct Resolution {
     pub honored: bool,
     /// When a verified change would take effect.
     pub effect: Effect,
+    /// A fact about this reading the operator must be told.
+    ///
+    /// Used where the state is determined but a naive reading of the
+    /// configuration would mislead, most importantly where a configured value
+    /// is not the value the platform acts on. The tool supplies the sentence
+    /// rather than relying on a caller to notice and add a caveat.
+    pub note: Option<String>,
 }
 
 impl Resolution {
@@ -77,7 +84,15 @@ impl Resolution {
             uncertainty: None,
             honored: true,
             effect: Effect::Active,
+            note: None,
         }
+    }
+
+    /// Attach a fact the operator must be told alongside this reading.
+    #[must_use]
+    pub fn with_note(mut self, note: impl Into<String>) -> Self {
+        self.note = Some(note.into());
+        self
     }
 
     pub fn uncertain(uncertainty: Uncertainty, source: ManagementSource) -> Self {
@@ -87,6 +102,7 @@ impl Resolution {
             uncertainty: Some(uncertainty),
             honored: true,
             effect: Effect::Active,
+            note: None,
         }
     }
 
@@ -98,6 +114,7 @@ impl Resolution {
             uncertainty: None,
             honored: false,
             effect: Effect::Active,
+            note: None,
         }
     }
 
@@ -131,6 +148,7 @@ impl Resolution {
                         uncertainty: None,
                         honored: observation.honored_by_platform,
                         effect: Effect::Active,
+                        note: None,
                     },
                     // A value we cannot interpret is malformed evidence, never
                     // a fallback to the documented default.
@@ -142,6 +160,7 @@ impl Resolution {
                     uncertainty: None,
                     honored: observation.honored_by_platform,
                     effect: Effect::Active,
+                    note: None,
                 },
                 Evidence::Denied { source, .. } => Self::uncertain(Uncertainty::Denied, *source),
                 Evidence::Malformed { source, .. } => {
@@ -220,6 +239,7 @@ pub fn evaluate(
             maturity: spec.maturity,
             effect: resolution.effect,
             exception,
+            note: resolution.note.clone(),
         };
 
     // A control the profile does not select is reported, not omitted. Silence

@@ -18,29 +18,31 @@ designed to be driven by an agent harness as readily as by a person.
 ## Status
 
 This repository is under active construction. **`privr check` works on Windows
-and carries exactly one control.** Everything else still returns exit code `3`.
+and carries two controls.** Everything else still returns exit code `3`.
+
+On the machine this was developed on, the second control found something real:
 
 ```text
-Profile   baseline
-Platform  windows Professional 25H2 (10.0.26200.9168)
-Result    complete
-
-1 pass   0 drift   0 review
-
-advertising
-  PASS     windows.advertising.id
+diagnostics
+  pass      Diagnostic data level
+            windows.diagnostics.level
+            A level of 0 is configured, but this Windows edition does not honor it.
+            Microsoft documents value 0 as applying only to Enterprise, Education,
+            and Server, and as equivalent to 1 elsewhere. This machine sends
+            required diagnostic data.
 ```
 
+Something had set `AllowTelemetry = 0` on a Windows Professional machine. Every
+tool that checks that value reports telemetry as disabled. It is not.
+
 What works today, under test: host discovery, typed registry probing, the
-applicability model, the evaluation engine, and versioned JSON output. One
-control is real; the number will grow slowly, because each one needs cited
+applicability model, the evaluation engine, `check`, `explain` with cited
+sources, `list` as a capability manifest, and versioned JSON output. Two
+controls are real; the number will grow slowly, because each one needs cited
 sources and fixtures before it ships.
 
-What is designed but not built: `plan`, `apply`, rollback, the agent server,
-`explain`, and the macOS and Linux adapters.
-
-See [ROADMAP.md](ROADMAP.md) for what ships first, and
-[docs/DECISIONS.md](docs/DECISIONS.md) for the decisions that constrain it.
+What is designed but not built: `plan`, `apply`, rollback, the agent server, and
+the macOS and Linux adapters.
 
 ## What it looks like
 

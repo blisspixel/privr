@@ -144,6 +144,15 @@ pub fn render(control: &Control, host: &HostFacts, ui: &Ui) -> String {
         field("Change"),
         remediation_label(&result)
     ));
+
+    // After the field block rather than inside it, so the fields stay a
+    // scannable unit. Printed even on a pass, because the case this exists for
+    // is precisely a finding that looks fine and is not what was configured.
+    if let Some(note) = &result.note {
+        out.push('\n');
+        out.push_str(&ui.paint(style::CAVEAT, &ui.wrap(note, 0)));
+        out.push('\n');
+    }
     out.push('\n');
 
     out.push_str(&format!("{}\n", ui.paint(style::HEADING, "Why it matters")));

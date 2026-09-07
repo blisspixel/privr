@@ -45,10 +45,12 @@ fn read_value_at(path: &'static str, value: &'static str) -> Readable {
             if value.kind != ValueKind::String {
                 return Readable::Unreadable;
             }
-            let units: Vec<u16> = value
-                .bytes
-                .chunks_exact(2)
-                .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            // Registry strings are UTF-16 code units, null terminated. A
+            // trailing odd byte is not a code unit and is discarded.
+            let (pairs, _odd) = value.bytes.as_chunks::<2>();
+            let units: Vec<u16> = pairs
+                .iter()
+                .map(|pair| u16::from_le_bytes(*pair))
                 .take_while(|unit| *unit != 0)
                 .collect();
             String::from_utf16(&units).map_or(Readable::Unreadable, Readable::Value)

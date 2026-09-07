@@ -661,6 +661,41 @@ Consequences that follow, and that resolve real design questions:
 - **Output is designed for one machine and one person.** No aggregation across
   hosts, no scoring for comparison, no dashboard.
 
+### Catalogue selection rules that follow
+
+These are prioritization rules, not permanent exclusions, and they invert what
+most tooling in this space does.
+
+**Prefer the mechanism that works on Home.** Windows Home is a first-class
+target, and Home honors almost no `\Policies\` value. Where a setting has both a
+policy form and an ordinary setting value, the ordinary value is the primary
+binding and the policy form is a secondary source consulted for precedence. Most
+comparable tools do the reverse, because they are written by people running Pro
+or Enterprise, and the result is a catalogue that silently does nothing for the
+largest group of users.
+
+**Prefer user scope over machine scope.** A user-scope setting needs no
+elevation, so an unelevated `privr check` on a personal machine should already
+be worth running. Machine-scope controls are added where the setting genuinely
+lives there, not by default.
+
+**Prefer settings a person recognizes.** Advertising identifier, diagnostic
+level, activity history, tailored experiences, typing personalization, cloud
+clipboard, search web results, screen-capture features, peer update delivery.
+Not audit policy, password policy, account lockout, or firewall rule sets, which
+belong to the compliance-benchmark world and are already well served there.
+
+**Explain in the operator's language.** A control describes what the machine
+shares and what it costs to stop, not the name of the underlying value. The
+value name belongs in the evidence, not the explanation.
+
+### Deferred because they serve a different buyer
+
+Not cancelled, but explicitly not early: custom policy file authoring, exception
+approval metadata, expiry workflows, compliance report export, and anything that
+aggregates across machines. A person tuning their own laptop selects a profile
+and adjusts a few controls. They do not write policy files.
+
 This makes one platform limitation more painful and it should be stated rather
 than hidden: unmanaged macOS is largely a guided-review product, and unmanaged is
 exactly the target. Managed Macs are where verification is genuinely possible,

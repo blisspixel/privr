@@ -55,9 +55,11 @@ fixtures.
 
 ## 0.1.0: Windows read-only release
 
-A standard user can:
+The target user is a person on a machine they own, including Windows Home. A
+standard user can:
 
-1. run `privr check` without elevation or network access;
+1. run `privr check` without elevation or network access, and get a useful
+   answer on Home as well as Pro;
 2. receive accurate results for at least 15 documented Windows controls;
 3. inspect sources, supported builds, management source, risk, reversibility,
    and remediation mode for every result;
@@ -78,7 +80,11 @@ Engineering work:
 - [ ] Report a policy value that cannot take effect on this edition as not
   applicable, never as compliant.
 - [ ] Add the first low-breakage diagnostic, personalization, activity, search,
-  clipboard, and delivery controls.
+  clipboard, and delivery controls, binding the setting value that works on Home
+  as the primary source and treating the policy form as a secondary source
+  consulted for precedence.
+- [ ] Prefer user-scope controls, so an unelevated check is already worth
+  running on a personal machine.
 - [ ] Add `explain`, `list` as a capability manifest, and stable fixtures.
 - [ ] Group results into sections as a reporting structure, with aggregates that
   exclude what could not be evaluated.
@@ -100,7 +106,9 @@ and an agent can drive it without being able to change anything.
 
 Product requirements:
 
-- [ ] Define the minimum custom-policy schema before mutation ships.
+- [ ] Define the minimum custom-policy schema before mutation ships. This stays
+  minimal: a person tuning their own machine selects a profile and adjusts a few
+  controls rather than authoring policy files.
 - [ ] Produce a deterministic, read-only plan from fresh observations.
 - [ ] Show risks, privilege, dependencies, mitigations, and pending restart
   effects.

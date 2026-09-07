@@ -9,6 +9,7 @@ mod app;
 mod cli;
 pub mod engine;
 pub mod model;
+pub mod platform;
 
 pub use app::run;
 pub use cli::Cli;

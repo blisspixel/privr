@@ -21,3 +21,7 @@ predicates = "3.1"
 [profile.release]
 lto = "thin"
 strip = true
+
+[target."cfg(windows)".dependencies]
+windows-registry = "0.100"
+windows-result = "0.100"

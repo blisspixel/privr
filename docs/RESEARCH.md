@@ -126,6 +126,32 @@ widely, were checked against primary vendor documentation, and are not used:
 Recording rejected claims is deliberate. A project whose pitch is citation
 discipline should be able to show what it declined to assert.
 
+### Management detection signals that do not work
+
+Four registry signals commonly used to detect whether a Windows host is
+externally managed were tested against an ordinary unmanaged personal machine.
+All four produce a false positive.
+
+| Signal | Why it fails |
+|---|---|
+| `Group Policy\History` key exists | Present on essentially every installation, because policy processing runs whether or not any policy is set |
+| `PolicyManager\current\device` exists | Populated by Windows for its own internal use, with no enrollment involved |
+| `Enrollments\<id>\EnrollmentState` is 1 | Created by Windows provisioning. The test machine carried 36 such subkeys and is not managed |
+| `Tcpip\Parameters\Domain` is set | Holds the DNS suffix, which any router can supply, not domain membership |
+
+`privr` therefore reports host-level management state as `unknown` rather than
+guessing. Claiming an unmanaged machine is managed would make every control
+needlessly scan-only; claiming the reverse would offer to fight a policy that
+simply reapplies.
+
+This does not weaken per-control reporting. A control determines its own
+management source from whether its specific policy value is present, which is a
+direct observation rather than an inference about the host.
+
+The lesson generalizes. A registry key that correlates with a feature existing
+is not evidence that the feature is in use, and every one of these signals is
+plausible enough to appear in tooling that never checked.
+
 ### The edition-gating rule
 
 A policy value that reads back correctly is not evidence that it took effect.

@@ -9,6 +9,7 @@ mod app;
 pub mod catalog;
 mod cli;
 pub mod engine;
+mod explain;
 pub mod model;
 pub mod platform;
 mod report;

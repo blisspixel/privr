@@ -197,23 +197,35 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
             );
             3
         }
-        Command::Explain { id } => {
-            let message = format!("check '{id}' is not registered in the concept build");
-            write_response(
-                out,
-                format,
-                ConceptResponse {
-                    schema: 1,
-                    complete: false,
-                    status: "not_found",
-                    command: "explain",
-                    platform: current_platform(),
-                    profile: None,
-                    message: &message,
-                },
-            );
-            3
-        }
+        Command::Explain { id } => match crate::explain::find(&id) {
+            Ok(control) => {
+                let host = crate::platform::discover();
+                let _ = write!(out, "{}", crate::explain::render(&control, &host, &ui));
+                0
+            }
+            Err(_) => {
+                // A bare failure wastes the caller's next step. Naming close
+                // matches costs nothing and helps a person and an agent alike.
+                let _ = writeln!(err, "privr: no control with the identifier '{id}'");
+                let hits = crate::explain::suggestions(&id);
+                if !hits.is_empty() {
+                    let _ = writeln!(
+                        err,
+                        "
+Did you mean:"
+                    );
+                    for hit in hits {
+                        let _ = writeln!(err, "  {hit}");
+                    }
+                }
+                let _ = writeln!(
+                    err,
+                    "
+Run privr list to see every control in this build."
+                );
+                2
+            }
+        },
         Command::Doctor => {
             write_response(
                 out,
@@ -395,12 +407,15 @@ mod tests {
     }
 
     #[test]
-    fn explain_unknown_check_has_distinct_exit_code() {
-        let (code, stdout, _) = run_for_test(Some(Command::Explain {
+    fn explaining_an_unknown_identifier_fails_with_guidance() {
+        let (code, stdout, stderr) = run_for_test(Some(Command::Explain {
             id: "missing.check".to_owned(),
         }));
-        assert_eq!(code, 3);
-        assert!(stdout.contains("missing.check"));
+        // A usage error, not an incomplete report: the machine was never asked.
+        assert_eq!(code, 2);
+        assert!(stdout.is_empty());
+        assert!(stderr.contains("missing.check"));
+        assert!(stderr.contains("privr list"), "no next step offered");
     }
 
     #[test]

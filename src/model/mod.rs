@@ -16,6 +16,8 @@ pub mod evidence;
 pub mod host;
 pub mod outcome;
 
+pub use outcome::Reversibility;
+
 pub use applicability::{Applicability, Applies, Predicate, Variant};
 pub use evidence::{DenialReason, Evidence, Observation, RawValue, UndeterminedReason, ValueKind};
 pub use host::{

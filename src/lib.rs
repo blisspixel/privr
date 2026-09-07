@@ -10,6 +10,7 @@ pub mod catalog;
 mod cli;
 pub mod engine;
 mod explain;
+mod manifest;
 pub mod model;
 pub mod platform;
 mod report;

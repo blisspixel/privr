@@ -180,22 +180,34 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
             );
             3
         }
-        Command::List { platform } => {
-            let selected = platform.unwrap_or(Platform::Auto);
-            write_response(
-                out,
-                format,
-                ConceptResponse {
-                    schema: 1,
-                    complete: false,
-                    status: "concept",
-                    command: "list",
-                    platform: selected.as_str(),
-                    profile: None,
-                    message: CONCEPT_NOTICE,
-                },
-            );
-            3
+        Command::List { platform, query } => {
+            // The catalogue a build carries is the platform it was built for.
+            // Asking for another one is a question this binary cannot answer,
+            // and answering with the local catalogue would be a wrong answer.
+            if let Some(requested) = platform
+                && requested != Platform::Auto
+                && requested.as_str() != crate::model::host::Platform::current().as_str()
+            {
+                let _ = writeln!(
+                    err,
+                    "privr: this build carries only {} controls",
+                    crate::model::host::Platform::current().as_str()
+                );
+                return 2;
+            }
+
+            let manifest = crate::manifest::Manifest::build(query.as_deref());
+            match format {
+                OutputFormat::Text => {
+                    let _ = write!(out, "{}", manifest.to_text(&ui));
+                }
+                OutputFormat::Json => {
+                    if serde_json::to_writer_pretty(&mut *out, &manifest).is_ok() {
+                        let _ = writeln!(out);
+                    }
+                }
+            }
+            0
         }
         Command::Explain { id } => match crate::explain::find(&id) {
             Ok(control) => {
@@ -469,7 +481,7 @@ mod tests {
     }
 
     #[test]
-    fn list_supports_platform_and_json() {
+    fn list_emits_the_capability_manifest_as_json() {
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
         let code = run(
@@ -477,17 +489,42 @@ mod tests {
                 color: crate::cli::ColorWhen::Never,
                 format: OutputFormat::Json,
                 command: Some(Command::List {
-                    platform: Some(Platform::All),
+                    platform: None,
+                    query: None,
                 }),
             },
             &mut stdout,
             &mut stderr,
         );
-        assert_eq!(code, 3);
+
+        assert_eq!(code, 0);
         assert!(stderr.is_empty());
         let stdout = String::from_utf8(stdout).expect("stdout is UTF-8");
         let value: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
-        assert_eq!(value["platform"], "all");
+        assert_eq!(
+            value["platform"],
+            crate::model::host::Platform::current().as_str()
+        );
+        assert!(value["total"].is_number());
+        assert!(value["entries"].is_array());
+    }
+
+    #[test]
+    fn listing_another_platform_is_refused_rather_than_answered_locally() {
+        // A build carries only the platform it was compiled for. Answering with
+        // the local catalogue would be a wrong answer to the question asked.
+        let other = if cfg!(windows) {
+            Platform::Linux
+        } else {
+            Platform::Windows
+        };
+        let (code, stdout, stderr) = run_for_test(Some(Command::List {
+            platform: Some(other),
+            query: None,
+        }));
+        assert_eq!(code, 2);
+        assert!(stdout.is_empty());
+        assert!(stderr.contains("carries only"));
     }
 
     #[test]

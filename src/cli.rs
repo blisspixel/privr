@@ -77,11 +77,15 @@ pub enum Command {
         #[arg(long)]
         yes: bool,
     },
-    /// List the catalogue: every control, its risk, and its applicability.
+    /// List the catalogue: every control this build can examine.
     List {
         /// Platform catalogue to list. Defaults to the current platform.
         #[arg(long, value_enum)]
         platform: Option<Platform>,
+        /// Show only controls matching this text, in the identifier, title,
+        /// section, or summary.
+        #[arg(long)]
+        query: Option<String>,
     },
     /// Explain one check, including impact and source.
     Explain {

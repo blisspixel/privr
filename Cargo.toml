@@ -10,7 +10,11 @@ keywords = ["privacy", "security", "cli", "compliance", "hardening"]
 categories = ["command-line-utilities", "config"]
 
 [dependencies]
+anstream = "1"
+anstyle = "1"
+anstyle-query = "1"
 clap = { version = "4.5", features = ["derive"] }
+colorchoice = "1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 

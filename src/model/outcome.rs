@@ -161,6 +161,9 @@ pub enum Exception {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ControlResult {
     pub id: String,
+    /// Human-readable name. Results are self-contained by contract, so
+    /// explaining a finding never requires a second lookup.
+    pub title: String,
     pub section: String,
     pub outcome: Outcome,
     pub management_source: ManagementSource,
@@ -271,6 +274,7 @@ mod tests {
     fn base_result() -> ControlResult {
         ControlResult {
             id: "windows.example".to_owned(),
+            title: "Example control".to_owned(),
             section: "diagnostics".to_owned(),
             outcome: Outcome::Pass,
             management_source: ManagementSource::User,

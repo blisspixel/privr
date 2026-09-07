@@ -239,8 +239,12 @@ dependencies = [
 name = "privr"
 version = "0.0.1"
 dependencies = [
+ "anstream",
+ "anstyle",
+ "anstyle-query",
  "assert_cmd",
  "clap",
+ "colorchoice",
  "predicates",
  "serde",
  "serde_json",

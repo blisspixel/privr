@@ -12,6 +12,7 @@ pub mod engine;
 pub mod model;
 pub mod platform;
 mod report;
+pub mod ui;
 
 pub use app::run;
 pub use cli::Cli;

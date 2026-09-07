@@ -19,6 +19,7 @@ struct ConceptResponse<'a> {
 
 pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
     let format = cli.format;
+    let ui = crate::ui::Ui::for_stdout(cli.color.into());
     match cli.command.unwrap_or(Command::Check {
         profile: Some(Profile::Baseline),
         policy: None,
@@ -43,13 +44,19 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                 return 2;
             }
 
-            let host = crate::platform::discover();
             let profile = profile.unwrap_or_default();
-            let report = crate::report::Report::build(&host, profile.as_str());
+            let report = {
+                // Progress goes to standard error and only when that is a
+                // terminal, so a pipe, a redirect, and an agent parse stay
+                // clean. The guard clears the line however this scope exits.
+                let _progress = ui.spinner("checking this machine");
+                let host = crate::platform::discover();
+                crate::report::Report::build(&host, profile.as_str())
+            };
 
             match format {
                 OutputFormat::Text => {
-                    let _ = write!(out, "{}", report.to_text(all));
+                    let _ = write!(out, "{}", report.to_text(&ui, all));
                 }
                 OutputFormat::Json => {
                     if serde_json::to_writer_pretty(&mut *out, &report).is_ok() {
@@ -276,11 +283,17 @@ fn current_platform() -> &'static str {
 mod tests {
     use super::*;
 
+    /// Collapse whitespace so assertions are not coupled to column padding.
+    fn flatten(text: &str) -> String {
+        text.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
     fn run_for_test(command: Option<Command>) -> (i32, String, String) {
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
         let code = run(
             Cli {
+                color: crate::cli::ColorWhen::Never,
                 format: OutputFormat::Text,
                 command,
             },
@@ -299,7 +312,7 @@ mod tests {
         let (code, stdout, stderr) = run_for_test(None);
 
         assert!(stderr.is_empty());
-        assert!(stdout.contains("Profile   baseline"));
+        assert!(flatten(&stdout).contains("Profile baseline"));
         // 0 clean, 1 drift, 3 incomplete. Anything else means the report did
         // not decide, which it always must.
         assert!(matches!(code, 0 | 1 | 3), "unexpected exit code {code}");
@@ -366,6 +379,7 @@ mod tests {
         let mut stderr = Vec::new();
         let code = run(
             Cli {
+                color: crate::cli::ColorWhen::Never,
                 format: OutputFormat::Json,
                 command: Some(Command::Doctor),
             },
@@ -397,9 +411,10 @@ mod tests {
             controls: Vec::new(),
             all: true,
         }));
-        assert!(stdout.contains("Profile   baseline"));
-        assert!(stdout.contains("Platform  "));
-        assert!(stdout.contains("Result    "));
+        let flat = flatten(&stdout);
+        assert!(flat.contains("Profile baseline"));
+        assert!(flat.contains("Platform"));
+        assert!(flat.contains("Coverage"));
     }
 
     #[test]
@@ -444,6 +459,7 @@ mod tests {
         let mut stderr = Vec::new();
         let code = run(
             Cli {
+                color: crate::cli::ColorWhen::Never,
                 format: OutputFormat::Json,
                 command: Some(Command::List {
                     platform: Some(Platform::All),

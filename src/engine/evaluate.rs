@@ -181,6 +181,7 @@ pub enum Mode {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ControlSpec {
     pub id: String,
+    pub title: String,
     pub section: String,
     pub applicability: Applicability,
     pub desired: SemanticState,
@@ -208,6 +209,7 @@ pub fn evaluate(
     let build =
         |outcome: Outcome, support: Support, remediation: Remediation, reason| ControlResult {
             id: spec.id.clone(),
+            title: spec.title.clone(),
             section: spec.section.clone(),
             outcome,
             management_source: resolution.source,
@@ -356,6 +358,7 @@ mod tests {
     fn spec() -> ControlSpec {
         ControlSpec {
             id: "windows.advertising.id".to_owned(),
+            title: "Advertising identifier".to_owned(),
             section: "advertising".to_owned(),
             applicability: Applicability::new(vec![Variant::new(
                 "windows",

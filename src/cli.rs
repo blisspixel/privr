@@ -13,6 +13,9 @@ pub struct Cli {
     /// Output format for commands that produce reports.
     #[arg(long, global = true, value_enum, default_value_t = OutputFormat::Text)]
     pub format: OutputFormat,
+    /// When to colorize output. An explicit choice overrides NO_COLOR.
+    #[arg(long, global = true, value_enum, default_value_t = ColorWhen::Auto)]
+    pub color: ColorWhen,
     #[command(subcommand)]
     pub command: Option<Command>,
 }
@@ -87,6 +90,18 @@ pub enum Command {
     },
     /// Check whether commands needed by the current platform are available.
     Doctor,
+}
+
+/// When to emit colour.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
+pub enum ColorWhen {
+    /// Colour when writing to a terminal that supports it.
+    #[default]
+    Auto,
+    /// Always colour, even when redirected.
+    Always,
+    /// Never colour.
+    Never,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]

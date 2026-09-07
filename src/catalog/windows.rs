@@ -105,6 +105,7 @@ fn advertising_id() -> Control {
     Control {
         spec: ControlSpec {
             id: "windows.advertising.id".to_owned(),
+            title: "Advertising identifier".to_owned(),
             section: "advertising".to_owned(),
             applicability: Applicability::new(vec![Variant::new(
                 "windows",

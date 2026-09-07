@@ -666,13 +666,15 @@ Consequences that follow, and that resolve real design questions:
 These are prioritization rules, not permanent exclusions, and they invert what
 most tooling in this space does.
 
-**Prefer the mechanism that works on Home.** Windows Home is a first-class
-target, and Home honors almost no `\Policies\` value. Where a setting has both a
-policy form and an ordinary setting value, the ordinary value is the primary
-binding and the policy form is a secondary source consulted for precedence. Most
-comparable tools do the reverse, because they are written by people running Pro
-or Enterprise, and the result is a catalogue that silently does nothing for the
-largest group of users.
+**Never assume Enterprise or Education.** A home or power user might be running
+Home or Pro, and the SKU says nothing about the person. What matters is that many
+documented policies apply only to Enterprise, Education, and Server, so they are
+inert for both Home and Pro users alike.
+
+Where a setting has both a policy form and an ordinary setting value, the
+ordinary value is the primary binding and the policy form is a secondary source
+consulted for precedence. Most comparable tools do the reverse, and the result is
+a catalogue that silently does nothing on the editions people actually run.
 
 **Prefer user scope over machine scope.** A user-scope setting needs no
 elevation, so an unelevated `privr check` on a personal machine should already

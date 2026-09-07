@@ -6,10 +6,12 @@
 #![forbid(unsafe_code)]
 
 mod app;
+pub mod catalog;
 mod cli;
 pub mod engine;
 pub mod model;
 pub mod platform;
+mod report;
 
 pub use app::run;
 pub use cli::Cli;

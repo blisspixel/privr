@@ -28,24 +28,36 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
         Command::Check {
             profile,
             policy,
-            controls,
-            all: _,
+            controls: _,
+            all,
         } => {
-            let qualifier = selection_text(&controls, policy.as_ref());
-            write_response(
-                out,
-                format,
-                ConceptResponse {
-                    schema: 1,
-                    complete: false,
-                    status: "concept",
-                    command: "check",
-                    platform: current_platform(),
-                    profile: selected_profile(profile, policy.as_ref()),
-                    message: qualifier.as_deref().unwrap_or(CONCEPT_NOTICE),
-                },
-            );
-            3
+            // A custom policy file is not implemented, and silently evaluating
+            // the built-in profile instead would answer a question the operator
+            // did not ask.
+            if policy.is_some() {
+                let _ = writeln!(
+                    err,
+                    "privr: custom policy files are not implemented yet; \
+                     omit --policy to use a built-in profile"
+                );
+                return 2;
+            }
+
+            let host = crate::platform::discover();
+            let profile = profile.unwrap_or_default();
+            let report = crate::report::Report::build(&host, profile.as_str());
+
+            match format {
+                OutputFormat::Text => {
+                    let _ = write!(out, "{}", report.to_text(all));
+                }
+                OutputFormat::Json => {
+                    if serde_json::to_writer_pretty(&mut *out, &report).is_ok() {
+                        let _ = writeln!(out);
+                    }
+                }
+            }
+            report.exit_code()
         }
         Command::Plan {
             profile,
@@ -283,12 +295,29 @@ mod tests {
     }
 
     #[test]
-    fn default_command_is_an_incomplete_check() {
+    fn the_default_command_checks_this_machine() {
         let (code, stdout, stderr) = run_for_test(None);
-        assert_eq!(code, 3);
-        assert!(stdout.contains("privr check"));
-        assert!(stdout.contains("not implemented"));
+
         assert!(stderr.is_empty());
+        assert!(stdout.contains("Profile   baseline"));
+        // 0 clean, 1 drift, 3 incomplete. Anything else means the report did
+        // not decide, which it always must.
+        assert!(matches!(code, 0 | 1 | 3), "unexpected exit code {code}");
+    }
+
+    #[test]
+    fn a_custom_policy_file_fails_closed_rather_than_substituting_a_profile() {
+        // Silently evaluating the built-in profile would answer a question the
+        // operator did not ask, and report it as though they had.
+        let (code, stdout, stderr) = run_for_test(Some(Command::Check {
+            profile: None,
+            policy: Some("laptop.toml".into()),
+            controls: Vec::new(),
+            all: false,
+        }));
+        assert_eq!(code, 2);
+        assert!(stdout.is_empty());
+        assert!(stderr.contains("not implemented"));
     }
 
     #[test]
@@ -361,15 +390,16 @@ mod tests {
     }
 
     #[test]
-    fn check_reports_selected_control_prefixes() {
-        let (code, stdout, _) = run_for_test(Some(Command::Check {
+    fn check_renders_a_report_header() {
+        let (_, stdout, _) = run_for_test(Some(Command::Check {
             profile: Some(Profile::Baseline),
             policy: None,
-            controls: vec!["windows.diagnostics".to_owned(), "windows.wer".to_owned()],
-            all: false,
+            controls: Vec::new(),
+            all: true,
         }));
-        assert_eq!(code, 3);
-        assert!(stdout.contains("windows.diagnostics, windows.wer"));
+        assert!(stdout.contains("Profile   baseline"));
+        assert!(stdout.contains("Platform  "));
+        assert!(stdout.contains("Result    "));
     }
 
     #[test]

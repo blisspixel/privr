@@ -16,15 +16,38 @@ fn help_exposes_the_canonical_workflow() {
 }
 
 #[test]
-fn check_reports_incomplete_json() {
+fn check_emits_a_versioned_json_report() {
     let mut command = Command::cargo_bin("privr").expect("binary");
     command
         .args(["check", "--format", "json"])
         .assert()
-        .code(3)
-        .stdout(predicate::str::contains("\"command\": \"check\""))
-        .stdout(predicate::str::contains("\"complete\": false"))
-        .stdout(predicate::str::contains("\"status\": \"concept\""));
+        .stdout(predicate::str::contains("\"schema\": 1"))
+        .stdout(predicate::str::contains("\"profile\": \"baseline\""))
+        .stdout(predicate::str::contains("\"summary\""))
+        .stdout(predicate::str::contains("\"results\""));
+}
+
+#[test]
+fn check_never_reports_a_machine_identifier() {
+    // The report is designed to be safe to forward, including to a model. A
+    // security identifier or a profile path appearing here would defeat the
+    // agent integration the tool is built for.
+    let mut command = Command::cargo_bin("privr").expect("binary");
+    command
+        .args(["check", "--format", "json", "--all"])
+        .assert()
+        .stdout(predicate::str::contains("S-1-5").not())
+        .stdout(predicate::str::contains("Users\\").not());
+}
+
+#[test]
+fn a_custom_policy_file_is_refused_rather_than_substituted() {
+    let mut command = Command::cargo_bin("privr").expect("binary");
+    command
+        .args(["check", "--policy", "nonexistent.toml"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("not implemented"));
 }
 
 #[test]

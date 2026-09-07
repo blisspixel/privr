@@ -17,18 +17,27 @@ designed to be driven by an agent harness as readily as by a person.
 
 ## Status
 
-This repository is a researched concept under active construction. **No control
-is wired to the command line yet**, so every command still returns exit code `3`
-and sets `complete: false`. Until real controls ship, the tool must never imply
-that a machine passed.
+This repository is under active construction. **`privr check` works on Windows
+and carries exactly one control.** Everything else still returns exit code `3`.
 
-What works today, under test: the evaluation engine, the applicability model,
-and the Windows adapter. Discovery reads real host facts, and registry probing
-preserves exact value types and bytes while keeping absent, denied, and
-malformed states apart.
+```text
+Profile   baseline
+Platform  windows Professional 25H2 (10.0.26200.9168)
+Result    complete
 
-What is designed but not built: the control catalogue, remediation, rollback,
-the agent server, and the macOS and Linux adapters.
+1 pass   0 drift   0 review
+
+advertising
+  PASS     windows.advertising.id
+```
+
+What works today, under test: host discovery, typed registry probing, the
+applicability model, the evaluation engine, and versioned JSON output. One
+control is real; the number will grow slowly, because each one needs cited
+sources and fixtures before it ships.
+
+What is designed but not built: `plan`, `apply`, rollback, the agent server,
+`explain`, and the macOS and Linux adapters.
 
 See [ROADMAP.md](ROADMAP.md) for what ships first, and
 [docs/DECISIONS.md](docs/DECISIONS.md) for the decisions that constrain it.

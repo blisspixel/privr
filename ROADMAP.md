@@ -55,11 +55,11 @@ fixtures.
 
 ## 0.1.0: Windows read-only release
 
-The target user is a person on a machine they own, including Windows Home. A
-standard user can:
+The target user is a person on a machine they own, running whichever edition
+came with it. A standard user can:
 
 1. run `privr check` without elevation or network access, and get a useful
-   answer on Home as well as Pro;
+   answer on Home and Pro, not only on Enterprise;
 2. receive accurate results for at least 15 documented Windows controls;
 3. inspect sources, supported builds, management source, risk, reversibility,
    and remediation mode for every result;
@@ -80,9 +80,9 @@ Engineering work:
 - [ ] Report a policy value that cannot take effect on this edition as not
   applicable, never as compliant.
 - [ ] Add the first low-breakage diagnostic, personalization, activity, search,
-  clipboard, and delivery controls, binding the setting value that works on Home
-  as the primary source and treating the policy form as a secondary source
-  consulted for precedence.
+  clipboard, and delivery controls, binding the ordinary setting value as the
+  primary source and treating the policy form as a secondary source consulted
+  for precedence, so a control is not inert on Home and Pro.
 - [ ] Prefer user-scope controls, so an unelevated check is already worth
   running on a personal machine.
 - [ ] Add `explain`, `list` as a capability manifest, and stable fixtures.

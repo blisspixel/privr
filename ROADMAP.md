@@ -34,24 +34,38 @@ Completed foundations:
 - [x] Repository-wide professional writing and attribution rules.
 - [x] Consolidated design decision record.
 - [x] Pin CI actions to reviewed full commit identifiers.
+- [x] Raise the minimum supported Rust version to what the platform crates
+  require, and adopt the split Windows API crates.
+- [x] Fix process exit to flush and unwind, and handle a closed pipe cleanly.
+- [x] Define the shared observation, evidence, and host-fact types against the
+  hardest case on all three platforms before implementing any adapter.
+- [x] Implement tri-state applicability with a closed predicate set.
+- [x] Implement the evaluation engine as a pure function.
+- [x] Implement Windows discovery without collecting stable identifiers.
+- [x] Implement typed read-only registry probing that keeps absent, denied, and
+  malformed apart.
+- [x] Implement seven read-only Windows controls end to end.
+- [x] Implement `check`, `explain`, and `list`.
+- [x] Implement terminal presentation: colour, progress, wrapping, and explicit
+  coverage alongside completeness.
+- [x] Prove the edition-gating case on a real machine.
+- [x] Type the ways a configured value is not the value in effect.
 
 Required before the first useful release:
 
-- [ ] Raise the minimum supported Rust version to what the platform crates
-  require, and adopt the split Windows API crates.
-- [ ] Fix process exit to flush and unwind, and handle a closed pipe cleanly.
-- [ ] Define the shared observation, evidence, and host-fact types against the
-  hardest case on all three platforms before implementing any adapter.
-- [ ] Implement the control catalogue schema: three-token binding, closed-set
-  predicates, tri-state applicability, and the compiled adapter registry.
-- [ ] Implement platform and management discovery without stable identifiers.
-- [ ] Implement one real read-only Windows control end to end.
-- [ ] Convert the Windows candidate matrix into versioned control definitions.
-- [ ] Validate the first controls on supported Windows fixtures.
+- [ ] Implement the catalogue as data rather than Rust constants: three-token
+  binding, closed-set predicates, and the compiled adapter registry.
+- [ ] Capture redacted fixtures per control and replay them in CI, so
+  correctness stops depending on the machine the tests run on.
+- [ ] Implement the profile ladder, so `baseline`, `strict`, and `restrictive`
+  select different control sets rather than all controls being enforced.
+- [ ] Implement review staleness against a real reviewed-version range.
+- [ ] Implement `doctor` against real discovery.
+- [ ] Reach fifteen documented controls.
 
-Exit criterion: one documented Windows control produces truthful text and JSON
-results across compliant, drift, managed, denied, malformed, and unsupported
-fixtures.
+Exit criterion: every control produces truthful text and JSON results across
+compliant, drift, managed, denied, malformed, and unsupported fixtures, without
+requiring a particular host to run the tests on.
 
 ## 0.1.0: Windows read-only release
 

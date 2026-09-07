@@ -335,17 +335,25 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn this_machine_produces_a_real_finding() {
+    fn this_machine_produces_real_findings() {
+        // Deliberately host-independent. What must hold on any Windows host is
+        // that controls are evaluated, results are coherent, and completeness
+        // agrees with whether anything was concealed. What this particular
+        // machine holds is not asserted, because a test that depends on the
+        // developer's registry state is a test that fails on someone else's.
         let host = platform::discover();
         let report = Report::build(&host, "baseline");
 
-        assert!(!report.results.is_empty());
-        assert_eq!(report.summary.evaluated(), report.results.len());
-        assert!(report.complete);
+        assert!(!report.results.is_empty(), "no controls evaluated");
+        for result in &report.results {
+            assert!(result.is_coherent(), "incoherent result: {result:?}");
+        }
+        assert_eq!(report.complete, report.summary.concealed() == 0);
 
         let text = report.to_text(&Ui::plain(), true);
         assert!(text.contains("windows.advertising.id"));
         assert!(text.contains("Advertising identifier"));
         assert!(flat(&text).contains("Profile baseline"));
+        assert!(flat(&text).contains("Coverage"));
     }
 }

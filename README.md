@@ -44,22 +44,15 @@ sources and fixtures before it ships.
 What is designed but not built: `plan`, `apply`, rollback, the agent server, and
 the macOS and Linux adapters.
 
-## What it looks like
+## Where it is going
 
-Both images below are mockups of the target output. **Nothing here is
-implemented yet**, and neither image is a capture of a real machine.
+`plan` is not built yet. This is the intended shape: changes grouped into
+sections you approve one at a time, every tradeoff paired with a way to keep the
+capability, and a plan that changes nothing.
 
-`privr check` on Windows. Note the third result: a policy value that many tools
-write and report as a success, which Microsoft documents as having no effect on
-this edition.
+![privr plan, showing changes grouped into sections, a tradeoff paired with a mitigation, and confirmation that nothing has been changed](docs/assets/plan-linux.svg)
 
-![privr check on Windows, showing drift, an edition-gated control reported as not applicable, a review item with a mitigation, and an honest unknown](docs/assets/check-windows.svg)
-
-`privr plan` on Linux. Changes are grouped into sections you approve one at a
-time, every tradeoff is paired with a way to keep the capability, and a plan
-never changes anything.
-
-![privr plan on Ubuntu, showing changes grouped into sections, a tradeoff paired with a mitigation, and confirmation that nothing has been changed](docs/assets/plan-linux.svg)
+The image is a mockup of unimplemented behaviour, unlike the output above it.
 
 ## Why this exists
 

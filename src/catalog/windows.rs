@@ -293,9 +293,303 @@ fn advertising_id() -> Control {
     }
 }
 
+// User-scope toggles.
+//
+// These are preferred over machine-scope equivalents wherever both exist. A
+// user-scope setting needs no elevation, so an unelevated check on a personal
+// machine is already worth running rather than demanding a prompt before it
+// says anything useful.
+
+/// A setting that is a single value meaning on or off.
+struct Toggle {
+    target: Target,
+    /// The stored value that means the collection is off.
+    private_value: u32,
+    /// The state that applies when no value is stored.
+    absent_means: &'static str,
+}
+
+impl Toggle {
+    fn probe(&self) -> Resolution {
+        match registry::read(&self.target, ManagementSource::User) {
+            Evidence::Present { value, .. } => match value.as_u32() {
+                Some(stored) => Resolution::determined(
+                    if stored == self.private_value {
+                        disabled()
+                    } else {
+                        enabled()
+                    },
+                    ManagementSource::User,
+                ),
+                // A value we cannot interpret is malformed evidence, never a
+                // silent fallback to the documented default.
+                None => Resolution::uncertain(Uncertainty::Malformed, ManagementSource::User),
+            },
+            Evidence::Absent { .. } => Resolution::determined(
+                SemanticState::new(self.absent_means),
+                ManagementSource::Default,
+            ),
+            Evidence::Denied { .. } => {
+                Resolution::uncertain(Uncertainty::Denied, ManagementSource::User)
+            }
+            _ => Resolution::uncertain(Uncertainty::Undetermined, ManagementSource::User),
+        }
+    }
+}
+
+const TAILORED_EXPERIENCES: Toggle = Toggle {
+    target: Target::new(
+        Hive::CurrentUser,
+        r"Software\Microsoft\Windows\CurrentVersion\Privacy",
+        "TailoredExperiencesWithDiagnosticDataEnabled",
+        View::Native,
+    ),
+    private_value: 0,
+    absent_means: "enabled",
+};
+
+const CLOUD_CLIPBOARD: Toggle = Toggle {
+    target: Target::new(
+        Hive::CurrentUser,
+        r"Software\Microsoft\Clipboard",
+        "CloudClipboardAutomaticUpload",
+        View::Native,
+    ),
+    private_value: 0,
+    absent_means: "disabled",
+};
+
+const WEB_SEARCH: Toggle = Toggle {
+    target: Target::new(
+        Hive::CurrentUser,
+        r"Software\Microsoft\Windows\CurrentVersion\Search",
+        "BingSearchEnabled",
+        View::Native,
+    ),
+    private_value: 0,
+    absent_means: "enabled",
+};
+
+const SUGGESTED_APPS: Toggle = Toggle {
+    target: Target::new(
+        Hive::CurrentUser,
+        r"Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager",
+        "SilentInstalledAppsEnabled",
+        View::Native,
+    ),
+    private_value: 0,
+    absent_means: "enabled",
+};
+
+/// Typing and inking personalisation, which is two values rather than one.
+///
+/// Both restrictions must be in place. Reporting the setting as off because one
+/// of them is would be a false pass, and the two are set independently.
+const IMPLICIT_TEXT: Target = Target::new(
+    Hive::CurrentUser,
+    r"Software\Microsoft\InputPersonalization",
+    "RestrictImplicitTextCollection",
+    View::Native,
+);
+const IMPLICIT_INK: Target = Target::new(
+    Hive::CurrentUser,
+    r"Software\Microsoft\InputPersonalization",
+    "RestrictImplicitInkCollection",
+    View::Native,
+);
+
+fn probe_input_personalization(_host: &HostFacts) -> Resolution {
+    let mut all_restricted = true;
+
+    for target in [&IMPLICIT_TEXT, &IMPLICIT_INK] {
+        match registry::read(target, ManagementSource::User) {
+            Evidence::Present { value, .. } => match value.as_u32() {
+                // One means collection is restricted. Note the polarity is the
+                // opposite of most toggles in this catalogue.
+                Some(1) => {}
+                Some(_) => all_restricted = false,
+                None => {
+                    return Resolution::uncertain(Uncertainty::Malformed, ManagementSource::User);
+                }
+            },
+            // Absent means unrestricted, which is the collecting state.
+            Evidence::Absent { .. } => all_restricted = false,
+            Evidence::Denied { .. } => {
+                return Resolution::uncertain(Uncertainty::Denied, ManagementSource::User);
+            }
+            _ => {
+                return Resolution::uncertain(Uncertainty::Undetermined, ManagementSource::User);
+            }
+        }
+    }
+
+    Resolution::determined(
+        if all_restricted {
+            disabled()
+        } else {
+            enabled()
+        },
+        ManagementSource::User,
+    )
+}
+
+/// Build a control around a single user-scope toggle.
+#[allow(clippy::too_many_arguments)]
+fn toggle_control(
+    id: &str,
+    section: &str,
+    title: &'static str,
+    summary: &'static str,
+    rationale: &'static str,
+    tradeoff: Option<&'static str>,
+    mitigation: Option<&'static str>,
+    sources: &'static [Source],
+    probe: fn(&HostFacts) -> Resolution,
+) -> Control {
+    Control {
+        spec: ControlSpec {
+            id: id.to_owned(),
+            title: title.to_owned(),
+            section: section.to_owned(),
+            applicability: Applicability::new(vec![Variant::new(
+                "windows",
+                vec![Predicate::Platform(Platform::Windows)],
+            )]),
+            desired: disabled(),
+            reversibility: Reversibility::Exact,
+            maturity: Maturity::Automated,
+            verified_through: None,
+            remediation: Remediation::AuditOnly,
+            remediation_reason: None,
+        },
+        title,
+        summary,
+        rationale,
+        tradeoff,
+        mitigation,
+        sources,
+        probe,
+    }
+}
+
+const PRIVACY_CSP: &str =
+    "https://learn.microsoft.com/windows/client-management/mdm/policy-csp-privacy";
+const TEXTINPUT_CSP: &str =
+    "https://learn.microsoft.com/windows/client-management/mdm/policy-csp-textinput";
+const SEARCH_CSP: &str =
+    "https://learn.microsoft.com/windows/client-management/mdm/policy-csp-search";
+const EXPERIENCE_CSP: &str =
+    "https://learn.microsoft.com/windows/client-management/mdm/policy-csp-experience";
+
 /// Every Windows control, in stable sorted order by identifier.
 pub fn controls() -> Vec<Control> {
-    vec![advertising_id(), diagnostics_level()]
+    let mut controls = vec![
+        advertising_id(),
+        diagnostics_level(),
+        toggle_control(
+            "windows.clipboard.cross-device",
+            "clipboard",
+            "Cross-device clipboard",
+            "What you copy can be uploaded so it can be pasted on your other devices.",
+            "Copied text routinely includes passwords, tokens, addresses, and \
+             fragments of private documents. Syncing it moves that material off \
+             the machine to make it available elsewhere.",
+            Some("You can no longer paste on another device something you copied here."),
+            Some(
+                "Local clipboard history is a separate setting and is unaffected. \
+                 Paste on this machine works exactly as before.",
+            ),
+            &[Source {
+                url: PRIVACY_CSP,
+                claim: "Documents the cross-device clipboard setting.",
+                reviewed: "2026-09-07",
+            }],
+            |_host| CLOUD_CLIPBOARD.probe(),
+        ),
+        toggle_control(
+            "windows.experience.suggested-apps",
+            "personalization",
+            "Suggested app installs",
+            "Windows can install and pin apps it suggests, without being asked each time.",
+            "Choosing what to install is a decision worth keeping. Suggestions are \
+             driven by profiling and the installs happen quietly, so software \
+             appears that you did not choose.",
+            Some("Windows stops suggesting and installing apps on your behalf."),
+            Some("The Store still works normally and you can install anything yourself."),
+            &[Source {
+                url: EXPERIENCE_CSP,
+                claim: "Documents suggested and silently installed application content.",
+                reviewed: "2026-09-07",
+            }],
+            |_host| SUGGESTED_APPS.probe(),
+        ),
+        toggle_control(
+            "windows.experience.tailored",
+            "personalization",
+            "Tailored experiences",
+            "Windows uses your diagnostic data to personalise tips, advertisements, \
+             and recommendations it shows you.",
+            "This is the setting that turns diagnostic data into a profile used to \
+             target you. Diagnostic collection and its use for personalisation are \
+             two separate decisions, and this is the second one.",
+            Some("Tips and recommendations become generic rather than targeted."),
+            Some(
+                "Nothing stops working. Windows still shows tips, they are simply \
+                 not selected from your activity.",
+            ),
+            &[Source {
+                url: PRIVACY_CSP,
+                claim: "Documents tailored experiences with diagnostic data.",
+                reviewed: "2026-09-07",
+            }],
+            |_host| TAILORED_EXPERIENCES.probe(),
+        ),
+        toggle_control(
+            "windows.input.personalization",
+            "personalization",
+            "Typing and inking personalisation",
+            "Windows can collect what you type and write to improve its own \
+             suggestions, and can read your contacts to do it.",
+            "This covers text you enter across the system rather than in one \
+             application. Both the typing and the inking restrictions must be in \
+             place, and they are set independently, so one alone leaves the other \
+             collecting.",
+            Some("Typing suggestions and autocorrect become less tailored to you."),
+            Some(
+                "The keyboard, handwriting, and spell check all continue to work. \
+                 Only the personalisation that learns from your input stops.",
+            ),
+            &[Source {
+                url: TEXTINPUT_CSP,
+                claim: "Documents the implicit text and ink collection restrictions.",
+                reviewed: "2026-09-07",
+            }],
+            probe_input_personalization,
+        ),
+        toggle_control(
+            "windows.search.web",
+            "search",
+            "Web results in Start",
+            "What you type into the Start menu is sent for web results alongside \
+             the search of your own machine.",
+            "The Start menu is where people look for their own files and \
+             applications. Sending those terms out treats a local search as a web \
+             search, and the two are rarely intended to be the same thing.",
+            Some("Start stops showing web results, and searches only this machine."),
+            Some("Searching the web in a browser is unaffected and unchanged."),
+            &[Source {
+                url: SEARCH_CSP,
+                claim: "Documents web results in Windows search.",
+                reviewed: "2026-09-07",
+            }],
+            |_host| WEB_SEARCH.probe(),
+        ),
+    ];
+    controls.sort_by(|a, b| {
+        (a.spec.section.clone(), a.spec.id.clone())
+            .cmp(&(b.spec.section.clone(), b.spec.id.clone()))
+    });
+    controls
 }
 
 #[cfg(test)]
@@ -376,6 +670,91 @@ mod tests {
         // A value outside the documented set is not evidence of any level.
         assert_eq!(diagnostics_state(4), None);
         assert_eq!(diagnostics_state(99), None);
+    }
+
+    #[test]
+    fn typing_personalisation_needs_both_restrictions() {
+        // Two values, set independently, and either one left unrestricted means
+        // collection continues. Reporting the setting as off because one of them
+        // is in place would be a false pass.
+        let host = platform::discover();
+        let resolution = probe_input_personalization(&host);
+
+        let text = registry::read(&IMPLICIT_TEXT, ManagementSource::User);
+        let ink = registry::read(&IMPLICIT_INK, ManagementSource::User);
+
+        let restricted = |evidence: &Evidence| match evidence {
+            Evidence::Present { value, .. } => value.as_u32() == Some(1),
+            _ => false,
+        };
+
+        if text.is_conclusive() && ink.is_conclusive() {
+            let expected = if restricted(&text) && restricted(&ink) {
+                disabled()
+            } else {
+                enabled()
+            };
+            assert_eq!(resolution.state, Some(expected));
+        }
+    }
+
+    #[test]
+    fn a_toggle_reports_the_documented_default_when_absent() {
+        // Absent is a positive observation: the documented default governs. It
+        // is never confused with a failed read.
+        let missing = Toggle {
+            target: Target::new(
+                Hive::CurrentUser,
+                r"Software\Microsoft\PrivrKeyThatDoesNotExist",
+                "Anything",
+                View::Native,
+            ),
+            private_value: 0,
+            absent_means: "enabled",
+        };
+
+        let resolution = missing.probe();
+        assert_eq!(resolution.state, Some(enabled()));
+        assert_eq!(resolution.source, ManagementSource::Default);
+        assert!(resolution.uncertainty.is_none());
+    }
+
+    #[test]
+    fn every_toggle_probes_this_machine_conclusively() {
+        for (name, toggle) in [
+            ("tailored", &TAILORED_EXPERIENCES),
+            ("clipboard", &CLOUD_CLIPBOARD),
+            ("web search", &WEB_SEARCH),
+            ("suggested apps", &SUGGESTED_APPS),
+        ] {
+            let resolution = toggle.probe();
+            assert!(
+                resolution.state.is_some(),
+                "{name} was not determined: {resolution:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_catalogue_is_sorted_by_section_then_identifier() {
+        // Deterministic ordering is a published property, and grouping in the
+        // report depends on it.
+        let controls = controls();
+        let keys: Vec<(String, String)> = controls
+            .iter()
+            .map(|c| (c.spec.section.clone(), c.spec.id.clone()))
+            .collect();
+        let mut sorted = keys.clone();
+        sorted.sort();
+        assert_eq!(keys, sorted);
+    }
+
+    #[test]
+    fn every_control_states_a_desired_state_and_a_section() {
+        for control in controls() {
+            assert!(!control.spec.desired.0.is_empty(), "{}", control.spec.id);
+            assert!(!control.spec.section.is_empty(), "{}", control.spec.id);
+        }
     }
 
     #[test]
@@ -505,8 +884,8 @@ mod tests {
 
         assert_eq!(result.id, "windows.advertising.id");
         assert_eq!(result.section, "advertising");
-        // The state is known, so this must be a real finding rather than an
-        // unknown, and it must be one of the two evaluated outcomes.
+        // Both the present and absent cases are documented, so any Windows host
+        // must reach a finding rather than an unknown.
         assert!(
             matches!(result.outcome, Outcome::Pass | Outcome::Drift),
             "expected a finding, got {:?}",

@@ -5,7 +5,7 @@ edition = "2024"
 description = "Privacy-first settings audit, drift detection, remediation, and rollback"
 license = "Apache-2.0"
 repository = "https://github.com/blisspixel/privr"
-rust-version = "1.85"
+rust-version = "1.95"
 keywords = ["privacy", "security", "cli", "compliance", "hardening"]
 categories = ["command-line-utilities", "config"]
 

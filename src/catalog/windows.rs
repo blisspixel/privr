@@ -9,13 +9,13 @@
 //! actually run, because many documented policies apply only to Enterprise,
 //! Education, and Server.
 
-use super::{Control, Source};
+use super::{Context, Control, Source};
 use crate::engine::evaluate::{ControlSpec, Resolution, SemanticState, Uncertainty};
 use crate::model::applicability::{Applicability, Predicate, Variant};
 use crate::model::evidence::{Evidence, Observation, RawValue};
 use crate::model::host::{HostFacts, ManagementSource, Platform};
 use crate::model::outcome::{Ineffective, Maturity, Remediation, Reversibility};
-use crate::platform::windows::registry::{self, Hive, Target, View};
+use crate::platform::windows::registry::{Hive, Target, View};
 
 fn enabled() -> SemanticState {
     SemanticState::new("enabled")
@@ -72,8 +72,10 @@ fn decode_policy(value: &RawValue) -> Option<SemanticState> {
 /// The policy form is consulted first because it overrides the user setting
 /// where it is present, then the user setting, which is the source that
 /// actually governs on an unmanaged machine.
-fn probe_advertising_id(_host: &HostFacts) -> Resolution {
-    let policy = registry::read(&ADVERTISING_POLICY, ManagementSource::GroupPolicy);
+fn probe_advertising_id(ctx: &Context) -> Resolution {
+    let policy = ctx
+        .registry
+        .read(&ADVERTISING_POLICY, ManagementSource::GroupPolicy);
 
     // A present policy value governs. Absent policy is not a finding: it simply
     // means the user setting decides.
@@ -89,7 +91,7 @@ fn probe_advertising_id(_host: &HostFacts) -> Resolution {
         return Resolution::uncertain(Uncertainty::Denied, ManagementSource::GroupPolicy);
     }
 
-    let user = registry::read(&ADVERTISING_USER, ManagementSource::User);
+    let user = ctx.registry.read(&ADVERTISING_USER, ManagementSource::User);
     let observation = Observation::new(vec![user]);
     Resolution::from_observation(
         &observation,
@@ -161,14 +163,14 @@ fn honors_security_level(host: &HostFacts) -> Option<bool> {
 }
 
 /// Resolve the effective diagnostic level, accounting for edition gating.
-fn probe_diagnostics_level(host: &HostFacts) -> Resolution {
+fn probe_diagnostics_level(ctx: &Context) -> Resolution {
     let mut configured: Option<(u32, ManagementSource)> = None;
 
     for (target, source) in [
         (&DIAGNOSTICS_POLICY, ManagementSource::GroupPolicy),
         (&DIAGNOSTICS_SETTING, ManagementSource::LocalPolicy),
     ] {
-        match registry::read(target, source) {
+        match ctx.registry.read(target, source) {
             Evidence::Present { value, .. } => match value.as_u32() {
                 Some(level) => {
                     configured = Some((level, source));
@@ -197,7 +199,7 @@ fn probe_diagnostics_level(host: &HostFacts) -> Resolution {
     }
 
     // The gated case. What is configured and what the platform acts on differ.
-    match honors_security_level(host) {
+    match honors_security_level(ctx.host) {
         Some(true) => Resolution::determined(state, source),
         Some(false) => Resolution::determined(SemanticState::new("required"), source)
             .configured_but_ineffective(
@@ -310,8 +312,8 @@ struct Toggle {
 }
 
 impl Toggle {
-    fn probe(&self) -> Resolution {
-        match registry::read(&self.target, ManagementSource::User) {
+    fn probe(&self, ctx: &Context) -> Resolution {
+        match ctx.registry.read(&self.target, ManagementSource::User) {
             Evidence::Present { value, .. } => match value.as_u32() {
                 Some(stored) => Resolution::determined(
                     if stored == self.private_value {
@@ -398,11 +400,11 @@ const IMPLICIT_INK: Target = Target::new(
     View::Native,
 );
 
-fn probe_input_personalization(_host: &HostFacts) -> Resolution {
+fn probe_input_personalization(ctx: &Context) -> Resolution {
     let mut all_restricted = true;
 
     for target in [&IMPLICIT_TEXT, &IMPLICIT_INK] {
-        match registry::read(target, ManagementSource::User) {
+        match ctx.registry.read(target, ManagementSource::User) {
             Evidence::Present { value, .. } => match value.as_u32() {
                 // One means collection is restricted. Note the polarity is the
                 // opposite of most toggles in this catalogue.
@@ -444,7 +446,7 @@ fn toggle_control(
     tradeoff: Option<&'static str>,
     mitigation: Option<&'static str>,
     sources: &'static [Source],
-    probe: fn(&HostFacts) -> Resolution,
+    probe: fn(&Context) -> Resolution,
 ) -> Control {
     Control {
         spec: ControlSpec {
@@ -504,7 +506,7 @@ pub fn controls() -> Vec<Control> {
                 claim: "Documents the cross-device clipboard setting.",
                 reviewed: "2026-09-07",
             }],
-            |_host| CLOUD_CLIPBOARD.probe(),
+            |ctx| CLOUD_CLIPBOARD.probe(ctx),
         ),
         toggle_control(
             "windows.experience.suggested-apps",
@@ -521,7 +523,7 @@ pub fn controls() -> Vec<Control> {
                 claim: "Documents suggested and silently installed application content.",
                 reviewed: "2026-09-07",
             }],
-            |_host| SUGGESTED_APPS.probe(),
+            |ctx| SUGGESTED_APPS.probe(ctx),
         ),
         toggle_control(
             "windows.experience.tailored",
@@ -542,7 +544,7 @@ pub fn controls() -> Vec<Control> {
                 claim: "Documents tailored experiences with diagnostic data.",
                 reviewed: "2026-09-07",
             }],
-            |_host| TAILORED_EXPERIENCES.probe(),
+            |ctx| TAILORED_EXPERIENCES.probe(ctx),
         ),
         toggle_control(
             "windows.input.personalization",
@@ -582,7 +584,7 @@ pub fn controls() -> Vec<Control> {
                 claim: "Documents web results in Windows search.",
                 reviewed: "2026-09-07",
             }],
-            |_host| WEB_SEARCH.probe(),
+            |ctx| WEB_SEARCH.probe(ctx),
         ),
     ];
     controls.sort_by(|a, b| {
@@ -601,6 +603,26 @@ mod tests {
     };
     use crate::model::outcome::{Exception, Outcome};
     use crate::platform;
+    use crate::platform::windows::registry::{Registry, key};
+    use std::collections::BTreeMap;
+
+    /// A context reading recorded evidence rather than the live machine.
+    fn recorded<'a>(host: &'a HostFacts, registry: &'a Registry) -> Context<'a> {
+        Context { host, registry }
+    }
+
+    /// Build a recording from target and evidence pairs.
+    ///
+    /// The recording holds the same `Evidence` type the live reader produces,
+    /// so there is no separate fake that can drift from the real one.
+    fn recording(entries: Vec<(Target, Evidence)>) -> Registry {
+        Registry::Recorded(
+            entries
+                .into_iter()
+                .map(|(target, evidence)| (key(&target), evidence))
+                .collect::<BTreeMap<_, _>>(),
+        )
+    }
 
     fn windows_host() -> HostFacts {
         HostFacts {
@@ -672,16 +694,238 @@ mod tests {
         assert_eq!(diagnostics_state(99), None);
     }
 
+    // Replayed evidence.
+    //
+    // These states cannot be produced on demand against a live machine without
+    // changing it, which is why the failure paths had no coverage before. The
+    // recording holds the same Evidence type the live probe produces, so there
+    // is no separate fake that can drift from the real reader.
+
+    #[test]
+    fn a_denied_policy_read_never_falls_through_to_the_user_setting() {
+        // The policy we were not allowed to read might be the thing governing
+        // this value. Answering from the user setting would be a confident
+        // guess, and it would look exactly like a real finding.
+        let host = windows_host();
+        let registry = recording(vec![
+            (
+                ADVERTISING_POLICY,
+                Evidence::Denied {
+                    source: ManagementSource::GroupPolicy,
+                    reason: crate::model::evidence::DenialReason::Permission,
+                },
+            ),
+            (
+                ADVERTISING_USER,
+                Evidence::Present {
+                    source: ManagementSource::User,
+                    value: RawValue::u32(0),
+                },
+            ),
+        ]);
+
+        let resolution = probe_advertising_id(&recorded(&host, &registry));
+        assert_eq!(resolution.state, None, "answered despite a denied read");
+        assert_eq!(resolution.uncertainty, Some(Uncertainty::Denied));
+
+        let result = evaluate(
+            &advertising_id().spec,
+            Mode::Enforce,
+            &resolution,
+            &host,
+            Exception::None,
+        );
+        assert_eq!(result.outcome, Outcome::Unknown);
+        assert!(result.outcome.conceals_state());
+    }
+
+    #[test]
+    fn a_policy_of_the_wrong_type_is_malformed_not_defaulted() {
+        let host = windows_host();
+        let registry = recording(vec![(
+            ADVERTISING_POLICY,
+            Evidence::Present {
+                source: ManagementSource::GroupPolicy,
+                value: RawValue::new(crate::model::evidence::ValueKind::String, b"1\0".to_vec()),
+            },
+        )]);
+
+        let resolution = probe_advertising_id(&recorded(&host, &registry));
+        assert_eq!(resolution.uncertainty, Some(Uncertainty::Malformed));
+        assert_eq!(resolution.state, None);
+    }
+
+    #[test]
+    fn a_governing_policy_overrides_the_user_setting() {
+        // Opposite polarity in the two sources, so this also proves the
+        // decoders are not shared.
+        let host = windows_host();
+        let registry = recording(vec![
+            (
+                ADVERTISING_POLICY,
+                Evidence::Present {
+                    source: ManagementSource::GroupPolicy,
+                    value: RawValue::u32(1),
+                },
+            ),
+            (
+                ADVERTISING_USER,
+                Evidence::Present {
+                    source: ManagementSource::User,
+                    value: RawValue::u32(1),
+                },
+            ),
+        ]);
+
+        let resolution = probe_advertising_id(&recorded(&host, &registry));
+        // Policy 1 means disabled; user 1 means enabled. The policy governs.
+        assert_eq!(resolution.state, Some(disabled()));
+        assert_eq!(resolution.source, ManagementSource::GroupPolicy);
+    }
+
+    #[test]
+    fn a_gated_diagnostic_level_is_reported_at_what_the_platform_does() {
+        // The case the project exists for, replayed rather than depending on
+        // the developer's machine happening to be configured this way.
+        let mut host = windows_host();
+        host.edition = Fact::Known("Professional".to_owned());
+
+        let registry = recording(vec![
+            (
+                DIAGNOSTICS_POLICY,
+                Evidence::Absent {
+                    source: ManagementSource::GroupPolicy,
+                },
+            ),
+            (
+                DIAGNOSTICS_SETTING,
+                Evidence::Present {
+                    source: ManagementSource::LocalPolicy,
+                    value: RawValue::u32(0),
+                },
+            ),
+        ]);
+
+        let resolution = probe_diagnostics_level(&recorded(&host, &registry));
+        assert_eq!(
+            resolution.state,
+            Some(SemanticState::new("required")),
+            "reported the stored value rather than the effective one"
+        );
+        assert_eq!(resolution.ineffective, Some(Ineffective::EditionGated));
+        assert!(resolution.note.is_some());
+    }
+
+    #[test]
+    fn the_same_configuration_on_enterprise_is_honored() {
+        // Identical evidence, different edition, different truthful answer.
+        let mut host = windows_host();
+        host.edition = Fact::Known("Enterprise".to_owned());
+
+        let registry = recording(vec![
+            (
+                DIAGNOSTICS_POLICY,
+                Evidence::Absent {
+                    source: ManagementSource::GroupPolicy,
+                },
+            ),
+            (
+                DIAGNOSTICS_SETTING,
+                Evidence::Present {
+                    source: ManagementSource::LocalPolicy,
+                    value: RawValue::u32(0),
+                },
+            ),
+        ]);
+
+        let resolution = probe_diagnostics_level(&recorded(&host, &registry));
+        assert_eq!(resolution.state, Some(SemanticState::new("security")));
+        assert_eq!(resolution.ineffective, None);
+        assert!(resolution.note.is_none());
+    }
+
+    #[test]
+    fn an_unknown_edition_leaves_a_gated_level_undetermined() {
+        let mut host = windows_host();
+        host.edition = Fact::Unknown;
+
+        let registry = recording(vec![
+            (
+                DIAGNOSTICS_POLICY,
+                Evidence::Absent {
+                    source: ManagementSource::GroupPolicy,
+                },
+            ),
+            (
+                DIAGNOSTICS_SETTING,
+                Evidence::Present {
+                    source: ManagementSource::LocalPolicy,
+                    value: RawValue::u32(0),
+                },
+            ),
+        ]);
+
+        let resolution = probe_diagnostics_level(&recorded(&host, &registry));
+        assert_eq!(
+            resolution.state, None,
+            "claimed a level without the edition"
+        );
+        assert_eq!(resolution.uncertainty, Some(Uncertainty::Undetermined));
+    }
+
+    #[test]
+    fn typing_personalisation_fails_closed_when_only_one_restriction_holds() {
+        // Two values set independently. One in place is not the setting being
+        // off, and reporting it as off would be a false pass.
+        let host = windows_host();
+        let registry = recording(vec![
+            (
+                IMPLICIT_TEXT,
+                Evidence::Present {
+                    source: ManagementSource::User,
+                    value: RawValue::u32(1),
+                },
+            ),
+            (
+                IMPLICIT_INK,
+                Evidence::Absent {
+                    source: ManagementSource::User,
+                },
+            ),
+        ]);
+
+        let resolution = probe_input_personalization(&recorded(&host, &registry));
+        assert_eq!(
+            resolution.state,
+            Some(enabled()),
+            "one restriction read as off"
+        );
+    }
+
+    #[test]
+    fn a_target_the_recording_never_captured_is_undetermined() {
+        // A fixture that omits a target has not observed it absent. Treating
+        // silence as absence would let a recording assert a documented default
+        // it never captured.
+        let host = windows_host();
+        let empty = recording(Vec::new());
+
+        let resolution = TAILORED_EXPERIENCES.probe(&recorded(&host, &empty));
+        assert_eq!(resolution.state, None);
+        assert_eq!(resolution.uncertainty, Some(Uncertainty::Undetermined));
+    }
+
     #[test]
     fn typing_personalisation_needs_both_restrictions() {
         // Two values, set independently, and either one left unrestricted means
         // collection continues. Reporting the setting as off because one of them
         // is in place would be a false pass.
         let host = platform::discover();
-        let resolution = probe_input_personalization(&host);
+        let ctx = Context::live(&host);
+        let resolution = probe_input_personalization(&ctx);
 
-        let text = registry::read(&IMPLICIT_TEXT, ManagementSource::User);
-        let ink = registry::read(&IMPLICIT_INK, ManagementSource::User);
+        let text = ctx.registry.read(&IMPLICIT_TEXT, ManagementSource::User);
+        let ink = ctx.registry.read(&IMPLICIT_INK, ManagementSource::User);
 
         let restricted = |evidence: &Evidence| match evidence {
             Evidence::Present { value, .. } => value.as_u32() == Some(1),
@@ -713,7 +957,8 @@ mod tests {
             absent_means: "enabled",
         };
 
-        let resolution = missing.probe();
+        let host = platform::discover();
+        let resolution = missing.probe(&Context::live(&host));
         assert_eq!(resolution.state, Some(enabled()));
         assert_eq!(resolution.source, ManagementSource::Default);
         assert!(resolution.uncertainty.is_none());
@@ -727,7 +972,8 @@ mod tests {
             ("web search", &WEB_SEARCH),
             ("suggested apps", &SUGGESTED_APPS),
         ] {
-            let resolution = toggle.probe();
+            let host = platform::discover();
+            let resolution = toggle.probe(&Context::live(&host));
             assert!(
                 resolution.state.is_some(),
                 "{name} was not determined: {resolution:?}"
@@ -786,7 +1032,7 @@ mod tests {
     #[test]
     fn probing_diagnostics_on_this_machine_is_conclusive() {
         let host = platform::discover();
-        let resolution = probe_diagnostics_level(&host);
+        let resolution = probe_diagnostics_level(&Context::live(&host));
         assert!(
             resolution.state.is_some(),
             "diagnostic level was not determined: {resolution:?}"
@@ -798,7 +1044,7 @@ mod tests {
         // A caller must be able to branch on the failure rather than parse a
         // sentence, so the typed reason travels with the prose.
         let host = platform::discover();
-        let resolution = probe_diagnostics_level(&host);
+        let resolution = probe_diagnostics_level(&Context::live(&host));
 
         if resolution.note.is_some() {
             assert_eq!(
@@ -841,7 +1087,7 @@ mod tests {
         // must be what the platform acts on, and the discrepancy must be
         // stated rather than left for the operator to discover.
         let host = platform::discover();
-        let resolution = probe_diagnostics_level(&host);
+        let resolution = probe_diagnostics_level(&Context::live(&host));
 
         if resolution.note.is_some() {
             assert_eq!(
@@ -860,7 +1106,7 @@ mod tests {
         // holds, the answer must be conclusive rather than an error, because
         // both the present and absent cases are documented.
         let host = platform::discover();
-        let resolution = probe_advertising_id(&host);
+        let resolution = probe_advertising_id(&Context::live(&host));
 
         assert!(
             resolution.state.is_some(),
@@ -873,7 +1119,7 @@ mod tests {
     fn the_control_evaluates_end_to_end_on_this_machine() {
         let host = platform::discover();
         let control = advertising_id();
-        let resolution = control.observe(&host);
+        let resolution = control.observe(&Context::live(&host));
         let result = evaluate(
             &control.spec,
             Mode::Enforce,

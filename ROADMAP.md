@@ -62,6 +62,19 @@ Required before the first useful release:
 - [ ] Implement review staleness against a real reviewed-version range.
 - [ ] Implement `doctor` against real discovery.
 - [ ] Reach fifteen documented controls.
+- [ ] Reserve the crate name, or decide on a different one.
+
+## Naming
+
+The name is provisional. `privr.co.uk` hosts a marketing page for an unrelated
+business access-management product, and `privr.io` is registered but serves
+nothing. The categories barely overlap and no registered mark has been found,
+so this is not treated as blocking.
+
+Two options, and the decision is deferred until closer to a stable release:
+reserve the crate name and keep it, or rename before 1.0 while the cost is a
+find and replace. Reserving costs nothing and prevents the name being taken
+meanwhile. Searching the trademark registers is a prerequisite either way.
 
 Exit criterion: every control produces truthful text and JSON results across
 compliant, drift, managed, denied, malformed, and unsupported fixtures, without

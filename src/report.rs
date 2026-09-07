@@ -47,13 +47,14 @@ pub struct Report {
 impl Report {
     /// Evaluate every applicable control against this host.
     pub fn build(host: &HostFacts, profile: &str) -> Self {
+        let context = catalog::Context::live(host);
         let mut results: Vec<ControlResult> = catalog::all()
             .iter()
             .map(|control| {
                 evaluate(
                     &control.spec,
                     Mode::Enforce,
-                    &control.observe(host),
+                    &control.observe(&context),
                     host,
                     Exception::None,
                 )

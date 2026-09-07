@@ -68,6 +68,31 @@ Open a proposal containing:
 
 A community tweak list may motivate research but is not sufficient evidence.
 
+## Branch and merge
+
+`main` is protected and always green. Nothing is pushed to it directly, not even
+a one-line fix, and not by the maintainer.
+
+```bash
+git switch -c topic/short-description
+# work, commit
+git push -u origin topic/short-description
+gh pr create --fill
+```
+
+Merging requires every check to pass on all three platforms: formatting, lints,
+tests, minimum supported Rust, dependency policy, and coverage. History is
+linear, force pushes are refused, and the branch must be up to date with `main`
+before it merges.
+
+The lint and minimum-supported-Rust jobs run on Linux, Windows, and macOS
+deliberately. Platform-gated code is compiled out elsewhere, so a
+single-platform job cannot see an unused import or a dead branch behind a `cfg`
+it did not enable. That has already caught failures in both directions.
+
+Run the checks locally before pushing, but do not rely on local results alone:
+the toolchain and the host both differ from CI.
+
 ## Development checks
 
 Run:

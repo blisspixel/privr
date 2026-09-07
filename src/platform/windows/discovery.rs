@@ -19,7 +19,7 @@ const CURRENT_VERSION: &str = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion";
 
 fn read_u32(value: &'static str) -> Option<u32> {
     let target = Target::new(Hive::LocalMachine, CURRENT_VERSION, value, View::Native);
-    match registry::read(&target, crate::model::host::ManagementSource::Default) {
+    match registry::Registry::Live.read(&target, crate::model::host::ManagementSource::Default) {
         crate::model::evidence::Evidence::Present { value, .. } => value.as_u32(),
         _ => None,
     }
@@ -40,7 +40,7 @@ fn read_value_at(path: &'static str, value: &'static str) -> Readable {
     use crate::model::evidence::{Evidence, ValueKind};
 
     let target = Target::new(Hive::LocalMachine, path, value, View::Native);
-    match registry::read(&target, crate::model::host::ManagementSource::Default) {
+    match registry::Registry::Live.read(&target, crate::model::host::ManagementSource::Default) {
         Evidence::Present { value, .. } => {
             if value.kind != ValueKind::String {
                 return Readable::Unreadable;

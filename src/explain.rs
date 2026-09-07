@@ -91,7 +91,7 @@ fn remediation_label(result: &ControlResult) -> String {
 
 /// Render the full explanation for a control.
 pub fn render(control: &Control, host: &HostFacts, ui: &Ui) -> String {
-    let resolution = control.observe(host);
+    let resolution = control.observe(&catalog::Context::live(host));
     let result = evaluate(
         &control.spec,
         Mode::Enforce,

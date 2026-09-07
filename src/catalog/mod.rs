@@ -15,6 +15,37 @@ mod windows;
 use crate::engine::evaluate::{ControlSpec, Resolution};
 use crate::model::host::HostFacts;
 
+/// What a probe is allowed to look at.
+///
+/// A probe never reaches for the machine directly. It reads through this, so
+/// the same control code runs against a live host and against recorded
+/// evidence, and there is no separate implementation that can drift.
+pub struct Context<'a> {
+    pub host: &'a HostFacts,
+    #[cfg(windows)]
+    pub registry: &'a crate::platform::windows::registry::Registry,
+}
+
+impl<'a> Context<'a> {
+    /// A context reading the machine this process is running on.
+    #[cfg(windows)]
+    pub fn live(host: &'a HostFacts) -> Self {
+        use crate::platform::windows::registry::Registry;
+        // A borrow of a constant with a static lifetime, so callers do not have
+        // to hold a live registry value themselves.
+        static LIVE: Registry = Registry::Live;
+        Self {
+            host,
+            registry: &LIVE,
+        }
+    }
+
+    #[cfg(not(windows))]
+    pub fn live(host: &'a HostFacts) -> Self {
+        Self { host }
+    }
+}
+
 /// A primary source supporting a claim this control makes.
 ///
 /// The claim is recorded alongside the link, because a bare URL does not say
@@ -44,12 +75,12 @@ pub struct Control {
     pub mitigation: Option<&'static str>,
     pub sources: &'static [Source],
     /// The compiled adapter. Owns every path, value name, type, and view.
-    pub probe: fn(&HostFacts) -> Resolution,
+    pub probe: fn(&Context) -> Resolution,
 }
 
 impl Control {
-    pub fn observe(&self, host: &HostFacts) -> Resolution {
-        (self.probe)(host)
+    pub fn observe(&self, context: &Context) -> Resolution {
+        (self.probe)(context)
     }
 }
 

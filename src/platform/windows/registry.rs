@@ -124,8 +124,88 @@ fn open(target: &Target) -> windows_registry::Result<Key> {
     options.open(target.path)
 }
 
-/// Read one value, returning what was seen rather than a verdict.
-pub fn read(target: &Target, source: ManagementSource) -> Evidence {
+/// A stable key naming one target, used to index recorded evidence.
+///
+/// Includes the view, because the same path in the 32-bit and 64-bit views can
+/// hold different values and a fixture that conflated them would be testing a
+/// state that cannot occur.
+pub fn key(target: &Target) -> String {
+    let hive = match target.hive {
+        Hive::LocalMachine => "HKLM",
+        Hive::CurrentUser => "HKCU",
+    };
+    let view = match target.view {
+        View::Native => "native",
+        View::Wow6432 => "wow6432",
+        View::Wow6464 => "wow6464",
+    };
+    format!("{hive}|{}|{}#{view}", target.path, target.value)
+}
+
+/// Where registry evidence comes from.
+///
+/// Recorded evidence is the same [`Evidence`] type the live probe produces, so
+/// there is no separate fake that can drift from reality. A recording is
+/// captured from a real machine rather than written by hand.
+#[derive(Debug, Default)]
+pub enum Registry {
+    /// The registry of the machine this process is running on.
+    #[default]
+    Live,
+    /// Evidence recorded earlier, keyed by [`key`].
+    Recorded(std::collections::BTreeMap<String, Evidence>),
+}
+
+impl Registry {
+    /// Read one value, returning what was seen rather than a verdict.
+    pub fn read(&self, target: &Target, source: ManagementSource) -> Evidence {
+        match self {
+            Self::Live => read_live(target, source),
+            Self::Recorded(entries) => entries.get(&key(target)).map_or(
+                // A target the recording does not mention was not observed.
+                // That is not the same as observing that it is absent, and
+                // treating it as absent would let a fixture silently assert a
+                // documented default it never captured.
+                Evidence::Undetermined {
+                    source,
+                    reason: UndeterminedReason::NoResult,
+                },
+                |evidence| Self::retag(evidence, source),
+            ),
+        }
+    }
+
+    /// Recorded evidence keeps its shape but takes the authority the caller is
+    /// consulting it as, since precedence is a property of the control.
+    fn retag(evidence: &Evidence, source: ManagementSource) -> Evidence {
+        match evidence {
+            Evidence::Present { value, .. } => Evidence::Present {
+                source,
+                value: value.clone(),
+            },
+            Evidence::Absent { .. } => Evidence::Absent { source },
+            Evidence::Denied { reason, .. } => Evidence::Denied {
+                source,
+                reason: *reason,
+            },
+            Evidence::Malformed {
+                expected, found, ..
+            } => Evidence::Malformed {
+                source,
+                expected: expected.clone(),
+                found: found.clone(),
+            },
+            Evidence::Unsupported { .. } => Evidence::Unsupported { source },
+            Evidence::Undetermined { reason, .. } => Evidence::Undetermined {
+                source,
+                reason: *reason,
+            },
+        }
+    }
+}
+
+/// Read one value from the live registry.
+fn read_live(target: &Target, source: ManagementSource) -> Evidence {
     let key = match open(target) {
         Ok(key) => key,
         Err(error) => return evidence_for_code(win32_code(&error), source),
@@ -178,7 +258,7 @@ mod tests {
             View::Native,
         );
 
-        match read(&target, ManagementSource::Default) {
+        match Registry::Live.read(&target, ManagementSource::Default) {
             Evidence::Present { value, .. } => {
                 assert_eq!(value.kind, ValueKind::String);
                 assert!(!value.bytes.is_empty());
@@ -197,7 +277,7 @@ mod tests {
         );
 
         assert!(matches!(
-            read(&target, ManagementSource::Default),
+            Registry::Live.read(&target, ManagementSource::Default),
             Evidence::Absent { .. }
         ));
     }
@@ -212,7 +292,7 @@ mod tests {
         );
 
         assert!(matches!(
-            read(&target, ManagementSource::Default),
+            Registry::Live.read(&target, ManagementSource::Default),
             Evidence::Absent { .. }
         ));
     }
@@ -247,7 +327,7 @@ mod tests {
             // is an undetermined result: the view is addressable either way.
             assert!(
                 matches!(
-                    read(&target, ManagementSource::Default),
+                    Registry::Live.read(&target, ManagementSource::Default),
                     Evidence::Present { .. } | Evidence::Absent { .. }
                 ),
                 "view {view:?} produced an inconclusive read"

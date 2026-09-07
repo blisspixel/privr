@@ -157,6 +157,50 @@ pub enum Exception {
     Expired,
 }
 
+/// Why a configured value is not the value the platform acts on.
+///
+/// The gap between "I turned this off" and "it stopped" is the product. A tool
+/// that reads a setting and reports what it finds is answering the wrong
+/// question, because the setting can read back exactly as written while the
+/// behaviour continues.
+///
+/// These are the documented ways that happens. Each is a distinct failure with
+/// a distinct remedy, so they are typed rather than described in prose: a
+/// caller can branch on them, and a control cannot invent a new one without
+/// review.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Ineffective {
+    /// Accepted and stored, but this edition or product tier does not act on
+    /// it. The write succeeds and reads back unchanged.
+    EditionGated,
+    /// The write is discarded by a protection mechanism without an error.
+    SilentlyDiscarded,
+    /// A different setting takes precedence and re-enables the behaviour.
+    SupersededBySetting,
+    /// The platform restores its own value on update or on a schedule.
+    RevertedByPlatform,
+    /// The setting governs one path to the behaviour but not all of them.
+    ScopeIncomplete,
+    /// The write reported success but the backing store never committed it.
+    WriteNotCommitted,
+}
+
+impl Ineffective {
+    /// A short phrase naming the failure, for output that has no room for the
+    /// full explanation.
+    pub const fn summary(self) -> &'static str {
+        match self {
+            Self::EditionGated => "not honored on this edition",
+            Self::SilentlyDiscarded => "the write is discarded without an error",
+            Self::SupersededBySetting => "another setting overrides it",
+            Self::RevertedByPlatform => "the platform restores its own value",
+            Self::ScopeIncomplete => "it does not cover every path to this behaviour",
+            Self::WriteNotCommitted => "the write was reported as successful but not stored",
+        }
+    }
+}
+
 /// The complete result for one control.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ControlResult {
@@ -183,6 +227,12 @@ pub struct ControlResult {
     /// notice a caveat and add one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    /// Why what is configured is not what the platform acts on.
+    ///
+    /// Typed alongside the prose note so a caller can branch on the failure
+    /// rather than parse a sentence.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ineffective: Option<Ineffective>,
 }
 
 impl ControlResult {
@@ -294,6 +344,7 @@ mod tests {
             effect: Effect::Active,
             exception: Exception::None,
             note: None,
+            ineffective: None,
         }
     }
 

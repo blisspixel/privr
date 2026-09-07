@@ -14,7 +14,7 @@ use crate::engine::evaluate::{ControlSpec, Resolution, SemanticState, Uncertaint
 use crate::model::applicability::{Applicability, Predicate, Variant};
 use crate::model::evidence::{Evidence, Observation, RawValue};
 use crate::model::host::{HostFacts, ManagementSource, Platform};
-use crate::model::outcome::{Maturity, Remediation, Reversibility};
+use crate::model::outcome::{Ineffective, Maturity, Remediation, Reversibility};
 use crate::platform::windows::registry::{self, Hive, Target, View};
 
 fn enabled() -> SemanticState {
@@ -199,7 +199,9 @@ fn probe_diagnostics_level(host: &HostFacts) -> Resolution {
     // The gated case. What is configured and what the platform acts on differ.
     match honors_security_level(host) {
         Some(true) => Resolution::determined(state, source),
-        Some(false) => Resolution::determined(SemanticState::new("required"), source).with_note(
+        Some(false) => Resolution::determined(SemanticState::new("required"), source)
+            .configured_but_ineffective(
+            Ineffective::EditionGated,
             "A level of 0 is configured, but this Windows edition does not honor it.              Microsoft documents value 0 as applying only to Enterprise, Education, and              Server, and as equivalent to 1 elsewhere. This machine sends required              diagnostic data.",
         ),
         // Without knowing the edition we cannot say which of two different
@@ -410,6 +412,48 @@ mod tests {
             resolution.state.is_some(),
             "diagnostic level was not determined: {resolution:?}"
         );
+    }
+
+    #[test]
+    fn a_gated_level_is_classified_not_only_described() {
+        // A caller must be able to branch on the failure rather than parse a
+        // sentence, so the typed reason travels with the prose.
+        let host = platform::discover();
+        let resolution = probe_diagnostics_level(&host);
+
+        if resolution.note.is_some() {
+            assert_eq!(
+                resolution.ineffective,
+                Some(Ineffective::EditionGated),
+                "a gated value must carry its typed reason"
+            );
+        }
+        // The two always travel together, in both directions.
+        assert_eq!(
+            resolution.note.is_some(),
+            resolution.ineffective.is_some(),
+            "prose and classification disagree"
+        );
+    }
+
+    #[test]
+    fn every_ineffectiveness_reason_reads_as_a_sentence_fragment() {
+        for reason in [
+            Ineffective::EditionGated,
+            Ineffective::SilentlyDiscarded,
+            Ineffective::SupersededBySetting,
+            Ineffective::RevertedByPlatform,
+            Ineffective::ScopeIncomplete,
+            Ineffective::WriteNotCommitted,
+        ] {
+            let summary = reason.summary();
+            assert!(!summary.is_empty());
+            // Phrased so it can follow "this setting is configured, but".
+            assert!(
+                !summary.ends_with('.'),
+                "{reason:?} is a sentence not a clause"
+            );
+        }
     }
 
     #[test]

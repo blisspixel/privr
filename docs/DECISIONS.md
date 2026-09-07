@@ -705,6 +705,65 @@ and those are the hosts this product is least aimed at. The honest framing is
 that macOS coverage will be thinner than Windows coverage for the intended user,
 for reasons outside this project's control.
 
+## 21b. The gap between configured and effective is the product
+
+Status: decided. Implemented for the edition-gated case.
+
+A tool that reads a setting and reports what it finds is answering the wrong
+question. The setting can read back exactly as written while the behaviour
+continues unchanged. What an operator wants to know is not "what is stored" but
+"what is this machine actually doing", and those differ often enough that the
+difference is the product.
+
+The catalogue therefore records not only how to read a setting but under what
+conditions the platform acts on it. A control that cannot say that is not
+finished.
+
+### The documented ways a refusal fails to stick
+
+These are typed rather than described in prose, so a caller can branch on the
+failure and a control cannot invent a new category without review:
+
+| Reason | What happens |
+|---|---|
+| Edition gated | Accepted and stored, but this edition does not act on it. The write succeeds and reads back unchanged. |
+| Silently discarded | The write is rejected by a protection mechanism with no error. |
+| Superseded by setting | A different setting takes precedence and re-enables the behaviour. |
+| Reverted by platform | The platform restores its own value on update or on a schedule. |
+| Scope incomplete | The setting governs one path to the behaviour but not all of them. |
+| Write not committed | The write reported success but the backing store never stored it. |
+
+Each carries both a typed reason and a sentence. The reason is for a caller; the
+sentence is for an operator. They always travel together, and a test asserts
+they never appear apart.
+
+A result carrying one of these is reported at the state the platform actually
+acts on, not the state that is stored. The stored value is evidence, not the
+finding.
+
+### Notes are printed even on a pass
+
+The case this mechanism exists for is precisely a result that looks fine. On the
+development machine, a diagnostic level of 0 was configured on a Professional
+edition. That reads back as 0, and the machine sends required diagnostic data
+regardless. The finding is a pass against the achievable baseline, and it would
+be dishonest to print it without saying that the configured value is inert.
+
+### What this does not license
+
+The project does not characterise vendor intent. The Windows case above is
+documented by Microsoft on its own policy pages, and the value in question is
+not offered in the consumer settings interface at all: it is a policy setting
+for managed devices that third-party tooling writes on machines it was never
+meant for.
+
+The defensible criticism is narrow and worth making precisely: an interface that
+accepts a value it will not honour, returns success, and reads it back unchanged
+gives the operator no way to discover the setting is inert. That is what makes
+this class of error survive for years, and it is what `privr` exists to detect.
+State the mechanism, cite the vendor's own documentation, and let the reader
+draw the conclusion.
+
 ## 22. Control maturity is per control, and risk metadata is enforced
 
 Status: decided.

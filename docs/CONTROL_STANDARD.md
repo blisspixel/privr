@@ -66,6 +66,7 @@ Every control contains:
 | `mitigation` | How to preserve the affected capability, where a way exists |
 | `remediation_reason` | Required when remediation is `none`, from a closed set |
 | `agent` | Intents, aliases, keywords, and negative examples for routing |
+| `effectiveness` | The conditions under which the platform actually acts on this setting, and the documented ways it does not |
 
 Notes on the fields added above:
 
@@ -85,6 +86,14 @@ Notes on the fields added above:
   own control causes. See [AGENT_INTERFACE.md](AGENT_INTERFACE.md).
 - `agent` exists so a model can route a plain-English request to the right
   control from a bounded candidate set rather than memorizing identifiers.
+- `effectiveness` is what separates this catalogue from a list of registry
+  paths. A control must state under what conditions the platform acts on the
+  setting, because a value can read back exactly as written while the behaviour
+  continues. Where a known failure applies, it is recorded with a typed reason
+  from the closed set (edition gated, silently discarded, superseded by another
+  setting, reverted by the platform, incomplete scope, write not committed) and
+  a sentence the operator can read. A control that cannot say when its setting
+  takes effect is not finished, whatever else it carries.
 
 ## Semantic values
 

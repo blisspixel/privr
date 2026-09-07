@@ -14,8 +14,8 @@ use crate::model::applicability::{Applicability, Applies};
 use crate::model::evidence::Observation;
 use crate::model::host::{HostFacts, ManagementSource, OsVersion};
 use crate::model::outcome::{
-    ControlResult, Effect, Exception, Maturity, Outcome, Remediation, RemediationReason,
-    Reversibility, Support,
+    ControlResult, Effect, Exception, Ineffective, Maturity, Outcome, Remediation,
+    RemediationReason, Reversibility, Support,
 };
 
 /// A semantic state, such as `disabled` or `required_only`.
@@ -67,6 +67,8 @@ pub struct Resolution {
     pub honored: bool,
     /// When a verified change would take effect.
     pub effect: Effect,
+    /// Why what is configured is not what the platform acts on.
+    pub ineffective: Option<Ineffective>,
     /// A fact about this reading the operator must be told.
     ///
     /// Used where the state is determined but a naive reading of the
@@ -85,12 +87,21 @@ impl Resolution {
             honored: true,
             effect: Effect::Active,
             note: None,
+            ineffective: None,
         }
     }
 
-    /// Attach a fact the operator must be told alongside this reading.
+    /// Record that the configured value is not the value in effect.
+    ///
+    /// Takes both the typed reason and the sentence, because a caller needs to
+    /// branch on one and an operator needs to read the other.
     #[must_use]
-    pub fn with_note(mut self, note: impl Into<String>) -> Self {
+    pub fn configured_but_ineffective(
+        mut self,
+        reason: Ineffective,
+        note: impl Into<String>,
+    ) -> Self {
+        self.ineffective = Some(reason);
         self.note = Some(note.into());
         self
     }
@@ -103,6 +114,7 @@ impl Resolution {
             honored: true,
             effect: Effect::Active,
             note: None,
+            ineffective: None,
         }
     }
 
@@ -115,6 +127,7 @@ impl Resolution {
             honored: false,
             effect: Effect::Active,
             note: None,
+            ineffective: None,
         }
     }
 
@@ -149,6 +162,7 @@ impl Resolution {
                         honored: observation.honored_by_platform,
                         effect: Effect::Active,
                         note: None,
+                        ineffective: None,
                     },
                     // A value we cannot interpret is malformed evidence, never
                     // a fallback to the documented default.
@@ -161,6 +175,7 @@ impl Resolution {
                     honored: observation.honored_by_platform,
                     effect: Effect::Active,
                     note: None,
+                    ineffective: None,
                 },
                 Evidence::Denied { source, .. } => Self::uncertain(Uncertainty::Denied, *source),
                 Evidence::Malformed { source, .. } => {
@@ -240,6 +255,7 @@ pub fn evaluate(
             effect: resolution.effect,
             exception,
             note: resolution.note.clone(),
+            ineffective: resolution.ineffective,
         };
 
     // A control the profile does not select is reported, not omitted. Silence

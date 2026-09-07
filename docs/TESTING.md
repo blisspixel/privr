@@ -32,6 +32,27 @@ The metrics that actually track confidence are:
 - false-pass guard completeness, meaning every state that must not become `pass`
   has a test asserting it does not.
 
+## What exists today
+
+Implemented, and not merely designed:
+
+- the evaluation engine as a pure function, with every false-pass rule under a
+  test named after the failure it prevents;
+- probes reading through a context, so the same control code runs against a live
+  host and against recorded evidence of the same type;
+- replay coverage for the paths a live machine cannot be made to produce on
+  demand, namely denied reads, malformed values, and specific edition
+  combinations;
+- a suite that does not depend on the machine it runs on;
+- lints and the minimum-supported-Rust check on all three platforms, which has
+  already caught failures in both directions.
+
+Not yet implemented, and described below as the target: fixtures as files with
+provenance and redaction rules, capture from a real machine, snapshot testing,
+property and fuzz testing, virtual machine integration, adversarial and fault
+injection, and the enforced network isolation layers beyond the dependency
+policy.
+
 ## Structure
 
 The evaluation engine is a pure function from catalogue, policy, host facts, and
@@ -84,6 +105,11 @@ The core evaluator and planner should run without touching the host. Test:
 - current-state conflict before apply and before rollback.
 
 ### Fixture format
+
+Recordings currently live in test code as values rather than as files. The file
+format below is the target, and the shape of what is recorded already matches
+it: the same `Evidence` type the live reader produces, keyed by a target that
+includes the registry view.
 
 One file per state, carrying:
 

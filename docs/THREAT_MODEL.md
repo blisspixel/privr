@@ -67,10 +67,38 @@ Future downloaded metadata is untrusted until its signature, digest, schema,
 version, and operation constraints are verified. Normal operation does not
 perform this update automatically.
 
+### Agent harness to `privr`
+
+An agent driving `privr` is an untrusted caller, and it is untrusted in an
+unusual way: its behavior is influenced by text it reads, which may include a
+web page, a document, a repository, or a message from a third party. A caller
+that can be argued with is not a caller whose intent can be relied on.
+
+The boundary is therefore drawn so that persuasion cannot cross it:
+
+- Mutating tools are absent from tool discovery unless the server is explicitly
+  started to expose them. A tool that is not present cannot be invoked, cannot be
+  described persuasively, and cannot appear in injected text as an available
+  capability.
+- The confirmation token required to apply cannot be obtained through any tool
+  call. It originates from a terminal on the machine being changed.
+- Approval is per section and per named control. There is no blanket approval
+  reachable through the agent interface.
+- A caller may select from an enumerated plan. It may never synthesize a change,
+  supply a target, or widen a selection.
+
+The agent is treated as an assistant to the operator, never as a substitute for
+the operator's consent.
+
 ### Tool output to terminal or CI
 
-Reports may be copied, uploaded, archived, or viewed by other users. Output must
-be safe without assuming it remains local.
+Reports may be copied, uploaded, archived, forwarded to a remote model, or viewed
+by other users. Output must be safe without assuming it remains local.
+
+Because a report carries no stable machine identifier, this boundary is closed by
+construction rather than by warning people not to share. A privacy tool whose
+output is a detailed profile of the machine would defeat its own purpose the
+moment a user piped it to a hosted service.
 
 ## Threat actors
 
@@ -81,12 +109,62 @@ be safe without assuming it remains local.
 - externally managed policy conflicting with local intent;
 - compromised administrator or kernel;
 - accidental maintainer error in a control mapping;
-- curious party reading reports, journals, or process arguments.
+- curious party reading reports, journals, or process arguments;
+- text that reaches an agent driving `privr` and attempts to induce a change the
+  operator did not ask for;
+- an over-eager or misaligned caller that would approve on the operator's behalf
+  if the interface permitted it.
 
 A compromised administrator or kernel is outside the protection boundary, but
 the design should still minimize stored sensitive material.
 
 ## Threats and mitigations
+
+### Agent-mediated change the operator did not authorize
+
+Threat: text an agent reads, such as a web page, document, repository, or
+message, induces it to change privacy settings, approve a security tradeoff,
+erase local data, or roll back a transaction the operator wanted kept.
+
+Mitigations:
+
+- mutating tools are absent from tool discovery unless explicitly enabled, so in
+  the default configuration there is no capability to induce;
+- the confirmation token cannot be obtained through any tool call and originates
+  from a terminal on the machine being changed;
+- approval is per section and per named control, with no blanket grant reachable
+  through the interface;
+- security tradeoffs and irreversible erasure require the specific control to be
+  named and are never reachable from a general confirmation;
+- a caller selects from an enumerated plan and cannot supply a target, widen a
+  selection, or synthesize an operation;
+- the plan is rebuilt from fresh state at apply time, so an argument made earlier
+  in a conversation is not authorization later.
+
+The design assumption is that the caller's judgment may be compromised. Nothing
+in the safety model depends on the caller behaving well, on it following
+instructions in a tool description, or on it correctly declining.
+
+### Misreporting through caller-side summarization
+
+Threat: an agent summarizes a report and states that a machine is compliant when
+results were unknown, denied, not evaluated, or truncated.
+
+Mitigations:
+
+- unknown, denied, unsupported, not-selected, and not-checked never appear as
+  passes in the data being summarized;
+- aggregates exclude what could not be evaluated, so a summary cannot improve
+  because visibility decreased;
+- truncation is always reported explicitly rather than silently omitting results;
+- `privr` supplies the sentence that must be stated when a result is incomplete,
+  rather than relying on the caller to add a caveat;
+- reports are deterministic and ordered, so a claim can be checked against a
+  rerun.
+
+This threat cannot be fully mitigated, because `privr` does not control what a
+caller says. It is reduced by making the honest reading the easy one and by never
+emitting a value that would make an optimistic summary defensible.
 
 ### Arbitrary code execution through policy data
 
@@ -249,6 +327,39 @@ Mitigations:
 - manual recovery instructions generated from the journal;
 - fault injection after every transaction stage.
 
+### A setting reads as applied but has no effect
+
+Threat: `privr` reports a machine as compliant when the underlying behavior is
+unchanged. This is the project's central threat, because it produces confident
+false assurance rather than a visible failure. The operator stops looking.
+
+It is not hypothetical. Four documented instances, on three platforms:
+
+- A Windows policy value written on an edition that does not honor it. The write
+  succeeds, the value reads back as written, and the vendor documents the
+  effective behavior as unchanged. Every surveyed tool reports a pass.
+- A macOS check that verifies an enforcing configuration profile is installed
+  rather than verifying the setting, which fails a correctly configured
+  unmanaged machine and passes on payload presence alone.
+- A Linux settings write performed as root against a user's session, which exits
+  zero while the user's value is untouched.
+- A configuration file setting overridden per component elsewhere, so a check
+  that reads only the main file passes on a stock system.
+
+Mitigations:
+
+- effective state is what is verified, never the presence of an enforcement
+  mechanism;
+- edition, build, and applicability are resolved per control, and a value that
+  cannot take effect is reported as `not_applicable`, never as `pass`;
+- every write is verified by re-reading authoritative effective state, out of
+  band where the write interface can report success without committing;
+- precedence is resolved per control rather than by one universal rule;
+- controls bind the value the system actually reads, not the name shown in a
+  policy interface;
+- no adapter assumes a polarity convention;
+- a mandatory fixture per control exercises the beyond-the-ceiling case.
+
 ### Privacy change weakens security
 
 Threat: reducing cloud reporting also reduces malware analysis, reputation,
@@ -257,8 +368,10 @@ updates, encryption recovery, logging, or incident response.
 Mitigations:
 
 - security-tradeoff metadata for every control;
-- default profile preserves core security;
-- separate named risk acknowledgement;
+- **no profile in the built-in ladder contains a control that reduces security**,
+  so escalating privacy cannot silently escalate exposure;
+- security tradeoffs form a separately named opt-in set, selected deliberately;
+- separate per-control risk acknowledgement that cannot be granted for a class;
 - no blanket service or scheduled-task removal;
 - local diagnostics distinguished from vendor uploads;
 - audit and remediation recommendations reviewed separately.
@@ -271,11 +384,15 @@ changes policy precedence, or stops honoring an interface.
 Mitigations:
 
 - version and edition applicability;
-- last-reviewed metadata;
+- last-reviewed date and last-reviewed platform range on every control;
+- **automatic staleness degradation**: a control past its reviewed range loses
+  `verified` support, can no longer report `pass`, and is forced to
+  `audit_only`, so a neglected catalogue becomes cautious rather than wrong;
 - current and prior release fixtures;
 - `unknown` outcome or `unsupported` support on unrecognized builds;
 - no optimistic fallback from a missing backing value;
-- catalogue deprecation lifecycle.
+- catalogue deprecation lifecycle that names retired control IDs so stored
+  journals remain decodable.
 
 ### Catalogue or release supply-chain compromise
 
@@ -335,7 +452,20 @@ The design and review process must reject:
 - a Windows control that writes undocumented state because a public tweak script
   does so;
 - an update mechanism that downloads and executes a replacement script;
-- a `pass` result based only on an unreadable or undocumented absent value.
+- a `pass` result based only on an unreadable or undocumented absent value;
+- a `pass` result derived from the presence of an enforcing policy object or
+  management payload rather than from the setting itself;
+- a mutating agent tool exposed by default, or a dry-run flag on a mutating tool
+  where a separate read tool belongs;
+- a confirmation an agent can obtain without the operator touching the machine;
+- an aggregate that improves because controls became unreadable;
+- an installer that requests elevation or changes a setting;
+- a scheduled maintenance job that commits catalogue content, alters a risk or
+  reversibility class, or edits rationale or warning text without review;
+- an irreversible action reachable from a blanket confirmation flag, or one that
+  omits a journal entry recording that rollback is unavailable;
+- deleting a file directly where a documented vendor erasure mechanism exists,
+  or staging deletions to a location that records what was considered sensitive.
 
 ## Security testing
 
@@ -351,7 +481,16 @@ The design and review process must reject:
 - managed-device conflict fixtures;
 - update-signature and rollback-attack tests;
 - dependency and release provenance checks;
-- proof that core workflows make no network requests.
+- proof that core workflows make no network requests, enforced by dependency
+  policy, lint, import-table assertion on linked library names, and runtime
+  isolation rather than asserted;
+- agent-interface tests proving mutating tools are absent from discovery by
+  default and that no tool call can yield a confirmation token;
+- false-pass guards asserting that every state which must not be reported as
+  compliant is not, including edition-gated values, enforcement-mechanism-only
+  reads, and writes that report success without committing;
+- section-granular apply and rollback tests, including an intentional stop
+  partway proving a success result and a clean journal.
 
 The full platform and fault-injection matrix is in [TESTING.md](TESTING.md).
 
@@ -367,6 +506,16 @@ The full platform and fault-injection matrix is in [TESTING.md](TESTING.md).
   operating-system side effect.
 - A compliant configuration does not prove that every installed application is
   private.
+- Configuring a machine for minimal sharing does not make it unobserved. Platform
+  diagnostic schemas can include the current consent state and the authority that
+  set it, so the act of hardening is itself reportable.
+- Required platform traffic continues. Updates, certificate services, time
+  synchronization, and licensing are not optional.
+- `privr` cannot constrain what a calling agent says about a report. It can only
+  ensure the underlying data does not make an optimistic summary defensible.
+- Sustained correctness depends on ongoing re-verification. Staleness degradation
+  bounds the damage when that lapses, but a degraded catalogue is a smaller tool,
+  not an equally useful one.
 
 These limitations must remain visible in product documentation and output.
 

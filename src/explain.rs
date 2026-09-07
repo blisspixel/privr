@@ -190,6 +190,8 @@ pub fn render(control: &Control, host: &HostFacts, ui: &Ui) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Only the platform-gated tests below observe a real host.
+    #[cfg(windows)]
     use crate::platform;
 
     #[cfg(windows)]

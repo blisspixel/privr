@@ -48,12 +48,28 @@ This user wants:
 - local history and rollback;
 - the ability to document intentional exceptions.
 
-### Later users
+### Who this is not for
 
-Small teams and administrators may eventually use `privr` as a local compliance
-signal. Fleet management is not an MVP objective. `privr` should integrate with
-existing management tools rather than compete with Group Policy, MDM, or general
-configuration management.
+`privr` is not a device-management product and does not compete with one. No
+fleet console, no remote administration, no compliance attestation, no
+enrollment. That is a different product with a different buyer, and building
+toward it would distort every other decision here.
+
+The assumed host is a machine the user owns and administers. Where an external
+authority does govern a setting, `privr` reports whether its effective value
+passes or drifts and stops there. It does not reapply, does not fight a policy
+that will simply return, and does not present a policy fight as remediation.
+
+Some controls happen to serve a managed context too, because the underlying
+setting is the same one either way. That is a property of the catalogue rather
+than a product direction, and it never justifies fleet features.
+
+One consequence worth stating plainly rather than hiding: unmanaged macOS is
+largely a guided-review product, and unmanaged is exactly the target here.
+Managed Macs are where verification is most possible, and those are the hosts
+this product is least aimed at. macOS coverage will therefore be thinner than
+Windows coverage for the intended user, for reasons outside this project's
+control.
 
 ## Jobs to be done
 

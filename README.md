@@ -7,9 +7,13 @@ data-sharing settings are actually in effect, explains the evidence and the
 tradeoffs, applies a policy in reviewable steps, and can reverse what it
 changed.
 
-It is built for people who run sensitive work on their own machines, and for the
-agent harnesses they increasingly work through. Every command produces stable
-text and versioned JSON, and nothing requires network access.
+It is built for individuals and power users on machines they own: developers,
+security-minded people, anyone running sensitive work or local models on their
+own hardware. It is not a device-management product and does not compete with
+one.
+
+Every command produces stable text and versioned JSON, works offline, and is
+designed to be driven by an agent harness as readily as by a person.
 
 ## Status
 

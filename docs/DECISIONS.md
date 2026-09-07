@@ -632,6 +632,42 @@ Constraints that keep this from becoming scope creep:
   transaction journal. `privr` did not do it and must not imply that it can
   reverse it.
 
+## 21a. The user is a person on their own machine
+
+Status: decided.
+
+`privr` is for individuals and power users on machines they own and administer.
+Developers, security-minded people, anyone running sensitive work or local
+models on their own hardware.
+
+It is not a device-management product and does not compete with one. No fleet
+console, no remote administration, no compliance attestation, no enrollment.
+Those are a different product with a different buyer, and building toward them
+would distort every decision in this document.
+
+Consequences that follow, and that resolve real design questions:
+
+- **The default host is unmanaged.** Host-level management detection is
+  therefore not load-bearing, which is why reporting it as unknown costs almost
+  nothing. What matters is per-control: whether this specific setting is governed
+  by an authority, observed directly rather than inferred about the host.
+- **Managed hosts are supported by being honest about them, not by managing
+  them.** Where an external authority governs a value, `privr` reports whether
+  its effective value passes or drifts and stops there. It does not reapply, does
+  not fight, and does not pretend a policy fight is remediation.
+- **Some controls serve both contexts,** because the underlying setting is the
+  same one either way. That is a happy accident of the catalogue, not a product
+  direction, and it never justifies fleet features.
+- **Output is designed for one machine and one person.** No aggregation across
+  hosts, no scoring for comparison, no dashboard.
+
+This makes one platform limitation more painful and it should be stated rather
+than hidden: unmanaged macOS is largely a guided-review product, and unmanaged is
+exactly the target. Managed Macs are where verification is genuinely possible,
+and those are the hosts this product is least aimed at. The honest framing is
+that macOS coverage will be thinner than Windows coverage for the intended user,
+for reasons outside this project's control.
+
 ## 22. Control maturity is per control, and risk metadata is enforced
 
 Status: decided.

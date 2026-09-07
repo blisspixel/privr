@@ -68,11 +68,18 @@ jobs:
 
   msrv:
     name: Minimum supported Rust
-    runs-on: ubuntu-latest
+    # Runs on every platform, because target-gated dependencies carry their own
+    # toolchain floor. Checking only one platform would let a Windows-only crate
+    # raise the real minimum without this job noticing.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         with:
-          toolchain: 1.85.1
+          toolchain: 1.95.0
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-      - run: cargo check --workspace --all-features --locked
+      - run: cargo check --workspace --all-targets --all-features --locked

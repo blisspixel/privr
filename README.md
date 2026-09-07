@@ -17,17 +17,18 @@ designed to be driven by an agent harness as readily as by a person.
 
 ## Status
 
-This repository is a researched concept with a compiling Rust skeleton. It does
-not yet inspect or change any operating-system setting.
+This repository is a researched concept under active construction. **No control
+is wired to the command line yet**, so every command still returns exit code `3`
+and sets `complete: false`. Until real controls ship, the tool must never imply
+that a machine passed.
 
-Every command returns exit code `3` and sets `complete: false`. That is
-deliberate. Until real platform probes exist, the tool must never imply that a
-machine passed.
+What works today, under test: the evaluation engine, the applicability model,
+and the Windows adapter. Discovery reads real host facts, and registry probing
+preserves exact value types and bytes while keeping absent, denied, and
+malformed states apart.
 
-What exists today is the design: the product and CLI contract, a Windows-first
-control candidate matrix, macOS and Linux support boundaries, a typed and
-allowlisted privilege architecture, exact rollback and drift semantics, and
-cross-platform CI with dependency, MSRV, and coverage gates.
+What is designed but not built: the control catalogue, remediation, rollback,
+the agent server, and the macOS and Linux adapters.
 
 See [ROADMAP.md](ROADMAP.md) for what ships first, and
 [docs/DECISIONS.md](docs/DECISIONS.md) for the decisions that constrain it.
@@ -80,8 +81,8 @@ cited, version-aware, and honest about what it does not know.
 
 ## Install
 
-Building from source is currently the only path, and the binary does not yet do
-anything useful. Rust 1.85 or later:
+Building from source is currently the only path, and the binary does not yet
+report anything about your machine. Rust 1.95 or later:
 
 ```bash
 git clone https://github.com/blisspixel/privr

@@ -9,6 +9,10 @@
 //! format they will name a compiled adapter and a compiled target rather than
 //! carrying either, so the ceiling this module establishes does not move.
 
+#[cfg(target_os = "linux")]
+mod linux;
+#[cfg(target_os = "macos")]
+mod macos;
 #[cfg(windows)]
 mod windows;
 
@@ -58,6 +62,19 @@ pub struct Source {
     pub reviewed: &'static str,
 }
 
+use crate::model::evidence::RawValue;
+
+/// An applied mutation operation for a control.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AppliedOp {
+    pub target_key: String,
+    pub preimage: Option<RawValue>,
+    pub postimage: RawValue,
+}
+
+pub type ApplyFn = fn(&Context) -> Result<AppliedOp, String>;
+pub type RollbackFn = fn(&Context, &Option<RawValue>) -> Result<(), String>;
+
 /// A compiled control definition.
 pub struct Control {
     pub spec: ControlSpec,
@@ -76,11 +93,27 @@ pub struct Control {
     pub sources: &'static [Source],
     /// The compiled adapter. Owns every path, value name, type, and view.
     pub probe: fn(&Context) -> Resolution,
+    /// Verified apply implementation, if available.
+    pub apply: Option<ApplyFn>,
+    /// Conflict-aware rollback implementation, if available.
+    pub rollback: Option<RollbackFn>,
 }
 
 impl Control {
     pub fn observe(&self, context: &Context) -> Resolution {
         (self.probe)(context)
+    }
+
+    pub fn apply(&self, context: &Context) -> Option<Result<AppliedOp, String>> {
+        self.apply.map(|f| f(context))
+    }
+
+    pub fn rollback(
+        &self,
+        context: &Context,
+        preimage: &Option<RawValue>,
+    ) -> Option<Result<(), String>> {
+        self.rollback.map(|f| f(context, preimage))
     }
 }
 
@@ -90,7 +123,15 @@ pub fn all() -> Vec<Control> {
     {
         windows::controls()
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    {
+        linux::controls()
+    }
+    #[cfg(target_os = "macos")]
+    {
+        macos::controls()
+    }
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
     {
         Vec::new()
     }

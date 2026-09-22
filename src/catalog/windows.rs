@@ -253,8 +253,16 @@ fn diagnostics_level() -> Control {
             },
         ],
         probe: probe_diagnostics_level,
+        apply: None,
+        rollback: None,
     }
 }
+
+const ADVERTISING_TOGGLE: Toggle = Toggle {
+    target: ADVERTISING_USER,
+    private_value: 0,
+    absent_means: "enabled",
+};
 
 fn advertising_id() -> Control {
     Control {
@@ -269,10 +277,8 @@ fn advertising_id() -> Control {
             desired: disabled(),
             reversibility: Reversibility::Exact,
             maturity: Maturity::Automated,
-            // Read-only for now. Remediation arrives with the transaction
-            // journal, not before.
             verified_through: None,
-            remediation: Remediation::AuditOnly,
+            remediation: Remediation::Automatic,
             remediation_reason: None,
         },
         title: "Advertising identifier",
@@ -292,6 +298,8 @@ fn advertising_id() -> Control {
             reviewed: "2026-09-07",
         }],
         probe: probe_advertising_id,
+        apply: Some(|ctx| ADVERTISING_TOGGLE.apply(ctx)),
+        rollback: Some(|ctx, pre| ADVERTISING_TOGGLE.rollback(ctx, pre)),
     }
 }
 
@@ -337,6 +345,290 @@ impl Toggle {
             _ => Resolution::uncertain(Uncertainty::Undetermined, ManagementSource::User),
         }
     }
+
+    fn apply(&self, ctx: &Context) -> Result<super::AppliedOp, String> {
+        let current = ctx.registry.read(&self.target, ManagementSource::User);
+        let preimage = match current {
+            Evidence::Present { value, .. } => {
+                if value.as_u32() == Some(self.private_value) {
+                    return Err("Target is already in desired state".to_owned());
+                }
+                Some(value)
+            }
+            Evidence::Absent { .. } => {
+                if self.absent_means == "disabled" {
+                    return Err("Target is already in desired state (absent default)".to_owned());
+                }
+                None
+            }
+            Evidence::Denied { .. } => return Err("Permission denied reading target".to_owned()),
+            _ => return Err("Target state undetermined".to_owned()),
+        };
+        let postimage = RawValue::u32(self.private_value);
+        if let Err(code) = crate::platform::windows::registry::write_raw(&self.target, &postimage) {
+            return Err(format!("Registry write failed with error code {code}"));
+        }
+        let verification = self.probe(ctx);
+        if verification.state != Some(disabled()) {
+            return Err("Verification failed after writing setting".to_owned());
+        }
+        Ok(super::AppliedOp {
+            target_key: crate::platform::windows::registry::key(&self.target),
+            preimage,
+            postimage,
+        })
+    }
+
+    fn rollback(&self, ctx: &Context, preimage: &Option<RawValue>) -> Result<(), String> {
+        let current = ctx.registry.read(&self.target, ManagementSource::User);
+        let current_matches = match current {
+            Evidence::Present { value, .. } => value.as_u32() == Some(self.private_value),
+            _ => false,
+        };
+        if !current_matches {
+            return Err("Conflict detected: current value has changed externally".to_owned());
+        }
+        match preimage {
+            Some(raw) => {
+                if let Err(code) = crate::platform::windows::registry::write_raw(&self.target, raw)
+                {
+                    return Err(format!("Rollback write failed with code {code}"));
+                }
+            }
+            None => {
+                if let Err(code) = crate::platform::windows::registry::delete_value(&self.target) {
+                    return Err(format!("Rollback deletion failed with code {code}"));
+                }
+            }
+        }
+        let restored = ctx.registry.read(&self.target, ManagementSource::User);
+        let verified = match (preimage, &restored) {
+            (Some(expected), Evidence::Present { value, .. }) => value == expected,
+            (None, Evidence::Absent { .. }) => true,
+            _ => false,
+        };
+        if !verified {
+            return Err("Verification failed after restoring setting during rollback".to_owned());
+        }
+        Ok(())
+    }
+}
+
+/// A setting that is a string value meaning on or off (e.g. Deny vs Allow).
+struct StringToggle {
+    target: Target,
+    /// The stored string that means the collection or capability is off.
+    private_value: &'static str,
+    /// The state that applies when no value is stored.
+    absent_means: &'static str,
+}
+
+impl StringToggle {
+    fn probe(&self, ctx: &Context) -> Resolution {
+        match ctx.registry.read(&self.target, ManagementSource::User) {
+            Evidence::Present { value, .. } => match value.as_str_lossy() {
+                Some(stored) => Resolution::determined(
+                    if stored.eq_ignore_ascii_case(self.private_value) {
+                        disabled()
+                    } else {
+                        enabled()
+                    },
+                    ManagementSource::User,
+                ),
+                None => Resolution::uncertain(Uncertainty::Malformed, ManagementSource::User),
+            },
+            Evidence::Absent { .. } => Resolution::determined(
+                SemanticState::new(self.absent_means),
+                ManagementSource::Default,
+            ),
+            Evidence::Denied { .. } => {
+                Resolution::uncertain(Uncertainty::Denied, ManagementSource::User)
+            }
+            _ => Resolution::uncertain(Uncertainty::Undetermined, ManagementSource::User),
+        }
+    }
+
+    fn apply(&self, ctx: &Context) -> Result<super::AppliedOp, String> {
+        let current = ctx.registry.read(&self.target, ManagementSource::User);
+        let preimage = match current {
+            Evidence::Present { value, .. } => {
+                if value
+                    .as_str_lossy()
+                    .as_deref()
+                    .map(|s| s.eq_ignore_ascii_case(self.private_value))
+                    == Some(true)
+                {
+                    return Err("Target is already in desired state".to_owned());
+                }
+                Some(value)
+            }
+            Evidence::Absent { .. } => {
+                if self.absent_means == "disabled" {
+                    return Err("Target is already in desired state (absent default)".to_owned());
+                }
+                None
+            }
+            Evidence::Denied { .. } => return Err("Permission denied reading target".to_owned()),
+            _ => return Err("Target state undetermined".to_owned()),
+        };
+        let postimage = RawValue::string_utf16(self.private_value);
+        if let Err(code) = crate::platform::windows::registry::write_raw(&self.target, &postimage) {
+            return Err(format!("Registry write failed with error code {code}"));
+        }
+        let verification = self.probe(ctx);
+        if verification.state != Some(disabled()) {
+            return Err("Verification failed after writing setting".to_owned());
+        }
+        Ok(super::AppliedOp {
+            target_key: crate::platform::windows::registry::key(&self.target),
+            preimage,
+            postimage,
+        })
+    }
+
+    fn rollback(&self, ctx: &Context, preimage: &Option<RawValue>) -> Result<(), String> {
+        let current = ctx.registry.read(&self.target, ManagementSource::User);
+        let current_matches = match current {
+            Evidence::Present { value, .. } => {
+                value
+                    .as_str_lossy()
+                    .as_deref()
+                    .map(|s| s.eq_ignore_ascii_case(self.private_value))
+                    == Some(true)
+            }
+            _ => false,
+        };
+        if !current_matches {
+            return Err("Conflict detected: current value has changed externally".to_owned());
+        }
+        match preimage {
+            Some(raw) => {
+                if let Err(code) = crate::platform::windows::registry::write_raw(&self.target, raw)
+                {
+                    return Err(format!("Rollback write failed with code {code}"));
+                }
+            }
+            None => {
+                if let Err(code) = crate::platform::windows::registry::delete_value(&self.target) {
+                    return Err(format!("Rollback deletion failed with code {code}"));
+                }
+            }
+        }
+        let restored = ctx.registry.read(&self.target, ManagementSource::User);
+        let verified = match (preimage, &restored) {
+            (Some(expected), Evidence::Present { value, .. }) => value == expected,
+            (None, Evidence::Absent { .. }) => true,
+            _ => false,
+        };
+        if !verified {
+            return Err("Verification failed after restoring setting during rollback".to_owned());
+        }
+        Ok(())
+    }
+}
+
+const FEEDBACK_FREQUENCY: Toggle = Toggle {
+    target: Target::new(
+        Hive::CurrentUser,
+        r"Software\Microsoft\Siuf\Rules",
+        "NumberOfSIUFInPeriod",
+        View::Native,
+    ),
+    private_value: 0,
+    absent_means: "enabled",
+};
+
+const WIFI_DATA_ACCESS: StringToggle = StringToggle {
+    target: Target::new(
+        Hive::CurrentUser,
+        r"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\wifiData",
+        "Value",
+        View::Native,
+    ),
+    private_value: "Deny",
+    absent_means: "enabled",
+};
+
+const ACCOUNT_INFO_ACCESS: StringToggle = StringToggle {
+    target: Target::new(
+        Hive::CurrentUser,
+        r"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\userAccountInformation",
+        "Value",
+        View::Native,
+    ),
+    private_value: "Deny",
+    absent_means: "enabled",
+};
+
+const APP_ACTIVITY_ACCESS: StringToggle = StringToggle {
+    target: Target::new(
+        Hive::CurrentUser,
+        r"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\activity",
+        "Value",
+        View::Native,
+    ),
+    private_value: "Deny",
+    absent_means: "enabled",
+};
+
+const LLMNR_MULTICAST: Target = Target::new(
+    Hive::LocalMachine,
+    r"SOFTWARE\Policies\Microsoft\Windows NT\DNSClient",
+    "EnableMulticast",
+    View::Native,
+);
+
+fn probe_llmnr(ctx: &Context) -> Resolution {
+    let policy = ctx
+        .registry
+        .read(&LLMNR_MULTICAST, ManagementSource::LocalPolicy);
+    match policy {
+        Evidence::Present { value, .. } => match value.as_u32() {
+            Some(0) => Resolution::determined(disabled(), ManagementSource::LocalPolicy),
+            Some(_) => Resolution::determined(enabled(), ManagementSource::LocalPolicy),
+            None => Resolution::uncertain(Uncertainty::Malformed, ManagementSource::LocalPolicy),
+        },
+        Evidence::Absent { .. } => Resolution::determined(enabled(), ManagementSource::Default),
+        Evidence::Denied { .. } => {
+            Resolution::uncertain(Uncertainty::Denied, ManagementSource::LocalPolicy)
+        }
+        _ => Resolution::uncertain(Uncertainty::Undetermined, ManagementSource::LocalPolicy),
+    }
+}
+
+fn security_llmnr() -> Control {
+    Control {
+        spec: ControlSpec {
+            id: "windows.security.llmnr".to_owned(),
+            title: "Link-Local Multicast Name Resolution".to_owned(),
+            section: "security".to_owned(),
+            applicability: Applicability::new(vec![Variant::new(
+                "windows",
+                vec![Predicate::Platform(Platform::Windows)],
+            )]),
+            desired: disabled(),
+            reversibility: Reversibility::Exact,
+            maturity: Maturity::Automated,
+            verified_through: None,
+            remediation: Remediation::AuditOnly,
+            remediation_reason: None,
+        },
+        title: "Link-Local Multicast Name Resolution",
+        summary: "Windows broadcasts name queries in plaintext across local networks when DNS fails.",
+        rationale: "LLMNR multicasts queries over UDP port 5355 without encryption or authentication. Attackers on the local network can spoof answers and harvest NetNTLM credentials.",
+        tradeoff: Some("Fallback local name resolution without a DNS server is unavailable."),
+        mitigation: Some(
+            "Standard unicast DNS resolution through routers or DNS servers continues to function normally.",
+        ),
+        sources: &[Source {
+            url: DNS_CLIENT_CSP,
+            claim: "Documents multicast DNS resolution policy.",
+            reviewed: "2026-09-21",
+        }],
+        probe: probe_llmnr,
+        apply: None,
+        rollback: None,
+    }
 }
 
 const TAILORED_EXPERIENCES: Toggle = Toggle {
@@ -361,6 +653,17 @@ const CLOUD_CLIPBOARD: Toggle = Toggle {
     absent_means: "disabled",
 };
 
+const CLOUD_CLIPBOARD_SYNC: Toggle = Toggle {
+    target: Target::new(
+        Hive::CurrentUser,
+        r"Software\Microsoft\Clipboard",
+        "AllowCrossDeviceClipboard",
+        View::Native,
+    ),
+    private_value: 0,
+    absent_means: "enabled",
+};
+
 const WEB_SEARCH: Toggle = Toggle {
     target: Target::new(
         Hive::CurrentUser,
@@ -377,6 +680,39 @@ const SUGGESTED_APPS: Toggle = Toggle {
         Hive::CurrentUser,
         r"Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager",
         "SilentInstalledAppsEnabled",
+        View::Native,
+    ),
+    private_value: 0,
+    absent_means: "enabled",
+};
+
+const START_SUGGESTIONS: Toggle = Toggle {
+    target: Target::new(
+        Hive::CurrentUser,
+        r"Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager",
+        "SubscribedContent-338389Enabled",
+        View::Native,
+    ),
+    private_value: 0,
+    absent_means: "enabled",
+};
+
+const SYSTEM_SUGGESTIONS: Toggle = Toggle {
+    target: Target::new(
+        Hive::CurrentUser,
+        r"Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager",
+        "SystemPaneSuggestionsEnabled",
+        View::Native,
+    ),
+    private_value: 0,
+    absent_means: "enabled",
+};
+
+const DEVICE_SEARCH_HISTORY: Toggle = Toggle {
+    target: Target::new(
+        Hive::CurrentUser,
+        r"Software\Microsoft\Windows\CurrentVersion\SearchSettings",
+        "IsDeviceSearchHistoryEnabled",
         View::Native,
     ),
     private_value: 0,
@@ -447,6 +783,8 @@ fn toggle_control(
     mitigation: Option<&'static str>,
     sources: &'static [Source],
     probe: fn(&Context) -> Resolution,
+    apply: Option<super::ApplyFn>,
+    rollback: Option<super::RollbackFn>,
 ) -> Control {
     Control {
         spec: ControlSpec {
@@ -461,7 +799,11 @@ fn toggle_control(
             reversibility: Reversibility::Exact,
             maturity: Maturity::Automated,
             verified_through: None,
-            remediation: Remediation::AuditOnly,
+            remediation: if apply.is_some() {
+                Remediation::Automatic
+            } else {
+                Remediation::AuditOnly
+            },
             remediation_reason: None,
         },
         title,
@@ -471,9 +813,203 @@ fn toggle_control(
         mitigation,
         sources,
         probe,
+        apply,
+        rollback,
     }
 }
 
+const COPILOT_CSP: &str =
+    "https://learn.microsoft.com/windows/client-management/mdm/policy-csp-windowscopilot";
+const WINDOWS_AI_CSP: &str =
+    "https://learn.microsoft.com/windows/client-management/mdm/policy-csp-windowsai";
+const DELIVERY_OPTIMIZATION_DOCS: &str =
+    "https://learn.microsoft.com/windows/deployment/do/waas-delivery-optimization-reference";
+const WINHTTP_DOCS: &str =
+    "https://learn.microsoft.com/windows/win32/winhttp/winhttp-autoproxy-support";
+
+const COPILOT_SHELL: Toggle = Toggle {
+    target: Target::new(
+        Hive::CurrentUser,
+        r"Software\Policies\Microsoft\Windows\WindowsCopilot",
+        "TurnOffWindowsCopilot",
+        View::Native,
+    ),
+    private_value: 1,
+    absent_means: "enabled",
+};
+
+const RECALL_POLICY: Target = Target::new(
+    Hive::LocalMachine,
+    r"SOFTWARE\Policies\Microsoft\Windows\WindowsAI",
+    "DisableAIDataAnalysis",
+    View::Native,
+);
+
+fn probe_recall_snapshots(ctx: &Context) -> Resolution {
+    match ctx
+        .registry
+        .read(&RECALL_POLICY, ManagementSource::LocalPolicy)
+    {
+        Evidence::Present { value, .. } => match value.as_u32() {
+            Some(1) => Resolution::determined(disabled(), ManagementSource::LocalPolicy),
+            Some(_) => Resolution::determined(enabled(), ManagementSource::LocalPolicy),
+            None => Resolution::uncertain(Uncertainty::Malformed, ManagementSource::LocalPolicy),
+        },
+        Evidence::Absent { .. } => Resolution::determined(enabled(), ManagementSource::Default),
+        Evidence::Denied { .. } => {
+            Resolution::uncertain(Uncertainty::Denied, ManagementSource::LocalPolicy)
+        }
+        _ => Resolution::uncertain(Uncertainty::Undetermined, ManagementSource::LocalPolicy),
+    }
+}
+
+const DELIVERY_OPTIMIZATION_POLICY: Target = Target::new(
+    Hive::LocalMachine,
+    r"SOFTWARE\Policies\Microsoft\Windows\DeliveryOptimization",
+    "DODownloadMode",
+    View::Native,
+);
+
+fn probe_delivery_optimization(ctx: &Context) -> Resolution {
+    match ctx
+        .registry
+        .read(&DELIVERY_OPTIMIZATION_POLICY, ManagementSource::LocalPolicy)
+    {
+        Evidence::Present { value, .. } => match value.as_u32() {
+            Some(0) | Some(99) => Resolution::determined(disabled(), ManagementSource::LocalPolicy),
+            Some(_) => Resolution::determined(enabled(), ManagementSource::LocalPolicy),
+            None => Resolution::uncertain(Uncertainty::Malformed, ManagementSource::LocalPolicy),
+        },
+        Evidence::Absent { .. } => Resolution::determined(enabled(), ManagementSource::Default),
+        Evidence::Denied { .. } => {
+            Resolution::uncertain(Uncertainty::Denied, ManagementSource::LocalPolicy)
+        }
+        _ => Resolution::uncertain(Uncertainty::Undetermined, ManagementSource::LocalPolicy),
+    }
+}
+
+const WPAD_POLICY: Target = Target::new(
+    Hive::LocalMachine,
+    r"SOFTWARE\Microsoft\Windows\CurrentVersion\Internet Settings\WinHttp",
+    "DisableWpad",
+    View::Native,
+);
+
+fn probe_wpad(ctx: &Context) -> Resolution {
+    match ctx
+        .registry
+        .read(&WPAD_POLICY, ManagementSource::LocalPolicy)
+    {
+        Evidence::Present { value, .. } => match value.as_u32() {
+            Some(1) => Resolution::determined(disabled(), ManagementSource::LocalPolicy),
+            Some(_) => Resolution::determined(enabled(), ManagementSource::LocalPolicy),
+            None => Resolution::uncertain(Uncertainty::Malformed, ManagementSource::LocalPolicy),
+        },
+        Evidence::Absent { .. } => Resolution::determined(enabled(), ManagementSource::Default),
+        Evidence::Denied { .. } => {
+            Resolution::uncertain(Uncertainty::Denied, ManagementSource::LocalPolicy)
+        }
+        _ => Resolution::uncertain(Uncertainty::Undetermined, ManagementSource::LocalPolicy),
+    }
+}
+
+const CRASH_DUMP_POLICY: Target = Target::new(
+    Hive::LocalMachine,
+    r"SYSTEM\CurrentControlSet\Control\CrashControl",
+    "CrashDumpEnabled",
+    View::Native,
+);
+
+fn probe_crash_dump_scope(ctx: &Context) -> Resolution {
+    match ctx
+        .registry
+        .read(&CRASH_DUMP_POLICY, ManagementSource::LocalPolicy)
+    {
+        Evidence::Present { value, .. } => match value.as_u32() {
+            Some(0) | Some(3) => Resolution::determined(disabled(), ManagementSource::LocalPolicy),
+            Some(_) => Resolution::determined(enabled(), ManagementSource::LocalPolicy),
+            None => Resolution::uncertain(Uncertainty::Malformed, ManagementSource::LocalPolicy),
+        },
+        Evidence::Absent { .. } => Resolution::determined(enabled(), ManagementSource::Default),
+        Evidence::Denied { .. } => {
+            Resolution::uncertain(Uncertainty::Denied, ManagementSource::LocalPolicy)
+        }
+        _ => Resolution::uncertain(Uncertainty::Undetermined, ManagementSource::LocalPolicy),
+    }
+}
+
+const INVENTORY_COLLECTOR_POLICY: Target = Target::new(
+    Hive::LocalMachine,
+    r"SOFTWARE\Policies\Microsoft\Windows\AppCompat",
+    "DisableInventory",
+    View::Native,
+);
+
+fn probe_inventory_collector(ctx: &Context) -> Resolution {
+    match ctx
+        .registry
+        .read(&INVENTORY_COLLECTOR_POLICY, ManagementSource::LocalPolicy)
+    {
+        Evidence::Present { value, .. } => match value.as_u32() {
+            Some(1) => Resolution::determined(disabled(), ManagementSource::LocalPolicy),
+            Some(_) => Resolution::determined(enabled(), ManagementSource::LocalPolicy),
+            None => Resolution::uncertain(Uncertainty::Malformed, ManagementSource::LocalPolicy),
+        },
+        Evidence::Absent { .. } => Resolution::determined(enabled(), ManagementSource::Default),
+        Evidence::Denied { .. } => {
+            Resolution::uncertain(Uncertainty::Denied, ManagementSource::LocalPolicy)
+        }
+        _ => Resolution::uncertain(Uncertainty::Undetermined, ManagementSource::LocalPolicy),
+    }
+}
+
+const NCSI_ACTIVE_PROBE: Target = Target::new(
+    Hive::LocalMachine,
+    r"SYSTEM\CurrentControlSet\Services\NlaSvc\Parameters\Internet",
+    "EnableActiveProbing",
+    View::Native,
+);
+
+const NCSI_POLICY_OVERRIDE: Target = Target::new(
+    Hive::LocalMachine,
+    r"SOFTWARE\Policies\Microsoft\Windows\NetworkConnectivityStatusIndicator",
+    "NoActiveProbe",
+    View::Native,
+);
+
+fn probe_ncsi_probing(ctx: &Context) -> Resolution {
+    if let Evidence::Present { value, .. } = ctx
+        .registry
+        .read(&NCSI_POLICY_OVERRIDE, ManagementSource::LocalPolicy)
+    {
+        return match value.as_u32() {
+            Some(1) => Resolution::determined(disabled(), ManagementSource::LocalPolicy),
+            Some(_) => Resolution::determined(enabled(), ManagementSource::LocalPolicy),
+            None => Resolution::uncertain(Uncertainty::Malformed, ManagementSource::LocalPolicy),
+        };
+    }
+    match ctx
+        .registry
+        .read(&NCSI_ACTIVE_PROBE, ManagementSource::LocalPolicy)
+    {
+        Evidence::Present { value, .. } => match value.as_u32() {
+            Some(0) => Resolution::determined(disabled(), ManagementSource::LocalPolicy),
+            Some(_) => Resolution::determined(enabled(), ManagementSource::LocalPolicy),
+            None => Resolution::uncertain(Uncertainty::Malformed, ManagementSource::LocalPolicy),
+        },
+        Evidence::Absent { .. } => Resolution::determined(enabled(), ManagementSource::Default),
+        Evidence::Denied { .. } => {
+            Resolution::uncertain(Uncertainty::Denied, ManagementSource::LocalPolicy)
+        }
+        _ => Resolution::uncertain(Uncertainty::Undetermined, ManagementSource::LocalPolicy),
+    }
+}
+
+const CRASH_CONTROL_DOCS: &str = "https://learn.microsoft.com/windows-hardware/drivers/debugger/varieties-of-kernel-mode-dump-files";
+const APPCOMPAT_CSP: &str =
+    "https://learn.microsoft.com/windows/client-management/mdm/policy-csp-applicationcompatibility";
+const NCSI_DOCS: &str =
+    "https://learn.microsoft.com/windows-server/networking/ncsi/ncsi-frequently-asked-questions";
 const PRIVACY_CSP: &str =
     "https://learn.microsoft.com/windows/client-management/mdm/policy-csp-privacy";
 const TEXTINPUT_CSP: &str =
@@ -482,12 +1018,185 @@ const SEARCH_CSP: &str =
     "https://learn.microsoft.com/windows/client-management/mdm/policy-csp-search";
 const EXPERIENCE_CSP: &str =
     "https://learn.microsoft.com/windows/client-management/mdm/policy-csp-experience";
+const SYSTEM_CSP: &str =
+    "https://learn.microsoft.com/windows/client-management/mdm/policy-csp-system";
+const DNS_CLIENT_CSP: &str =
+    "https://learn.microsoft.com/windows/client-management/mdm/policy-csp-dnsclient";
 
 /// Every Windows control, in stable sorted order by identifier.
 pub fn controls() -> Vec<Control> {
     let mut controls = vec![
         advertising_id(),
-        diagnostics_level(),
+        toggle_control(
+            "windows.ai.copilot-shell",
+            "ai",
+            "Windows Copilot shell integration",
+            "Windows integrates Copilot into the taskbar and shortcuts, sending queries and context to cloud services.",
+            "Desktop Copilot integration sends user context, prompts, and active application references to Microsoft cloud services.",
+            Some("The Copilot taskbar button and Win+C shortcut are deactivated."),
+            Some("Copilot remains accessible through a web browser when deliberately visited."),
+            &[Source {
+                url: COPILOT_CSP,
+                claim: "Documents Windows Copilot policy configuration.",
+                reviewed: "2026-09-22",
+            }],
+            |ctx| COPILOT_SHELL.probe(ctx),
+            Some(|ctx| COPILOT_SHELL.apply(ctx)),
+            Some(|ctx, pre| COPILOT_SHELL.rollback(ctx, pre)),
+        ),
+        toggle_control(
+            "windows.ai.recall-snapshot",
+            "ai",
+            "Recall screen snapshots",
+            "Windows Recall captures periodic screenshots of activity and stores semantic representations.",
+            "Automatic desktop snapshots record sensitive on-screen documents, credentials, and personal communications.",
+            Some("Windows stops capturing periodic desktop snapshots for Recall timeline search."),
+            Some("Standard screenshot tools and manual captures continue to function normally."),
+            &[Source {
+                url: WINDOWS_AI_CSP,
+                claim: "Documents Windows AI snapshot analysis policy.",
+                reviewed: "2026-09-22",
+            }],
+            probe_recall_snapshots,
+            None,
+            None,
+        ),
+        toggle_control(
+            "windows.capability.account-info",
+            "capabilities",
+            "User account information access",
+            "Windows apps can read your account name, email address, and profile picture.",
+            "Permitting universal account info access exposes your user identity, \
+             email, and display picture to all installed store apps without specific consent.",
+            Some("Apps cannot automatically populate your name or profile picture."),
+            Some("You can enter account credentials or sign in manually within apps as needed."),
+            &[Source {
+                url: PRIVACY_CSP,
+                claim: "Documents user account information capability access.",
+                reviewed: "2026-09-21",
+            }],
+            |ctx| ACCOUNT_INFO_ACCESS.probe(ctx),
+            Some(|ctx| ACCOUNT_INFO_ACCESS.apply(ctx)),
+            Some(|ctx, pre| ACCOUNT_INFO_ACCESS.rollback(ctx, pre)),
+        ),
+        toggle_control(
+            "windows.capability.activity",
+            "capabilities",
+            "App activity tracking",
+            "Windows apps can track your in-app actions and resume states across app sessions.",
+            "App activity tracking records usage workflows across applications. \
+             Disabling this restricts apps to local session data.",
+            Some("Cross-app timeline resumption is disabled."),
+            Some("Normal document and project saving within each app continues to work."),
+            &[Source {
+                url: PRIVACY_CSP,
+                claim: "Documents user activity capability access.",
+                reviewed: "2026-09-21",
+            }],
+            |ctx| APP_ACTIVITY_ACCESS.probe(ctx),
+            Some(|ctx| APP_ACTIVITY_ACCESS.apply(ctx)),
+            Some(|ctx, pre| APP_ACTIVITY_ACCESS.rollback(ctx, pre)),
+        ),
+        toggle_control(
+            "windows.capability.wifi-data",
+            "capabilities",
+            "Wi-Fi adapter and scan access",
+            "Windows apps can scan nearby Wi-Fi networks and adapters, allowing location estimation.",
+            "Access to Wi-Fi scan data allows applications to determine geographic \
+             location through Wi-Fi BSSID triangulation even when GPS and location services are denied.",
+            Some(
+                "Applications that explicitly diagnose or configure Wi-Fi networks cannot scan adapters.",
+            ),
+            Some(
+                "Wi-Fi network connection and internet access through Windows Settings and web browsers are unaffected.",
+            ),
+            &[Source {
+                url: PRIVACY_CSP,
+                claim: "Documents Wi-Fi data capability access.",
+                reviewed: "2026-09-21",
+            }],
+            |ctx| WIFI_DATA_ACCESS.probe(ctx),
+            Some(|ctx| WIFI_DATA_ACCESS.apply(ctx)),
+            Some(|ctx, pre| WIFI_DATA_ACCESS.rollback(ctx, pre)),
+        ),
+        toggle_control(
+            "windows.diagnostics.crash-dump-scope",
+            "diagnostics",
+            "Crash dump memory scope",
+            "Windows captures raw physical RAM contents during kernel bugchecks and system crashes.",
+            "Complete and automatic memory dumps capture physical RAM including passwords, cryptographic keys, and session tokens. Restricting crash dumps to minidumps prevents sensitive memory persistence.",
+            Some(
+                "Deep kernel memory and full heap crash inspection for driver developers is unavailable.",
+            ),
+            Some(
+                "Kernel minidumps containing stop codes, call stacks, and loaded drivers are still captured for crash analysis.",
+            ),
+            &[Source {
+                url: CRASH_CONTROL_DOCS,
+                claim: "Documents kernel-mode crash dump file options and scope.",
+                reviewed: "2026-09-22",
+            }],
+            probe_crash_dump_scope,
+            None,
+            None,
+        ),
+        toggle_control(
+            "windows.diagnostics.feedback",
+            "diagnostics",
+            "Feedback frequency",
+            "Windows prompts for feedback surveys and collects diagnostic impressions.",
+            "System Initiated User Feedback prompts periodically interrupt the operator \
+             and transmit diagnostic impressions to vendor services. Setting this to 0 prevents prompts.",
+            Some("Windows will not prompt for feedback on features or experiences."),
+            Some("Feedback Hub remains available to submit feedback manually whenever you choose."),
+            &[Source {
+                url: SYSTEM_CSP,
+                claim: "Documents feedback notification and survey frequency policy.",
+                reviewed: "2026-09-21",
+            }],
+            |ctx| FEEDBACK_FREQUENCY.probe(ctx),
+            Some(|ctx| FEEDBACK_FREQUENCY.apply(ctx)),
+            Some(|ctx, pre| FEEDBACK_FREQUENCY.rollback(ctx, pre)),
+        ),
+        toggle_control(
+            "windows.diagnostics.inventory-collector",
+            "diagnostics",
+            "Application and device inventory collection",
+            "Windows inventory collector catalogues installed software binaries, checksums, and attached peripherals.",
+            "The compatibility inventory collector runs periodically to enumerate software files and peripheral devices for transmission to vendor analytics services.",
+            Some(
+                "Microsoft does not automatically pre-screen third-party application compatibility shims before major operating system upgrades.",
+            ),
+            Some(
+                "Software installations, driver updates, and application execution continue normally.",
+            ),
+            &[Source {
+                url: APPCOMPAT_CSP,
+                claim: "Documents Inventory Collector policy configuration.",
+                reviewed: "2026-09-22",
+            }],
+            probe_inventory_collector,
+            None,
+            None,
+        ),
+        toggle_control(
+            "windows.clipboard.cloud-sync",
+            "clipboard",
+            "Cloud clipboard synchronisation",
+            "What you copy to the clipboard can be synchronised across other devices.",
+            "Synchronising the clipboard transmits copied passwords, tokens, and \
+             documents to cloud services to make them available on other devices.",
+            Some("You cannot paste on another device content copied on this machine."),
+            Some("Local clipboard history on this machine continues to work normally."),
+            &[Source {
+                url: PRIVACY_CSP,
+                claim: "Documents the cross-device clipboard setting.",
+                reviewed: "2026-09-21",
+            }],
+            |ctx| CLOUD_CLIPBOARD_SYNC.probe(ctx),
+            Some(|ctx| CLOUD_CLIPBOARD_SYNC.apply(ctx)),
+            Some(|ctx, pre| CLOUD_CLIPBOARD_SYNC.rollback(ctx, pre)),
+        ),
         toggle_control(
             "windows.clipboard.cross-device",
             "clipboard",
@@ -507,6 +1216,27 @@ pub fn controls() -> Vec<Control> {
                 reviewed: "2026-09-07",
             }],
             |ctx| CLOUD_CLIPBOARD.probe(ctx),
+            Some(|ctx| CLOUD_CLIPBOARD.apply(ctx)),
+            Some(|ctx, pre| CLOUD_CLIPBOARD.rollback(ctx, pre)),
+        ),
+        diagnostics_level(),
+        toggle_control(
+            "windows.experience.start-suggestions",
+            "personalization",
+            "Start menu recommendations",
+            "Windows shows app recommendations and suggested content in the Start menu.",
+            "Recommendations in the Start menu are targeted based on application \
+             usage profiling to promote store software and web content.",
+            Some("Windows stops suggesting apps and content in the Start menu."),
+            Some("All installed applications and search remain available as normal."),
+            &[Source {
+                url: EXPERIENCE_CSP,
+                claim: "Documents Start menu recommendation content.",
+                reviewed: "2026-09-21",
+            }],
+            |ctx| START_SUGGESTIONS.probe(ctx),
+            Some(|ctx| START_SUGGESTIONS.apply(ctx)),
+            Some(|ctx, pre| START_SUGGESTIONS.rollback(ctx, pre)),
         ),
         toggle_control(
             "windows.experience.suggested-apps",
@@ -524,6 +1254,26 @@ pub fn controls() -> Vec<Control> {
                 reviewed: "2026-09-07",
             }],
             |ctx| SUGGESTED_APPS.probe(ctx),
+            Some(|ctx| SUGGESTED_APPS.apply(ctx)),
+            Some(|ctx, pre| SUGGESTED_APPS.rollback(ctx, pre)),
+        ),
+        toggle_control(
+            "windows.experience.system-suggestions",
+            "personalization",
+            "Settings suggestions",
+            "Windows displays suggestions and tips within system settings and notifications.",
+            "Showing recommendations in configuration screens turns system management \
+             interfaces into promotional channels.",
+            Some("Settings panes stop displaying suggestions and tips."),
+            Some("Settings functionality remains fully available without tips."),
+            &[Source {
+                url: EXPERIENCE_CSP,
+                claim: "Documents system pane suggestions.",
+                reviewed: "2026-09-21",
+            }],
+            |ctx| SYSTEM_SUGGESTIONS.probe(ctx),
+            Some(|ctx| SYSTEM_SUGGESTIONS.apply(ctx)),
+            Some(|ctx, pre| SYSTEM_SUGGESTIONS.rollback(ctx, pre)),
         ),
         toggle_control(
             "windows.experience.tailored",
@@ -545,6 +1295,8 @@ pub fn controls() -> Vec<Control> {
                 reviewed: "2026-09-07",
             }],
             |ctx| TAILORED_EXPERIENCES.probe(ctx),
+            Some(|ctx| TAILORED_EXPERIENCES.apply(ctx)),
+            Some(|ctx, pre| TAILORED_EXPERIENCES.rollback(ctx, pre)),
         ),
         toggle_control(
             "windows.input.personalization",
@@ -567,6 +1319,28 @@ pub fn controls() -> Vec<Control> {
                 reviewed: "2026-09-07",
             }],
             probe_input_personalization,
+            None,
+            None,
+        ),
+        toggle_control(
+            "windows.search.device-history",
+            "search",
+            "Device search history",
+            "Windows records search queries on this device to suggest previous terms.",
+            "Keeping a local search history maintains a persistent record of \
+             searched terms, accessed documents, and applications.",
+            Some("Windows does not suggest recently searched terms in the search flyout."),
+            Some(
+                "Searching files, settings, and installed applications continues to work normally.",
+            ),
+            &[Source {
+                url: SEARCH_CSP,
+                claim: "Documents device search history recording.",
+                reviewed: "2026-09-21",
+            }],
+            |ctx| DEVICE_SEARCH_HISTORY.probe(ctx),
+            Some(|ctx| DEVICE_SEARCH_HISTORY.apply(ctx)),
+            Some(|ctx, pre| DEVICE_SEARCH_HISTORY.rollback(ctx, pre)),
         ),
         toggle_control(
             "windows.search.web",
@@ -585,6 +1359,70 @@ pub fn controls() -> Vec<Control> {
                 reviewed: "2026-09-07",
             }],
             |ctx| WEB_SEARCH.probe(ctx),
+            Some(|ctx| WEB_SEARCH.apply(ctx)),
+            Some(|ctx, pre| WEB_SEARCH.rollback(ctx, pre)),
+        ),
+        toggle_control(
+            "windows.delivery-optimization.mode",
+            "delivery-optimization",
+            "Delivery Optimization peer distribution",
+            "Windows can share update payloads with other PCs across the local network and the internet.",
+            "Peer-to-peer update distribution exposes machine presence and shares network bandwidth with unknown peers.",
+            Some("Windows downloads updates directly from Microsoft CDN without peer sharing."),
+            Some(
+                "Updates download normally from Microsoft servers; only peer uploading and downloading is disabled.",
+            ),
+            &[Source {
+                url: DELIVERY_OPTIMIZATION_DOCS,
+                claim: "Documents Delivery Optimization download mode settings.",
+                reviewed: "2026-09-22",
+            }],
+            probe_delivery_optimization,
+            None,
+            None,
+        ),
+        security_llmnr(),
+        toggle_control(
+            "windows.security.ncsi-probing",
+            "security",
+            "Network Connectivity Status Indicator active probing",
+            "Windows performs active HTTP requests and DNS queries to test internet connectivity whenever network links change.",
+            "Active probing transmits cleartext HTTP requests to msftconnecttest.com, beaconing network association timestamps, IP address changes, and device presence to external observers.",
+            Some(
+                "The network icon in the taskbar may indicate no internet connection or action needed even when internet access works normally. Captive portal auto-detection is disabled.",
+            ),
+            Some(
+                "Web browsers and all internet applications function normally. On public captive networks, navigate directly to a gateway IP address or non-HTTPS URL to log in.",
+            ),
+            &[Source {
+                url: NCSI_DOCS,
+                claim: "Documents Network Connectivity Status Indicator active probing configuration.",
+                reviewed: "2026-09-22",
+            }],
+            probe_ncsi_probing,
+            None,
+            None,
+        ),
+        toggle_control(
+            "windows.security.wpad",
+            "security",
+            "Web Proxy Auto-Discovery",
+            "Windows broadcasts name queries to automatically discover HTTP and HTTPS proxy servers.",
+            "Unauthenticated WPAD queries can be answered by rogue devices on local networks to redirect web traffic.",
+            Some(
+                "Automated proxy discovery is disabled. Outbound traffic connects directly unless a proxy is explicitly configured.",
+            ),
+            Some(
+                "Manual proxy configurations and PAC URLs in network settings continue to function normally.",
+            ),
+            &[Source {
+                url: WINHTTP_DOCS,
+                claim: "Documents Web Proxy Auto-Discovery client configuration.",
+                reviewed: "2026-09-22",
+            }],
+            probe_wpad,
+            None,
+            None,
         ),
     ];
     controls.sort_by(|a, b| {
@@ -940,6 +1778,14 @@ mod tests {
             };
             assert_eq!(resolution.state, Some(expected));
         }
+    }
+
+    #[test]
+    fn check_wifi_data_reading() {
+        let host = platform::discover();
+        let ctx = Context::live(&host);
+        let res = WIFI_DATA_ACCESS.probe(&ctx);
+        assert!(res.state.is_some());
     }
 
     #[test]

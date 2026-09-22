@@ -82,8 +82,10 @@ impl RawValue {
         if self.bytes.len().is_multiple_of(2) && !self.bytes.is_empty() {
             let u16s: Vec<u16> = self
                 .bytes
-                .chunks_exact(2)
-                .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|&c| u16::from_le_bytes(c))
                 .collect();
             let s = String::from_utf16_lossy(&u16s);
             let trimmed = s.trim_matches('\0').to_string();

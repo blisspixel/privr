@@ -116,8 +116,11 @@ cargo deny check
 ```
 
 Platform code is compiled out on other hosts, so the cross-target Clippy runs
-(`rustup target add` if missing) are the only local check of it. CI runs these
-jobs on Windows, macOS, and Linux and remains the authority.
+(`rustup target add` if missing) are the only local check of it. CI lints with
+the latest stable toolchain, and new Clippy lints arrive with each release, so
+run `rustup update stable` first and use `cargo +stable` if your default
+toolchain differs. CI runs these jobs on Windows, macOS, and Linux and remains
+the authority.
 
 - Never make a check pass by weakening it: no new `allow` attributes, ignored
   tests, lowered thresholds, or loosened `deny.toml` without a stated reason.

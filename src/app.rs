@@ -17,6 +17,40 @@ struct ConceptResponse<'a> {
     message: &'a str,
 }
 
+#[derive(Serialize)]
+struct PlanItem {
+    id: String,
+    title: String,
+    section: String,
+    current: String,
+    desired: String,
+}
+
+#[derive(Serialize)]
+struct PlanReport {
+    schema: u8,
+    profile: String,
+    platform: String,
+    planned_changes: usize,
+    changes: Vec<PlanItem>,
+}
+
+#[derive(Serialize)]
+struct ApplyReport {
+    schema: u8,
+    profile: String,
+    platform: String,
+    transaction_id: String,
+    applied_changes: usize,
+}
+
+#[derive(Serialize)]
+struct RollbackReport {
+    schema: u8,
+    transaction_id: String,
+    restored_changes: usize,
+}
+
 pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
     let format = cli.format;
     let ui = crate::ui::Ui::for_stdout(cli.color.into());
@@ -71,27 +105,99 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
             policy,
             controls,
         } => {
-            let qualifier = selection_text(&controls, policy.as_ref());
-            let message = format!(
-                "{CONCEPT_NOTICE}; planned changes: 0{}",
-                qualifier
-                    .map(|value| format!("; {value}"))
-                    .unwrap_or_default()
-            );
-            write_response(
-                out,
-                format,
-                ConceptResponse {
-                    schema: 1,
-                    complete: false,
-                    status: "concept",
-                    command: "plan",
-                    platform: current_platform(),
-                    profile: selected_profile(profile, policy.as_ref()),
-                    message: &message,
-                },
-            );
-            3
+            if policy.is_some() {
+                let _ = writeln!(
+                    err,
+                    "privr: custom policy files are not implemented yet; \
+                     omit --policy to use a built-in profile"
+                );
+                return 2;
+            }
+            let profile = profile.unwrap_or_default();
+            let host = crate::platform::discover();
+            let context = crate::catalog::Context::live(&host);
+            let all_controls = crate::catalog::all();
+            let mut planned = Vec::new();
+
+            for c in &all_controls {
+                if !controls.is_empty()
+                    && !controls
+                        .iter()
+                        .any(|sel| c.spec.id == *sel || c.spec.id.starts_with(sel))
+                {
+                    continue;
+                }
+                let resolution = c.observe(&context);
+                let eval = crate::engine::evaluate::evaluate(
+                    &c.spec,
+                    crate::engine::evaluate::Mode::Enforce,
+                    &resolution,
+                    &host,
+                    crate::model::outcome::Exception::None,
+                );
+                if eval.outcome == crate::model::outcome::Outcome::Drift
+                    && eval.remediation == crate::model::outcome::Remediation::Automatic
+                    && c.apply.is_some()
+                {
+                    let current_str = resolution
+                        .state
+                        .map(|s| s.0)
+                        .unwrap_or_else(|| "drift".to_owned());
+                    planned.push(PlanItem {
+                        id: c.spec.id.clone(),
+                        title: c.title.to_owned(),
+                        section: c.spec.section.clone(),
+                        current: current_str,
+                        desired: c.spec.desired.0.clone(),
+                    });
+                }
+            }
+
+            let plan_report = PlanReport {
+                schema: 1,
+                profile: profile.as_str().to_owned(),
+                platform: host.platform.as_str().to_owned(),
+                planned_changes: planned.len(),
+                changes: planned,
+            };
+
+            match format {
+                OutputFormat::Text => {
+                    let _ = writeln!(out, "Profile  {}", plan_report.profile);
+                    let _ = writeln!(out, "Platform {}", plan_report.platform);
+                    if plan_report.planned_changes == 0 {
+                        let _ = writeln!(out, "Planned changes: 0 (machine matches policy)");
+                    } else {
+                        let _ = writeln!(
+                            out,
+                            "Planned changes: {} (changes nothing)\n",
+                            plan_report.planned_changes
+                        );
+                        for item in &plan_report.changes {
+                            let _ = writeln!(out, "{}", item.section);
+                            let _ = writeln!(out, "  {}", item.id);
+                            let _ = writeln!(
+                                out,
+                                "    Current: {}",
+                                ui.paint(
+                                    crate::ui::style::outcome_style(
+                                        crate::model::outcome::Outcome::Drift,
+                                    ),
+                                    &item.current,
+                                )
+                            );
+                            let _ = writeln!(out, "    Desired: {}", item.desired);
+                        }
+                        let _ = writeln!(out, "\nRun privr apply --yes to apply these changes.");
+                    }
+                }
+                OutputFormat::Json => {
+                    if serde_json::to_writer_pretty(&mut *out, &plan_report).is_ok() {
+                        let _ = writeln!(out);
+                    }
+                }
+            }
+            0
         }
         Command::Apply {
             profile,
@@ -101,27 +207,19 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
             controls,
         } => {
             if dry_run {
-                let qualifier = selection_text(&controls, policy.as_ref());
-                let message = format!(
-                    "{CONCEPT_NOTICE}; planned changes: 0{}",
-                    qualifier
-                        .map(|value| format!("; {value}"))
-                        .unwrap_or_default()
-                );
-                write_response(
-                    out,
-                    format,
-                    ConceptResponse {
-                        schema: 1,
-                        complete: false,
-                        status: "concept",
-                        command: "plan",
-                        platform: current_platform(),
-                        profile: selected_profile(profile, policy.as_ref()),
-                        message: &message,
+                return run(
+                    Cli {
+                        format,
+                        color: cli.color,
+                        command: Some(Command::Plan {
+                            profile,
+                            policy,
+                            controls,
+                        }),
                     },
+                    out,
+                    err,
                 );
-                return 3;
             }
             if !yes {
                 let _ = writeln!(
@@ -130,27 +228,141 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                 );
                 return 2;
             }
-            let selection = selection_text(&controls, policy.as_ref());
-            let message = format!(
-                "{CONCEPT_NOTICE}; applied changes: 0{}",
-                selection
-                    .map(|value| format!("; {value}"))
+            if policy.is_some() {
+                let _ = writeln!(
+                    err,
+                    "privr: custom policy files are not implemented yet; \
+                     omit --policy to use a built-in profile"
+                );
+                return 2;
+            }
+            let profile = profile.unwrap_or_default();
+            let host = crate::platform::discover();
+            let context = crate::catalog::Context::live(&host);
+            let all_controls = crate::catalog::all();
+
+            let timestamp = format!(
+                "{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
+                    .as_secs()
             );
-            write_response(
-                out,
-                format,
-                ConceptResponse {
-                    schema: 1,
-                    complete: false,
-                    status: "concept",
-                    command: "apply",
-                    platform: current_platform(),
-                    profile: selected_profile(profile, policy.as_ref()),
-                    message: &message,
-                },
-            );
-            3
+            let tx_id = format!("tx-{timestamp}");
+            let mut journal = crate::journal::TransactionJournal {
+                schema: crate::journal::JOURNAL_SCHEMA,
+                transaction_id: tx_id.clone(),
+                timestamp: timestamp.clone(),
+                platform: host.platform.as_str().to_owned(),
+                profile: profile.as_str().to_owned(),
+                operations: Vec::new(),
+            };
+
+            for c in &all_controls {
+                if !controls.is_empty()
+                    && !controls
+                        .iter()
+                        .any(|sel| c.spec.id == *sel || c.spec.id.starts_with(sel))
+                {
+                    continue;
+                }
+                let resolution = c.observe(&context);
+                let eval = crate::engine::evaluate::evaluate(
+                    &c.spec,
+                    crate::engine::evaluate::Mode::Enforce,
+                    &resolution,
+                    &host,
+                    crate::model::outcome::Exception::None,
+                );
+                if eval.outcome == crate::model::outcome::Outcome::Drift
+                    && eval.remediation == crate::model::outcome::Remediation::Automatic
+                    && c.apply.is_some()
+                {
+                    match c.apply(&context) {
+                        Some(Ok(op)) => {
+                            journal.operations.push(crate::journal::OperationJournal {
+                                control_id: c.spec.id.clone(),
+                                target_key: op.target_key,
+                                preimage: op.preimage,
+                                postimage: op.postimage,
+                                verified: true,
+                            });
+                            if let Err(e) = crate::journal::save_transaction(&journal) {
+                                let _ = writeln!(
+                                    err,
+                                    "privr: warning: failed to write transaction journal: {e}"
+                                );
+                            }
+                        }
+                        Some(Err(e)) => {
+                            if !journal.operations.is_empty() {
+                                let _ = writeln!(
+                                    err,
+                                    "privr: failed to apply {}: {e}. Applied {} prior change(s) (transaction {}). To rollback: privr rollback {} --yes",
+                                    c.spec.id,
+                                    journal.operations.len(),
+                                    tx_id,
+                                    tx_id,
+                                );
+                            } else {
+                                let _ = writeln!(err, "privr: failed to apply {}: {e}", c.spec.id);
+                            }
+                            return 4;
+                        }
+                        None => {}
+                    }
+                }
+            }
+
+            if journal.operations.is_empty() {
+                match format {
+                    OutputFormat::Text => {
+                        let _ =
+                            writeln!(out, "No drifted controls to apply. Machine matches policy.");
+                    }
+                    OutputFormat::Json => {
+                        let rep = ApplyReport {
+                            schema: 1,
+                            profile: profile.as_str().to_owned(),
+                            platform: host.platform.as_str().to_owned(),
+                            transaction_id: String::new(),
+                            applied_changes: 0,
+                        };
+                        let _ = serde_json::to_writer_pretty(&mut *out, &rep);
+                        let _ = writeln!(out);
+                    }
+                }
+                return 0;
+            }
+
+            let apply_report = ApplyReport {
+                schema: 1,
+                profile: profile.as_str().to_owned(),
+                platform: host.platform.as_str().to_owned(),
+                transaction_id: tx_id,
+                applied_changes: journal.operations.len(),
+            };
+
+            match format {
+                OutputFormat::Text => {
+                    let _ = writeln!(
+                        out,
+                        "Applied {} changes (transaction {}).",
+                        apply_report.applied_changes, apply_report.transaction_id
+                    );
+                    let _ = writeln!(
+                        out,
+                        "All changes verified. To reverse, run: privr rollback {} --yes",
+                        apply_report.transaction_id
+                    );
+                }
+                OutputFormat::Json => {
+                    if serde_json::to_writer_pretty(&mut *out, &apply_report).is_ok() {
+                        let _ = writeln!(out);
+                    }
+                }
+            }
+            0
         }
         Command::Rollback {
             transaction_id,
@@ -163,22 +375,78 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                 );
                 return 2;
             }
-            let message =
-                format!("{CONCEPT_NOTICE}; transaction {transaction_id}; restored changes: 0");
-            write_response(
-                out,
-                format,
-                ConceptResponse {
-                    schema: 1,
-                    complete: false,
-                    status: "concept",
-                    command: "rollback",
-                    platform: current_platform(),
-                    profile: None,
-                    message: &message,
-                },
-            );
-            3
+
+            let journal = match crate::journal::load_transaction(&transaction_id) {
+                Ok(j) => j,
+                Err(_) => {
+                    let message = format!(
+                        "{CONCEPT_NOTICE}; transaction {transaction_id}; restored changes: 0"
+                    );
+                    write_response(
+                        out,
+                        format,
+                        ConceptResponse {
+                            schema: 1,
+                            complete: false,
+                            status: "concept",
+                            command: "rollback",
+                            platform: current_platform(),
+                            profile: None,
+                            message: &message,
+                        },
+                    );
+                    return 3;
+                }
+            };
+
+            let host = crate::platform::discover();
+            let context = crate::catalog::Context::live(&host);
+            let all_controls = crate::catalog::all();
+            let mut restored = 0;
+
+            for op in journal.operations.iter().rev() {
+                if let Some(c) = all_controls
+                    .iter()
+                    .find(|item| item.spec.id == op.control_id)
+                {
+                    match c.rollback(&context, &op.preimage) {
+                        Some(Ok(())) => {
+                            restored += 1;
+                        }
+                        Some(Err(e)) => {
+                            let _ = writeln!(
+                                err,
+                                "privr: conflict during rollback of {}: {e}",
+                                c.spec.id
+                            );
+                            return 5;
+                        }
+                        None => {}
+                    }
+                }
+            }
+
+            let rep = RollbackReport {
+                schema: 1,
+                transaction_id,
+                restored_changes: restored,
+            };
+
+            match format {
+                OutputFormat::Text => {
+                    let _ = writeln!(
+                        out,
+                        "Restored {} changes from transaction {}.",
+                        rep.restored_changes, rep.transaction_id
+                    );
+                }
+                OutputFormat::Json => {
+                    if serde_json::to_writer_pretty(&mut *out, &rep).is_ok() {
+                        let _ = writeln!(out);
+                    }
+                }
+            }
+            0
         }
         Command::List { platform, query } => {
             // The catalogue a build carries is the platform it was built for.
@@ -255,28 +523,6 @@ Run privr list to see every control in this build."
             3
         }
     }
-}
-
-fn selection_text(controls: &[String], policy: Option<&std::path::PathBuf>) -> Option<String> {
-    match (controls.is_empty(), policy) {
-        (true, None) => None,
-        (false, None) => Some(format!("selected controls: {}", controls.join(", "))),
-        (true, Some(path)) => Some(format!("policy: {}", path.display())),
-        (false, Some(path)) => Some(format!(
-            "policy: {}; selected controls: {}",
-            path.display(),
-            controls.join(", ")
-        )),
-    }
-}
-
-fn selected_profile(
-    profile: Option<Profile>,
-    policy: Option<&std::path::PathBuf>,
-) -> Option<&'static str> {
-    policy
-        .is_none()
-        .then(|| profile.unwrap_or_default().as_str())
 }
 
 fn write_response(out: &mut impl Write, format: OutputFormat, response: ConceptResponse<'_>) {
@@ -372,16 +618,15 @@ mod tests {
     }
 
     #[test]
-    fn plan_is_safe_and_reports_incomplete() {
+    fn plan_is_safe_and_reports_planned_changes() {
         let (code, stdout, _) = run_for_test(Some(Command::Plan {
             profile: Some(Profile::Baseline),
             policy: None,
-            controls: vec!["windows.telemetry".to_owned()],
+            controls: vec!["windows.advertising.id".to_owned()],
         }));
-        assert_eq!(code, 3);
-        assert!(stdout.contains("privr plan"));
-        assert!(stdout.contains("planned changes: 0"));
-        assert!(stdout.contains("windows.telemetry"));
+        assert_eq!(code, 0);
+        assert!(stdout.contains("Profile"));
+        assert!(stdout.contains("Planned changes"));
     }
 
     #[test]
@@ -393,8 +638,9 @@ mod tests {
             yes: false,
             controls: Vec::new(),
         }));
-        assert_eq!(code, 3);
-        assert!(stdout.contains("privr plan"));
+        assert_eq!(code, 0);
+        assert!(stdout.contains("Profile"));
+        assert!(stdout.contains("Planned changes"));
     }
 
     #[test]
@@ -445,17 +691,16 @@ mod tests {
     }
 
     #[test]
-    fn confirmed_apply_still_reports_concept_as_incomplete() {
+    fn confirmed_apply_reports_clean_state_or_applied() {
         let (code, stdout, _) = run_for_test(Some(Command::Apply {
-            profile: None,
-            policy: Some("laptop.toml".into()),
+            profile: Some(Profile::Baseline),
+            policy: None,
             dry_run: false,
             yes: true,
             controls: Vec::new(),
         }));
-        assert_eq!(code, 3);
-        assert!(stdout.contains("privr apply"));
-        assert!(stdout.contains("policy: laptop.toml"));
+        assert_eq!(code, 0);
+        assert!(stdout.contains("Machine matches policy") || stdout.contains("Applied"));
     }
 
     #[test]

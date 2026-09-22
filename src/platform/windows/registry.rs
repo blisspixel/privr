@@ -242,6 +242,75 @@ pub fn can_write_machine_scope() -> Option<bool> {
     }
 }
 
+/// Write a raw value to the registry.
+///
+/// Only CurrentUser targets can be written without elevation.
+pub fn write_raw(target: &Target, value: &RawValue) -> Result<(), u32> {
+    if target.hive != Hive::CurrentUser {
+        return Err(ERROR_ACCESS_DENIED);
+    }
+    let mut options = CURRENT_USER.options();
+    options.read().write().create();
+    match target.view {
+        View::Native => {}
+        View::Wow6432 => {
+            options.wow64_32();
+        }
+        View::Wow6464 => {
+            options.wow64_64();
+        }
+    }
+    let key = options.open(target.path).map_err(|e| win32_code(&e))?;
+    let ty = match value.kind {
+        ValueKind::U32 => Type::U32,
+        ValueKind::U64 => Type::U64,
+        ValueKind::String => Type::String,
+        ValueKind::Binary => Type::Bytes,
+        _ => return Err(ERROR_ACCESS_DENIED),
+    };
+    key.set_bytes(target.value, ty, &value.bytes)
+        .map_err(|e| win32_code(&e))
+}
+
+/// Remove a value from the registry.
+pub fn delete_value(target: &Target) -> Result<(), u32> {
+    if target.hive != Hive::CurrentUser {
+        return Err(ERROR_ACCESS_DENIED);
+    }
+    let mut options = CURRENT_USER.options();
+    options.read().write();
+    match target.view {
+        View::Native => {}
+        View::Wow6432 => {
+            options.wow64_32();
+        }
+        View::Wow6464 => {
+            options.wow64_64();
+        }
+    }
+    let key = match options.open(target.path) {
+        Ok(k) => k,
+        Err(e) => {
+            let code = win32_code(&e);
+            if code == ERROR_FILE_NOT_FOUND || code == ERROR_PATH_NOT_FOUND {
+                return Ok(());
+            }
+            return Err(code);
+        }
+    };
+    match key.remove_value(target.value) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let code = win32_code(&e);
+            if code == ERROR_FILE_NOT_FOUND {
+                Ok(())
+            } else {
+                Err(code)
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -351,5 +420,30 @@ mod tests {
         // and asking must not change anything or raise a prompt.
         let answer = can_write_machine_scope();
         assert!(answer.is_some());
+    }
+
+    #[test]
+    fn write_and_delete_user_registry_value() {
+        let test_path = r"Software\PrivrTestTarget";
+        let target = Target::new(Hive::CurrentUser, test_path, "TestValue", View::Native);
+        let val = RawValue::u32(123);
+        assert!(write_raw(&target, &val).is_ok());
+        let read = Registry::Live.read(&target, ManagementSource::User);
+        assert_eq!(
+            read,
+            Evidence::Present {
+                source: ManagementSource::User,
+                value: val
+            }
+        );
+        assert!(delete_value(&target).is_ok());
+        let read_after = Registry::Live.read(&target, ManagementSource::User);
+        assert_eq!(
+            read_after,
+            Evidence::Absent {
+                source: ManagementSource::User
+            }
+        );
+        let _ = CURRENT_USER.remove_tree(test_path);
     }
 }

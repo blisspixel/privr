@@ -7,6 +7,10 @@
 //! Modules are gated by target rather than selected at runtime, so code for a
 //! platform is not merely unreachable elsewhere, it is not compiled.
 
+#[cfg(target_os = "linux")]
+pub mod linux;
+#[cfg(target_os = "macos")]
+pub mod macos;
 #[cfg(windows)]
 pub mod windows;
 
@@ -22,7 +26,15 @@ pub fn discover() -> HostFacts {
     {
         windows::discovery::discover()
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    {
+        linux::discovery::discover()
+    }
+    #[cfg(target_os = "macos")]
+    {
+        macos::discovery::discover()
+    }
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
     {
         HostFacts::unknown(crate::model::host::Platform::current())
     }
@@ -38,7 +50,7 @@ mod tests {
         assert_eq!(discover().platform, Platform::current());
     }
 
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
     #[test]
     fn an_unimplemented_platform_admits_it_knows_nothing() {
         // The property that keeps an unported platform honest: no fact is

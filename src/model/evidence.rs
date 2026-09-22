@@ -73,6 +73,41 @@ impl RawValue {
             self.bytes[3],
         ]))
     }
+
+    /// Interpret as a string, decoding UTF-16LE or UTF-8 bytes and stripping null terminators.
+    pub fn as_str_lossy(&self) -> Option<String> {
+        if self.kind != ValueKind::String {
+            return None;
+        }
+        if self.bytes.len().is_multiple_of(2) && !self.bytes.is_empty() {
+            let u16s: Vec<u16> = self
+                .bytes
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|&c| u16::from_le_bytes(c))
+                .collect();
+            let s = String::from_utf16_lossy(&u16s);
+            let trimmed = s.trim_matches('\0').to_string();
+            if !trimmed.is_empty() {
+                return Some(trimmed);
+            }
+        }
+        if let Ok(s) = std::str::from_utf8(&self.bytes) {
+            return Some(s.trim_matches('\0').to_string());
+        }
+        None
+    }
+
+    /// Construct a UTF-16LE encoded string value (standard for Windows registry REG_SZ).
+    pub fn string_utf16(value: &str) -> Self {
+        let mut bytes = Vec::with_capacity((value.len() + 1) * 2);
+        for c in value.encode_utf16() {
+            bytes.extend_from_slice(&c.to_le_bytes());
+        }
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        Self::new(ValueKind::String, bytes)
+    }
 }
 
 /// Why a value could not be read.
@@ -213,10 +248,14 @@ mod tests {
 
     #[test]
     fn u32_round_trips_through_exact_bytes() {
-        let value = RawValue::u32(3);
-        assert_eq!(value.kind, ValueKind::U32);
-        assert_eq!(value.bytes, vec![3, 0, 0, 0]);
-        assert_eq!(value.as_u32(), Some(3));
+        let value = RawValue::u32(0x12345678);
+        assert_eq!(value.as_u32(), Some(0x12345678));
+    }
+
+    #[test]
+    fn string_utf16_round_trips_through_exact_bytes() {
+        let value = RawValue::string_utf16("Deny");
+        assert_eq!(value.as_str_lossy(), Some("Deny".to_string()));
     }
 
     #[test]

@@ -2,8 +2,9 @@
 
 ## Status
 
-This is the target contract. The current `0.0.x` concept implements only a small
-command skeleton and performs no platform checks or changes.
+This is the target contract, not a description of the current build. What
+exists today, and where it falls short of this contract, is recorded in
+[ROADMAP.md](../ROADMAP.md#current-state).
 
 ## Design goals
 

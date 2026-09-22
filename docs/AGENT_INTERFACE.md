@@ -2,7 +2,9 @@
 
 ## Status
 
-Planned. No agent interface exists in the current concept build.
+Planned. No agent server exists yet. The JSON output of `check`, `list`,
+`explain`, and `plan` is available today; see
+[ROADMAP.md](../ROADMAP.md#current-state).
 
 This document describes how `privr` is consumed by an agent harness. For
 repository contribution rules, see [AGENTS.md](../AGENTS.md).

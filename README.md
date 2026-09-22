@@ -17,10 +17,20 @@ designed to be driven by an agent harness as readily as by a person.
 
 ## Status
 
-This repository is under active construction. **`privr check` works on Windows
-and carries two controls.** Everything else still returns exit code `3`.
+This repository is under active construction and has no release.
 
-On the machine this was developed on, the second control found something real:
+- **Windows `check`, `explain`, and `list` work**, with 23 read-only controls,
+  validated on one Windows 11 Pro machine.
+- **Windows `plan`, `apply`, and `rollback` are experimental.** They change real
+  settings but do not yet meet the safety requirements in the roadmap. Do not
+  use them on a machine you care about.
+- **Linux and macOS `check` are experimental** and have not been checked against
+  a real desktop. Treat their results as unverified.
+
+The full state, including known defects, is in
+[ROADMAP.md](ROADMAP.md#current-state).
+
+On the machine this was developed on, one control found something real:
 
 ```text
 diagnostics
@@ -35,20 +45,14 @@ diagnostics
 Something had set `AllowTelemetry = 0` on a Windows Professional machine. Every
 tool that checks that value reports telemetry as disabled. It is not.
 
-What works today, under test: host discovery, typed registry probing, the
-applicability model, the evaluation engine, `check`, `explain` with cited
-sources, `list` as a capability manifest, and versioned JSON output. Two
-controls are real; the number will grow slowly, because each one needs cited
-sources and fixtures before it ships.
-
-What is designed but not built: `plan`, `apply`, rollback, the agent server, and
-the macOS and Linux adapters.
+What is designed but not built: profiles that select different controls,
+sectioned approval, the agent server, fixture files, and signed releases.
 
 ## Where it is going
 
-`plan` is not built yet. This is the intended shape: changes grouped into
-sections you approve one at a time, every tradeoff paired with a way to keep the
-capability, and a plan that changes nothing.
+`plan` exists today only as a flat list. This is the intended shape: changes
+grouped into sections you approve one at a time, every tradeoff paired with a
+way to keep the capability, and a plan that changes nothing.
 
 ![privr plan, showing changes grouped into sections, a tradeoff paired with a mitigation, and confirmation that nothing has been changed](docs/assets/plan-linux.svg)
 
@@ -85,8 +89,7 @@ cited, version-aware, and honest about what it does not know.
 
 ## Install
 
-Building from source is currently the only path, and the binary does not yet
-report anything about your machine. Rust 1.95 or later:
+Building from source is currently the only path. Rust 1.95 or later:
 
 ```bash
 git clone https://github.com/blisspixel/privr
@@ -103,6 +106,10 @@ release. The installer will place an unprivileged binary and nothing else;
 ```text
 check -> explain -> plan -> apply -> verify -> rollback
 ```
+
+This is the target workflow. `check`, `explain`, and `list` behave as described
+on Windows; `plan`, `apply`, and `rollback` do not yet, as recorded in
+[ROADMAP.md](ROADMAP.md#current-state).
 
 ```text
 privr check
@@ -126,7 +133,8 @@ The full command and exit-code contract is in [docs/CLI.md](docs/CLI.md).
 ## Agents
 
 `privr` is designed to be driven by an agent harness from the first release,
-whether that is a coding assistant, a hosted model, or a local one.
+whether that is a coding assistant, a hosted model, or a local one. The agent
+server is planned; the properties below are its design.
 
 - Read-only tool access over stdio, so an agent can inspect and propose without
   being able to change anything.
@@ -141,6 +149,9 @@ whether that is a coding assistant, a hosted model, or a local one.
 never a dependency, and normal operation stays offline.
 
 ## Safety
+
+These are the release requirements. The experimental `apply` and `rollback` do
+not yet meet all of them; see [ROADMAP.md](ROADMAP.md#current-state).
 
 - No product telemetry, and no network requirement for normal operation.
 - No arbitrary shell commands in profiles or catalogue data.

@@ -19,6 +19,77 @@ schedule.
 The decisions that constrain every milestone are recorded in
 [docs/DECISIONS.md](docs/DECISIONS.md).
 
+## Current state
+
+Reviewed 2026-09-22 against `main`. This section is the single statement of
+what exists; other documents link here rather than repeating counts.
+
+Terms: **implemented** means the code exists; **tested** means automated tests
+cover it; **validated** means it was run and checked on a real machine;
+**experimental** means it runs but does not yet meet the requirements of its
+milestone and its results should not be trusted.
+
+| Area | State |
+|---|---|
+| Windows `check`, `explain`, `list` | Implemented and tested with recorded evidence. 23 read-only controls. Validated on one Windows 11 Pro 25H2 machine. |
+| Windows `plan`, `apply`, `rollback` | Experimental. 14 user-scope controls carry an apply and rollback. Unit tested only; not validated in a disposable VM. Does not meet the 0.2.0 requirements. |
+| Linux `check` | Experimental. Discovery and 9 controls (GNOME, Ubuntu, Debian, Fedora, KDE). Compiled and tested in CI; never checked against a real desktop. |
+| macOS `check` | Experimental. Discovery and 4 controls. Compiled and tested in CI; never checked against a real Mac. |
+| `doctor` | Placeholder. Reports that platform adapters are not implemented. |
+| Profile ladder | Not built. Every profile enforces every control. |
+| Custom policy files, interactive approval, sections | Not built. `apply` and `rollback` require `--yes`. |
+| Agent server | Not built. |
+| Fixture files, staleness, signed releases | Not built. |
+
+### Known issues
+
+These are defects in code already on `main`, not future work. Each must be
+fixed, or the affected path disabled, before the milestone it belongs to can
+exit.
+
+Mutation (blocks 0.2.0):
+
+- [ ] `apply` writes before journaling, and a failed journal write only warns
+  and continues. The journal must record the operation before the write, and a
+  journal failure must stop the apply.
+- [ ] `rollback` receives only the recorded prior value, so it cannot refuse
+  when current state no longer equals the recorded postimage.
+- [ ] The journal directory comes from environment variables and is not
+  permission-restricted. Transaction IDs have one-second resolution and can
+  collide.
+- [ ] `apply` has no plan review or section approval; `--yes` applies every
+  eligible change at once.
+- [ ] `rollback` of an unknown transaction prints the old concept-build notice
+  and exits `3`, where the contract calls for a clear usage error.
+- [ ] A registry test writes to the live `HKEY_CURRENT_USER` hive of whoever
+  runs the suite. Mutation must be tested through recorded context, with live
+  writes proven only in disposable VMs.
+
+Reporting (blocks 0.1.0):
+
+- [ ] `plan` prints "machine matches policy" when drift exists that has no
+  automatic remediation. On the validation machine `check` reports 5 drifted
+  machine-scope controls while `plan` reports none.
+- [ ] Controls ship without per-control fixture files, so the fixture
+  requirements in [CONTROL_STANDARD.md](docs/CONTROL_STANDARD.md) are unmet for
+  all of them.
+- [ ] The `security` section (LLMNR, WPAD, NCSI active probing) is closer to
+  generic hardening, a stated non-goal, than to optional data sharing. Decide
+  whether it belongs in the catalogue.
+
+Linux and macOS probes (block 0.3.0 and 0.4.0), each a false-pass risk:
+
+- [ ] macOS analytics searches the raw text of a property list for a key and a
+  `false` value anywhere in the file. The 0.3.0 requirements forbid parsing
+  preference files directly.
+- [ ] Ubuntu Report and Ubuntu Insights report `disabled` when a file is
+  absent. Absence of a file is not evidence that submission is off.
+- [ ] Fedora ABRT reads `abrt-action-save-package-data.conf` for the
+  auto-reporting setting. The governing file has not been verified against
+  primary sources.
+- [ ] Linux controls run without the ordered environment detection, dconf lock,
+  and live-session checks that 0.4.0 requires first.
+
 ## Current milestone: researched concept
 
 Status: in progress
@@ -45,6 +116,8 @@ Completed foundations:
 - [x] Implement typed read-only registry probing that keeps absent, denied, and
   malformed apart.
 - [x] Implement seven read-only Windows controls end to end.
+- [x] Grow the Windows catalogue to 23 read-only controls. Fixture files are
+  still owed; see Known issues.
 - [x] Implement `check`, `explain`, and `list`.
 - [x] Implement terminal presentation: colour, progress, wrapping, and explicit
   coverage alongside completeness.
@@ -61,7 +134,9 @@ Required before the first useful release:
   select different control sets rather than all controls being enforced.
 - [ ] Implement review staleness against a real reviewed-version range.
 - [ ] Implement `doctor` against real discovery.
-- [ ] Reach fifteen documented controls.
+- [ ] Reach fifteen documented controls. The count exists (23 on Windows);
+  what remains is the documentation and fixtures each needs under the control
+  standard.
 - [ ] Reserve the crate name, or decide on a different one.
 
 ## Naming
@@ -131,6 +206,10 @@ and an agent can drive it without being able to change anything.
 
 ## 0.2.0: Windows plan, apply, and rollback
 
+An experimental apply and rollback path already exists for 14 user-scope
+controls. It meets none of the transaction requirements below yet; see
+[Current state](#current-state).
+
 Product requirements:
 
 - [ ] Define the minimum custom-policy schema before mutation ships. This stays
@@ -182,6 +261,9 @@ over-the-shoulder elevation safety.
 
 ## 0.3.0: macOS read-only release
 
+Experimental discovery and 4 controls exist. They do not yet meet the
+requirements below; see [Current state](#current-state).
+
 - [ ] Support the current and two prior supported macOS releases.
 - [ ] Read through the preferences API, never by shelling to `defaults` and
   never by parsing preference files directly.
@@ -202,6 +284,9 @@ governs the visible setting, and no control claims a pass because an enforcing
 profile exists.
 
 ## 0.4.0: named Linux environments
+
+Experimental discovery and 9 controls exist. They do not yet meet the
+requirements below; see [Current state](#current-state).
 
 Initial targets:
 

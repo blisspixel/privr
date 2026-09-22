@@ -36,8 +36,10 @@ The following areas require additional review:
 - update and policy-signature verification;
 - apply, verification, and rollback ordering.
 
-The project does not currently provide operational remediation. The concept CLI
-changes zero system settings.
+The current build includes an experimental `apply` and `rollback` that change
+user-scope Windows registry values. They are not release quality; known gaps
+are listed in [ROADMAP.md](ROADMAP.md#current-state). Reports about them are
+welcome.
 
 See [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) for the security model and
 [docs/SUPPLY_CHAIN.md](docs/SUPPLY_CHAIN.md) for release and catalogue controls.

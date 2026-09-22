@@ -6,7 +6,10 @@ This threat model covers the future `privr` checker, policy catalogue, profile
 loader, planner, elevated helper, mutation engine, transaction journals,
 reports, catalogue updates, and release artifacts.
 
-The current concept CLI performs no system mutation.
+The current build includes an experimental `apply` and `rollback` for
+user-scope Windows registry values. It does not yet implement the journal,
+conflict, and approval controls this model requires; the gaps are listed in
+[ROADMAP.md](../ROADMAP.md#current-state).
 
 ## Security and privacy goals
 

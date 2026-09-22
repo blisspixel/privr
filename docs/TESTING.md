@@ -43,7 +43,9 @@ Implemented, and not merely designed:
 - replay coverage for the paths a live machine cannot be made to produce on
   demand, namely denied reads, malformed values, and specific edition
   combinations;
-- a suite that does not depend on the machine it runs on;
+- a suite that does not depend on the machine it runs on, with one exception:
+  a registry write test touches the live user hive, listed as a known issue in
+  [ROADMAP.md](../ROADMAP.md#current-state);
 - lints and the minimum-supported-Rust check on all three platforms, which has
   already caught failures in both directions.
 

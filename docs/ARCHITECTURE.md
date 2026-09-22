@@ -12,8 +12,9 @@ to misuse. Core invariants are:
 - mutation uses fresh state, typed adapters, and exact rollback journals;
 - uncertainty fails closed and remains visible.
 
-The current repository is a small CLI skeleton. The components below are the
-target architecture, not an implementation claim.
+The components below are the target architecture, not an implementation
+claim. The repository is still a single crate; what exists today is recorded in
+[ROADMAP.md](../ROADMAP.md#current-state).
 
 ## Proposed Rust workspace
 

@@ -12,9 +12,10 @@ possible bug.
 - Binding decisions: `docs/DECISIONS.md`. It overrides older statements in
   other documents until they are updated.
 - Planned work and milestone order: `ROADMAP.md`. Planned is not shipped.
-- Implemented behavior: `src/` and `tests/`. Code and tests outrank prose. Several
-  documents still describe a concept build with fewer controls than exist; fix
-  a stale status claim when your change touches it.
+- Current status and known defects: the Current state section of `ROADMAP.md`.
+  It is the only place that states control counts and maturity; other
+  documents link to it.
+- Implemented behavior: `src/` and `tests/`. Code and tests outrank prose.
 - Contribution workflow and control proposals: `CONTRIBUTING.md` and
   `docs/CONTROL_STANDARD.md`.
 
@@ -140,8 +141,8 @@ the authority.
 ## Documentation and project state
 
 - Keep README content concise and link to detailed documents.
-- Update the README status section and roadmap checkboxes in the same change
-  that makes them true. Mark concept, planned, experimental, and supported
+- Update the roadmap Current state, its known issues, and the README status
+  summary in the same change that makes them true. Mark concept, planned, experimental, and supported
   behavior clearly.
 - Explain privacy benefits together with security and functionality tradeoffs.
 - Use examples that contain no real user, machine, tenant, or account data.

@@ -1,4 +1,4 @@
-//! Typed, read-only Windows registry probing.
+//! Typed Windows registry probing, and experimental user-scope writes.
 //!
 //! Every target is a compiled constant. No path, key, or value name ever comes
 //! from catalogue data, a policy file, or a caller, which is what keeps

@@ -2,9 +2,10 @@
 
 ## Status
 
-This is a research-backed candidate matrix. The concept build implements none of
-these controls yet. A control becomes supported only after meeting
-[CONTROL_STANDARD.md](CONTROL_STANDARD.md).
+This is a research-backed candidate matrix, not a list of implemented
+controls. Which controls the build carries, and how far each is validated, is
+recorded in [ROADMAP.md](../ROADMAP.md#current-state). No control is supported
+until it meets [CONTROL_STANDARD.md](CONTROL_STANDARD.md).
 
 Research reviewed: 2026-08-30.
 

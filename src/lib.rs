@@ -1,7 +1,8 @@
 //! `privr` is a local-first privacy posture CLI.
 //!
-//! This crate is a concept build. It carries the shared model and the command
-//! surface, and performs no platform observation or mutation yet.
+//! Read-only observation is implemented for Windows, and experimentally for
+//! Linux and macOS. Mutation is experimental and Windows user-scope only. See
+//! the Current state section of `ROADMAP.md`.
 
 #![forbid(unsafe_code)]
 

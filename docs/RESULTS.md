@@ -157,7 +157,9 @@ when the selected policy expected them to be evaluated on that host.
 Truncation for output size is always reported explicitly. Silently omitting
 results reads as a pass.
 
-The current concept build always reports `complete: false`.
+The current build reports `complete: true` only when every selected control
+was evaluated. Some Linux and macOS probes can report a determined state from
+insufficient evidence; see [ROADMAP.md](../ROADMAP.md#current-state).
 
 ## Exit codes
 

@@ -84,10 +84,7 @@ fn handle_message(req: &Value, allow_apply: bool, err: &mut impl Write) -> Optio
     };
 
     // If there is no id, it is a notification (e.g. notifications/initialized)
-    let req_id = match id {
-        Some(id_val) => id_val.clone(),
-        None => return None,
-    };
+    let req_id = id?.clone();
 
     let response_result = match method {
         "initialize" => handle_initialize(req.get("params")),
@@ -694,5 +691,207 @@ mod tests {
         assert_eq!(resp["id"], 42);
         let content_text = resp["result"]["content"][0]["text"].as_str().expect("text");
         assert!(content_text.contains("thumbnail"));
+    }
+
+    #[test]
+    fn privr_status_returns_facts() {
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "privr_status"
+            }
+        });
+        let mut err = Vec::new();
+        let resp = handle_message(&req, false, &mut err).expect("response");
+        assert_eq!(resp["id"], 2);
+        let text = resp["result"]["content"][0]["text"].as_str().expect("text");
+        assert!(text.contains("platform"));
+    }
+
+    #[test]
+    fn privr_check_evaluates_profiles() {
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": {
+                "name": "privr_check",
+                "arguments": {
+                    "profile": "baseline",
+                    "all": true
+                }
+            }
+        });
+        let mut err = Vec::new();
+        let resp = handle_message(&req, false, &mut err).expect("response");
+        assert_eq!(resp["id"], 3);
+        let text = resp["result"]["content"][0]["text"].as_str().expect("text");
+        assert!(text.contains("results"));
+    }
+
+    #[test]
+    fn privr_explain_handles_unknown_id() {
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 4,
+            "method": "tools/call",
+            "params": {
+                "name": "privr_explain",
+                "arguments": {
+                    "id": "completely.unknown.control"
+                }
+            }
+        });
+        let mut err = Vec::new();
+        let resp = handle_message(&req, false, &mut err).expect("response");
+        assert_eq!(resp["id"], 4);
+        assert_eq!(resp["result"]["isError"], true);
+    }
+
+    #[test]
+    fn privr_plan_returns_change_set() {
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 5,
+            "method": "tools/call",
+            "params": {
+                "name": "privr_plan",
+                "arguments": {
+                    "profile": "strict"
+                }
+            }
+        });
+        let mut err = Vec::new();
+        let resp = handle_message(&req, false, &mut err).expect("response");
+        assert_eq!(resp["id"], 5);
+        let text = resp["result"]["content"][0]["text"].as_str().expect("text");
+        assert!(text.contains("planned_changes"));
+    }
+
+    #[test]
+    fn privr_apply_requires_allow_apply_and_confirmation() {
+        // Disallowed
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 6,
+            "method": "tools/call",
+            "params": {
+                "name": "privr_apply",
+                "arguments": { "yes": true }
+            }
+        });
+        let mut err = Vec::new();
+        let resp = handle_message(&req, false, &mut err).expect("response");
+        assert_eq!(resp["result"]["isError"], true);
+
+        // Allowed but unconfirmed
+        let req_unconfirmed = json!({
+            "jsonrpc": "2.0",
+            "id": 7,
+            "method": "tools/call",
+            "params": {
+                "name": "privr_apply",
+                "arguments": { "yes": false }
+            }
+        });
+        let resp2 = handle_message(&req_unconfirmed, true, &mut err).expect("response");
+        assert_eq!(resp2["result"]["isError"], true);
+    }
+
+    #[test]
+    fn privr_rollback_requires_allow_apply_and_confirmation() {
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 8,
+            "method": "tools/call",
+            "params": {
+                "name": "privr_rollback",
+                "arguments": { "transaction_id": "tx-fake", "yes": true }
+            }
+        });
+        let mut err = Vec::new();
+        let resp = handle_message(&req, false, &mut err).expect("response");
+        assert_eq!(resp["result"]["isError"], true);
+
+        // Unconfirmed
+        let req_unconfirmed = json!({
+            "jsonrpc": "2.0",
+            "id": 9,
+            "method": "tools/call",
+            "params": {
+                "name": "privr_rollback",
+                "arguments": { "transaction_id": "tx-fake", "yes": false }
+            }
+        });
+        let resp2 = handle_message(&req_unconfirmed, true, &mut err).expect("response");
+        assert_eq!(resp2["result"]["isError"], true);
+
+        // Confirmed but nonexistent transaction
+        let resp3 = handle_message(&req, true, &mut err).expect("response");
+        assert_eq!(resp3["result"]["isError"], true);
+    }
+
+    #[test]
+    fn unknown_tool_returns_error() {
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 10,
+            "method": "tools/call",
+            "params": {
+                "name": "unknown_tool_name"
+            }
+        });
+        let mut err = Vec::new();
+        let resp = handle_message(&req, false, &mut err).expect("response");
+        assert!(resp["error"].is_object());
+    }
+
+    #[test]
+    fn protocol_notifications_and_methods() {
+        let mut err = Vec::new();
+        // ping
+        let ping_req = json!({ "jsonrpc": "2.0", "id": 11, "method": "ping" });
+        let resp = handle_message(&ping_req, false, &mut err).expect("response");
+        assert_eq!(resp["result"], json!({}));
+
+        // resources & prompts
+        let res_req = json!({ "jsonrpc": "2.0", "id": 12, "method": "resources/list" });
+        let resp_res = handle_message(&res_req, false, &mut err).expect("response");
+        assert!(resp_res["result"]["resources"].is_array());
+
+        let prompt_req = json!({ "jsonrpc": "2.0", "id": 13, "method": "prompts/list" });
+        let resp_prompt = handle_message(&prompt_req, false, &mut err).expect("response");
+        assert!(resp_prompt["result"]["prompts"].is_array());
+
+        // notification without id
+        let notif = json!({ "jsonrpc": "2.0", "method": "notifications/initialized" });
+        assert!(handle_message(&notif, false, &mut err).is_none());
+
+        // unknown method
+        let unk_req = json!({ "jsonrpc": "2.0", "id": 14, "method": "nonexistent" });
+        let resp_unk = handle_message(&unk_req, false, &mut err).expect("response");
+        assert!(resp_unk["error"].is_object());
+    }
+
+    #[test]
+    fn parse_profile_validation() {
+        assert_eq!(parse_profile("baseline").unwrap(), Profile::Baseline);
+        assert_eq!(parse_profile("strict").unwrap(), Profile::Strict);
+        assert_eq!(parse_profile("restrictive").unwrap(), Profile::Restrictive);
+        assert!(parse_profile("invalid").is_err());
+    }
+
+    #[test]
+    fn run_stdio_processes_lines() {
+        let input = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}\n\n{\"invalid json\n";
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        let code = run_stdio(false, input.as_bytes(), &mut out, &mut err);
+        assert_eq!(code, 0);
+        let out_str = String::from_utf8(out).expect("utf8 stdout");
+        assert!(out_str.contains("\"id\":1"));
+        assert!(out_str.contains("Parse error"));
     }
 }

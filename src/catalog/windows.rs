@@ -719,6 +719,28 @@ const DEVICE_SEARCH_HISTORY: Toggle = Toggle {
     absent_means: "enabled",
 };
 
+const THUMBNAIL_CACHE: Toggle = Toggle {
+    target: Target::new(
+        Hive::CurrentUser,
+        r"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer",
+        "NoThumbnailCache",
+        View::Native,
+    ),
+    private_value: 1,
+    absent_means: "enabled",
+};
+
+const EDGE_METRICS: Toggle = Toggle {
+    target: Target::new(
+        Hive::CurrentUser,
+        r"Software\Policies\Microsoft\Edge",
+        "MetricsReportingEnabled",
+        View::Native,
+    ),
+    private_value: 0,
+    absent_means: "enabled",
+};
+
 /// Typing and inking personalisation, which is two values rather than one.
 ///
 /// Both restrictions must be in place. Reporting the setting as off because one
@@ -1022,6 +1044,10 @@ const SYSTEM_CSP: &str =
     "https://learn.microsoft.com/windows/client-management/mdm/policy-csp-system";
 const DNS_CLIENT_CSP: &str =
     "https://learn.microsoft.com/windows/client-management/mdm/policy-csp-dnsclient";
+const FILE_EXPLORER_CSP: &str =
+    "https://learn.microsoft.com/windows/client-management/mdm/policy-csp-fileexplorer";
+const EDGE_POLICY_DOCS: &str =
+    "https://learn.microsoft.com/deployedge/microsoft-edge-policies/metricsreportingenabled";
 
 /// Every Windows control, in stable sorted order by identifier.
 pub fn controls() -> Vec<Control> {
@@ -1421,6 +1447,44 @@ pub fn controls() -> Vec<Control> {
                 reviewed: "2026-09-22",
             }],
             probe_wpad,
+            None,
+            None,
+        ),
+        toggle_control(
+            "windows.browser.edge.telemetry",
+            "browser",
+            "Microsoft Edge diagnostic reporting",
+            "Microsoft Edge collects browsing diagnostic metrics and uncompressed crash memory dumps.",
+            "Edge transmits usage telemetry and stores crash memory dumps in Crashpad containing visited URLs, cookies, and active DOM contents.",
+            Some("Automatic crash dump and diagnostic transmission to Microsoft is disabled."),
+            Some("Web browsing, extensions, and developer tools continue to function normally."),
+            &[Source {
+                url: EDGE_POLICY_DOCS,
+                claim: "Documents Microsoft Edge metrics and diagnostic reporting policy.",
+                reviewed: "2026-10-01",
+            }],
+            |ctx| EDGE_METRICS.probe(ctx),
+            None,
+            None,
+        ),
+        toggle_control(
+            "windows.storage.thumbnail-cache",
+            "storage",
+            "File Explorer thumbnail caching",
+            "Windows Explorer renders and caches visual thumbnails of opened images, videos, and documents.",
+            "Explorer generates scaled visual thumbnails in global databases (thumbcache_*.db). These thumbnails persist unencrypted on disk even after files are deleted or viewed from encrypted volumes.",
+            Some(
+                "Explorer displays generic file icons instead of visual picture and video previews.",
+            ),
+            Some(
+                "Pictures, videos, and documents can still be opened and previewed directly inside applications.",
+            ),
+            &[Source {
+                url: FILE_EXPLORER_CSP,
+                claim: "Documents File Explorer thumbnail cache policy.",
+                reviewed: "2026-10-01",
+            }],
+            |ctx| THUMBNAIL_CACHE.probe(ctx),
             None,
             None,
         ),

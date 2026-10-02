@@ -17,6 +17,7 @@ const APPLE_RESTRICTIONS_URL: &str =
     "https://support.apple.com/guide/deployment/restrictions-for-mac-depba790e53/web";
 const MAC_ANALYTICS_URL: &str = "https://support.apple.com/guide/mac-help/mh27990/mac";
 const SIRI_PRIVACY_URL: &str = "https://support.apple.com/en-us/127070";
+const QUICKLOOK_DOCS_URL: &str = "https://developer.apple.com/documentation/quicklook";
 
 fn probe_macos_analytics(_ctx: &Context) -> Resolution {
     let path = std::path::Path::new(
@@ -165,6 +166,40 @@ pub fn controls() -> Vec<Control> {
                 url: SIRI_PRIVACY_URL,
                 claim: "Documents Siri and Dictation data sharing opt-out.",
                 reviewed: "2026-09-21",
+            }],
+            probe: probe_macos_unmanaged_guided,
+            apply: None,
+            rollback: None,
+        },
+        Control {
+            spec: ControlSpec {
+                id: "macos.storage.quicklook-cache".to_owned(),
+                title: "Quick Look thumbnail cache".to_owned(),
+                section: "storage".to_owned(),
+                applicability: Applicability::new(vec![Variant::new(
+                    "macos",
+                    vec![Predicate::Platform(Platform::Macos)],
+                )]),
+                desired: disabled(),
+                reversibility: Reversibility::Exact,
+                maturity: Maturity::Automated,
+                verified_through: None,
+                remediation: Remediation::AuditOnly,
+                remediation_reason: None,
+            },
+            title: "Quick Look thumbnail cache",
+            summary: "macOS generates and retains unencrypted file thumbnails when files are previewed in Finder or Quick Look.",
+            rationale: "Quick Look caches rendered previews of images, documents, and media in cleartext on the boot volume even when original files reside on encrypted volumes or external drives.",
+            tradeoff: Some(
+                "First-time file preview rendering in Finder takes slightly longer without a persistent cache.",
+            ),
+            mitigation: Some(
+                "Quick Look previews continue to render on demand; cache generation can be cleared periodically.",
+            ),
+            sources: &[Source {
+                url: QUICKLOOK_DOCS_URL,
+                claim: "Documents Quick Look thumbnail generation and caching framework.",
+                reviewed: "2026-10-01",
             }],
             probe: probe_macos_unmanaged_guided,
             apply: None,

@@ -24,6 +24,10 @@ const DEBIAN_POPCON_URL: &str =
     "https://manpages.debian.org/testing/popularity-contest/popularity-contest.8.en.html";
 const FEDORA_ABRT_URL: &str = "https://github.com/abrt/doc/blob/master/conf.rst";
 const KDE_USERFEEDBACK_URL: &str = "https://develop.kde.org/docs/administration/kiosk/keys/";
+const SYSTEMD_COREDUMP_URL: &str =
+    "https://manpages.debian.org/testing/systemd-coredump/systemd-coredump.conf.5.en.html";
+const FREEDESKTOP_THUMBNAIL_URL: &str =
+    "https://specifications.freedesktop.org/thumbnail-spec/thumbnail-spec-latest.html";
 
 /// Probe Debian popularity-contest configuration.
 fn probe_debian_popcon(_ctx: &Context) -> Resolution {
@@ -134,6 +138,35 @@ fn probe_kde_feedback(_ctx: &Context) -> Resolution {
     Resolution::determined(disabled(), ManagementSource::Default)
 }
 
+/// Probe systemd core dump persistence.
+fn probe_systemd_coredump(_ctx: &Context) -> Resolution {
+    let conf = std::path::Path::new("/etc/systemd/coredump.conf");
+    if !conf.exists() {
+        return Resolution::determined(enabled(), ManagementSource::Default);
+    }
+    match std::fs::read_to_string(conf) {
+        Ok(content) => {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if trimmed.starts_with("Storage=") {
+                    let val = trimmed.trim_start_matches("Storage=").trim();
+                    if val.eq_ignore_ascii_case("none") {
+                        return Resolution::determined(disabled(), ManagementSource::LocalPolicy);
+                    }
+                    return Resolution::determined(enabled(), ManagementSource::LocalPolicy);
+                }
+            }
+            Resolution::determined(enabled(), ManagementSource::Default)
+        }
+        Err(_) => Resolution::uncertain(Uncertainty::Undetermined, ManagementSource::LocalPolicy),
+    }
+}
+
+/// Probe FreeDesktop thumbnail caching.
+fn probe_freedesktop_thumbnails(_ctx: &Context) -> Resolution {
+    Resolution::uncertain(Uncertainty::Undetermined, ManagementSource::User)
+}
+
 /// Return all Linux controls, sorted by identifier.
 pub fn controls() -> Vec<Control> {
     let mut controls = vec![
@@ -209,6 +242,40 @@ pub fn controls() -> Vec<Control> {
                 reviewed: "2026-09-21",
             }],
             probe: probe_fedora_abrt,
+            apply: None,
+            rollback: None,
+        },
+        Control {
+            spec: ControlSpec {
+                id: "freedesktop.thumbnails.caching".to_owned(),
+                title: "FreeDesktop thumbnail caching".to_owned(),
+                section: "freedesktop".to_owned(),
+                applicability: Applicability::new(vec![Variant::new(
+                    "linux-desktop",
+                    vec![Predicate::LiveSession(true)],
+                )]),
+                desired: disabled(),
+                reversibility: Reversibility::Exact,
+                maturity: Maturity::Automated,
+                verified_through: None,
+                remediation: Remediation::AuditOnly,
+                remediation_reason: None,
+            },
+            title: "FreeDesktop thumbnail caching",
+            summary: "Linux desktop environments generate and retain unencrypted file thumbnails when browsing folders.",
+            rationale: "FreeDesktop thumbnail management caches high-resolution previews in ~/.cache/thumbnails/ with MD5 URI mapping to original file paths, persisting after files are deleted.",
+            tradeoff: Some(
+                "Desktop file managers display generic file icons instead of visual media previews.",
+            ),
+            mitigation: Some(
+                "Media files can be opened and viewed directly in default applications.",
+            ),
+            sources: &[Source {
+                url: FREEDESKTOP_THUMBNAIL_URL,
+                claim: "Documents FreeDesktop Thumbnail Management Standard.",
+                reviewed: "2026-10-01",
+            }],
+            probe: probe_freedesktop_thumbnails,
             apply: None,
             rollback: None,
         },
@@ -382,6 +449,37 @@ pub fn controls() -> Vec<Control> {
                 reviewed: "2026-09-21",
             }],
             probe: probe_kde_feedback,
+            apply: None,
+            rollback: None,
+        },
+        Control {
+            spec: ControlSpec {
+                id: "systemd.coredump.storage".to_owned(),
+                title: "Systemd core dump persistence".to_owned(),
+                section: "systemd".to_owned(),
+                applicability: Applicability::new(vec![Variant::new("linux-systemd", vec![])]),
+                desired: disabled(),
+                reversibility: Reversibility::Exact,
+                maturity: Maturity::Automated,
+                verified_through: None,
+                remediation: Remediation::AuditOnly,
+                remediation_reason: None,
+            },
+            title: "Systemd core dump persistence",
+            summary: "systemd-coredump records process memory dumps to disk when applications crash.",
+            rationale: "Crash dumps store full process memory contents, which can expose passwords, encryption keys, decrypted tokens, and sensitive document text.",
+            tradeoff: Some(
+                "Developers and administrators cannot inspect post-crash core dumps for offline debugging.",
+            ),
+            mitigation: Some(
+                "Crash stack traces and backtraces remain logged in systemd-journald.",
+            ),
+            sources: &[Source {
+                url: SYSTEMD_COREDUMP_URL,
+                claim: "Documents systemd-coredump storage configuration.",
+                reviewed: "2026-10-01",
+            }],
+            probe: probe_systemd_coredump,
             apply: None,
             rollback: None,
         },

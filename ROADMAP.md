@@ -21,7 +21,7 @@ The decisions that constrain every milestone are recorded in
 
 ## Current state
 
-Reviewed 2026-09-22 against `main`. This section is the single statement of
+Reviewed 2026-10-02 against `main`. This section is the single statement of
 what exists; other documents link here rather than repeating counts.
 
 Terms: **implemented** means the code exists; **tested** means automated tests
@@ -31,14 +31,14 @@ milestone and its results should not be trusted.
 
 | Area | State |
 |---|---|
-| Windows `check`, `explain`, `list` | Implemented and tested with recorded evidence. 23 read-only controls. Validated on one Windows 11 Pro 25H2 machine. |
+| Windows `check`, `explain`, `list` | Implemented and tested with recorded evidence. 25 read-only controls. Validated on one Windows 11 Pro 25H2 machine. |
 | Windows `plan`, `apply`, `rollback` | Experimental. 14 user-scope controls carry an apply and rollback. Unit tested only; not validated in a disposable VM. Does not meet the 0.2.0 requirements. |
-| Linux `check` | Experimental. Discovery and 9 controls (GNOME, Ubuntu, Debian, Fedora, KDE). Compiled and tested in CI; never checked against a real desktop. |
-| macOS `check` | Experimental. Discovery and 4 controls. Compiled and tested in CI; never checked against a real Mac. |
+| Linux `check` | Experimental. Discovery and 11 controls (GNOME, Ubuntu, Debian, Fedora, KDE, FreeDesktop, systemd). Compiled and tested in CI; never checked against a real desktop. |
+| macOS `check` | Experimental. Discovery and 5 controls. Compiled and tested in CI; never checked against a real Mac. |
+| Agent server (`mcp`) | Implemented and tested. Synchronous stdio server with read-only tools and gated mutation. Conforms to Model Context Protocol and Agent Plugins v1.0.0. |
 | `doctor` | Placeholder. Reports that platform adapters are not implemented. |
 | Profile ladder | Not built. Every profile enforces every control. |
 | Custom policy files, interactive approval, sections | Not built. `apply` and `rollback` require `--yes`. |
-| Agent server | Not built. |
 | Fixture files, staleness, signed releases | Not built. |
 
 ### Known issues

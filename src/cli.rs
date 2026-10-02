@@ -94,6 +94,12 @@ pub enum Command {
     },
     /// Check whether commands needed by the current platform are available.
     Doctor,
+    /// Run a stdio Model Context Protocol (MCP) server for agent integration.
+    Mcp {
+        /// Expose mutation tools in tool discovery.
+        #[arg(long)]
+        allow_apply: bool,
+    },
 }
 
 /// When to emit colour.

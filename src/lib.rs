@@ -13,6 +13,7 @@ pub mod engine;
 mod explain;
 pub mod journal;
 mod manifest;
+pub mod mcp;
 pub mod model;
 pub mod platform;
 mod report;

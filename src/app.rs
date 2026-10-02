@@ -522,6 +522,11 @@ Run privr list to see every control in this build."
             );
             3
         }
+        Command::Mcp { allow_apply } => {
+            let stdin = std::io::stdin();
+            let reader = stdin.lock();
+            crate::mcp::run_stdio(allow_apply, reader, out, err)
+        }
     }
 }
 
@@ -692,14 +697,14 @@ mod tests {
 
     #[test]
     fn confirmed_apply_reports_clean_state_or_applied() {
-        let (code, stdout, _) = run_for_test(Some(Command::Apply {
+        let (code, stdout, stderr) = run_for_test(Some(Command::Apply {
             profile: Some(Profile::Baseline),
             policy: None,
             dry_run: false,
             yes: true,
             controls: Vec::new(),
         }));
-        assert_eq!(code, 0);
+        assert_eq!(code, 0, "stderr: {stderr}");
         assert!(stdout.contains("Machine matches policy") || stdout.contains("Applied"));
     }
 

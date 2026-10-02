@@ -1,0 +1,21 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "privr",
+  "version": "0.0.1",
+  "description": "Local-first privacy posture auditing, forensic residue analysis, and verified remediation",
+  "author": {
+    "name": "privr contributors",
+    "url": "https://github.com/blisspixel/privr"
+  },
+  "homepage": "https://github.com/blisspixel/privr",
+  "repository": "https://github.com/blisspixel/privr",
+  "license": "Apache-2.0",
+  "keywords": [
+    "privacy",
+    "security",
+    "forensics",
+    "mcp",
+    "agent-plugin",
+    "compliance"
+  ]
+}

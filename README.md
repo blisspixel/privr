@@ -19,13 +19,15 @@ designed to be driven by an agent harness as readily as by a person.
 
 This repository is under active construction and has no release.
 
-- **Windows `check`, `explain`, and `list` work**, with 23 read-only controls,
+- **Windows `check`, `explain`, and `list` work**, with 25 read-only controls,
   validated on one Windows 11 Pro machine.
 - **Windows `plan`, `apply`, and `rollback` are experimental.** They change real
   settings but do not yet meet the safety requirements in the roadmap. Do not
   use them on a machine you care about.
-- **Linux and macOS `check` are experimental** and have not been checked against
-  a real desktop. Treat their results as unverified.
+- **Linux (11 controls) and macOS (5 controls) `check` are experimental** and have
+  not been checked against a real desktop. Treat their results as unverified.
+- **Agent integration (`privr mcp`) is implemented**, providing a stdio Model
+  Context Protocol (MCP) server and portable Agent Plugins v1.0.0 package.
 
 The full state, including known defects, is in
 [ROADMAP.md](ROADMAP.md#current-state).
@@ -46,7 +48,7 @@ Something had set `AllowTelemetry = 0` on a Windows Professional machine. Every
 tool that checks that value reports telemetry as disabled. It is not.
 
 What is designed but not built: profiles that select different controls,
-sectioned approval, the agent server, fixture files, and signed releases.
+sectioned approval, fixture files, and signed releases.
 
 ## Where it is going
 
@@ -131,15 +133,19 @@ privr rollback <transaction-id>
 The full command and exit-code contract is in [docs/CLI.md](docs/CLI.md).
 
 ## Agents
-
+ 
 `privr` is designed to be driven by an agent harness from the first release,
-whether that is a coding assistant, a hosted model, or a local one. The agent
-server is planned; the properties below are its design.
+whether that is a coding assistant, a hosted model, or a local one. A direct
+stdio server is implemented at `privr mcp`, alongside packaging for the open
+[Agent Plugins](https://agent-plugins.org/) standard (`plugin.json`, `mcp.json`,
+and `skills/privr/SKILL.md`).
 
-- Read-only tool access over stdio, so an agent can inspect and propose without
-  being able to change anything.
-- Mutating tools are absent from discovery unless explicitly enabled, and
-  approval cannot be granted through a tool call.
+- Read-only tool access (`privr_status`, `privr_catalog`, `privr_check`,
+  `privr_explain`, `privr_plan`) over stdio, so an agent can inspect and
+  propose without being able to change anything.
+- Mutating tools (`privr_apply`, `privr_rollback`) are absent from discovery
+  unless explicitly enabled via `--allow-apply`, and approval cannot be granted
+  through an unconfirmed tool call.
 - Result objects are self-contained and ordered deterministically, with
   verbosity tiers so a full report fits a small context window.
 - Reports carry no stable machine identifier, so a report is safe to hand to a
@@ -182,6 +188,7 @@ See [docs/SAFETY.md](docs/SAFETY.md) and
 - [Safety model](docs/SAFETY.md)
 - [Threat model](docs/THREAT_MODEL.md)
 - [Privacy behavior](docs/PRIVACY.md)
+- [Privacy residue and erasure](docs/PRIVACY_RESIDUE.md)
 - [Testing strategy](docs/TESTING.md)
 - [Supply-chain security](docs/SUPPLY_CHAIN.md)
 - [Research notes](docs/RESEARCH.md)

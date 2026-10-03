@@ -23,11 +23,14 @@ const UNICODE_FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "�
 const ASCII_FRAMES: [&str; 4] = ["|", "/", "-", "\\"];
 
 const INTERVAL: Duration = Duration::from_millis(80);
+const MIN_DISPLAY_DURATION: Duration = Duration::from_millis(200);
 
 /// A running spinner. Stops and clears when dropped.
 pub struct Spinner {
     running: Arc<AtomicBool>,
     handle: Option<JoinHandle<()>>,
+    start_time: Option<std::time::Instant>,
+    cleanup: Option<Box<dyn FnOnce() + Send>>,
 }
 
 impl Spinner {
@@ -37,33 +40,73 @@ impl Spinner {
             return Self::inert();
         }
 
+        Self::start_with_writer(
+            message,
+            unicode,
+            true,
+            || Box::new(anstream::stderr()) as Box<dyn Write + Send>,
+            Box::new(|| {
+                let mut err = anstream::stderr();
+                let _ = write!(err, "\r\x1b[2K");
+                let _ = err.flush();
+            }),
+        )
+    }
+
+    /// Start a spinner with an explicit terminal availability flag and custom writer.
+    pub fn start_with_writer<F>(
+        message: &str,
+        unicode: bool,
+        is_terminal: bool,
+        writer_factory: F,
+        cleanup: Box<dyn FnOnce() + Send>,
+    ) -> Self
+    where
+        F: Fn() -> Box<dyn Write + Send> + Send + 'static,
+    {
+        if !is_terminal {
+            return Self::inert();
+        }
+
+        let frames: &'static [&'static str] = if unicode {
+            &UNICODE_FRAMES
+        } else {
+            &ASCII_FRAMES
+        };
+
+        // Draw initial frame immediately for zero-latency feedback.
+        {
+            let mut err = writer_factory();
+            let _ = write!(err, "\r\x1b[2K{} {message}", frames[0]);
+            let _ = err.flush();
+        }
+
+        let start_time = std::time::Instant::now();
         let running = Arc::new(AtomicBool::new(true));
         let flag = Arc::clone(&running);
-        let message = message.to_owned();
+        let msg = message.to_owned();
 
         let handle = thread::spawn(move || {
-            let frames: &[&str] = if unicode {
-                &UNICODE_FRAMES
-            } else {
-                &ASCII_FRAMES
-            };
-            let mut index = 0;
+            let mut index = 1;
             while flag.load(Ordering::Relaxed) {
-                let mut err = std::io::stderr().lock();
+                thread::sleep(INTERVAL);
+                if !flag.load(Ordering::Relaxed) {
+                    break;
+                }
+                let mut err = writer_factory();
                 // Carriage return and clear-to-end, so each frame overwrites
                 // the previous one rather than accumulating lines.
-                let _ = write!(err, "\r\x1b[2K{} {message}", frames[index % frames.len()]);
+                let _ = write!(err, "\r\x1b[2K{} {msg}", frames[index % frames.len()]);
                 let _ = err.flush();
-                drop(err);
-
                 index = index.wrapping_add(1);
-                thread::sleep(INTERVAL);
             }
         });
 
         Self {
             running,
             handle: Some(handle),
+            start_time: Some(start_time),
+            cleanup: Some(cleanup),
         }
     }
 
@@ -72,6 +115,8 @@ impl Spinner {
         Self {
             running: Arc::new(AtomicBool::new(false)),
             handle: None,
+            start_time: None,
+            cleanup: None,
         }
     }
 
@@ -82,12 +127,19 @@ impl Spinner {
 
     /// Stop and erase the line.
     pub fn finish(&mut self) {
-        self.running.store(false, Ordering::Relaxed);
-        if let Some(handle) = self.handle.take() {
-            let _ = handle.join();
-            let mut err = std::io::stderr().lock();
-            let _ = write!(err, "\r\x1b[2K");
-            let _ = err.flush();
+        if self.running.swap(false, Ordering::Relaxed) {
+            if let Some(start_time) = self.start_time.take() {
+                let elapsed = start_time.elapsed();
+                if elapsed < MIN_DISPLAY_DURATION {
+                    thread::sleep(MIN_DISPLAY_DURATION - elapsed);
+                }
+            }
+            if let Some(handle) = self.handle.take() {
+                let _ = handle.join();
+            }
+            if let Some(cleanup) = self.cleanup.take() {
+                cleanup();
+            }
         }
     }
 }
@@ -119,6 +171,75 @@ mod tests {
         spinner.finish();
         // Finishing twice must not panic or block, because Drop also finishes.
         spinner.finish();
+    }
+
+    #[test]
+    fn an_active_spinner_runs_and_finishes_cleanly() {
+        let buffer = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let b1 = Arc::clone(&buffer);
+        let b2 = Arc::clone(&buffer);
+
+        struct BufWriter(Arc<std::sync::Mutex<Vec<u8>>>);
+        impl Write for BufWriter {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(buf);
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let mut spinner = Spinner::start_with_writer(
+            "scanning controls",
+            true,
+            true,
+            move || Box::new(BufWriter(Arc::clone(&b1))),
+            Box::new(move || {
+                let mut w = BufWriter(b2);
+                let _ = write!(w, "\r\x1b[2K");
+            }),
+        );
+        assert!(spinner.is_active());
+        spinner.finish();
+        assert!(!spinner.is_active());
+        // Second finish call must be idempotent.
+        spinner.finish();
+
+        let out = String::from_utf8(buffer.lock().unwrap().clone()).unwrap();
+        assert!(out.contains("scanning controls"));
+        assert!(out.contains("\x1b[2K"));
+    }
+
+    #[test]
+    fn an_active_ascii_spinner_cleans_up_on_drop() {
+        let buffer = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let b1 = Arc::clone(&buffer);
+        let b2 = Arc::clone(&buffer);
+
+        struct BufWriter(Arc<std::sync::Mutex<Vec<u8>>>);
+        impl Write for BufWriter {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(buf);
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let spinner = Spinner::start_with_writer(
+            "ascii scanning",
+            false,
+            true,
+            move || Box::new(BufWriter(Arc::clone(&b1))),
+            Box::new(move || {
+                let mut w = BufWriter(b2);
+                let _ = write!(w, "\r\x1b[2K");
+            }),
+        );
+        assert!(spinner.is_active());
+        drop(spinner);
     }
 
     #[test]

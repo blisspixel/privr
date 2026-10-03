@@ -5,6 +5,7 @@
 //! On Windows, triggers Shell.Application ShellExecute with verb "runas" (UAC).
 //! On Unix, triggers sudo.
 
+use std::io::Write;
 use std::path::Path;
 
 /// Result of an elevated execution attempt.
@@ -56,8 +57,7 @@ impl<'a> DualWriter<'a> {
             }
             std::fs::OpenOptions::new()
                 .create(true)
-                .write(true)
-                .truncate(true)
+                .append(true)
                 .open(p)
                 .ok()
         });
@@ -80,6 +80,12 @@ impl<'a> std::io::Write for DualWriter<'a> {
             let _ = sec.flush();
         }
         Ok(())
+    }
+}
+
+impl<'a> Drop for DualWriter<'a> {
+    fn drop(&mut self) {
+        let _ = self.flush();
     }
 }
 

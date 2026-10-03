@@ -114,6 +114,15 @@ impl Ui {
         Spinner::start(message, self.unicode)
     }
 
+    /// Start a spinner when text output is requested, inert otherwise.
+    pub fn spinner_for(&self, message: &str, format: crate::cli::OutputFormat) -> Spinner {
+        if format != crate::cli::OutputFormat::Text {
+            Spinner::inert()
+        } else {
+            self.spinner(message)
+        }
+    }
+
     /// Wrap prose to the usable width at whitespace, indenting continuations.
     ///
     /// Explanations are sentences, and a sentence that runs off the edge of a

@@ -266,25 +266,39 @@ impl Report {
             out.push('\n');
 
             if self.summary.drift > 0 {
-                out.push_str(&format!("\n{}\n", ui.paint(style::HEADING, "Actionable Next Steps")));
+                out.push_str(&format!(
+                    "\n{}\n",
+                    ui.paint(style::HEADING, "Actionable Next Steps")
+                ));
                 out.push_str(&format!(
                     "  {} {}\n",
                     ui.paint(style::IDENT, "privr apply"),
-                    ui.paint(style::MUTED, "- Apply recommended daily-driver privacy protections in-place")
+                    ui.paint(
+                        style::MUTED,
+                        "- Apply recommended daily-driver privacy protections in-place"
+                    )
                 ));
                 out.push_str(&format!(
                     "  {} {}\n",
                     ui.paint(style::IDENT, "privr plan"),
-                    ui.paint(style::MUTED, "- Preview eligible changes, current/desired state, and friction")
+                    ui.paint(
+                        style::MUTED,
+                        "- Preview eligible changes, current/desired state, and friction"
+                    )
                 ));
                 out.push_str(&format!(
                     "  {} {}\n",
                     ui.paint(style::IDENT, "privr recommend"),
-                    ui.paint(style::MUTED, "- View recommendations by persona (general, developer, creative)")
+                    ui.paint(
+                        style::MUTED,
+                        "- View recommendations by persona (general, developer, creative)"
+                    )
                 ));
             } else if self.complete && self.summary.drift == 0 {
                 out.push_str(&format!("\n{}\n", ui.paint(style::HEADING, "Status")));
-                out.push_str("  All evaluated controls match target policy. Machine is compliant.\n");
+                out.push_str(
+                    "  All evaluated controls match target policy. Machine is compliant.\n",
+                );
             }
         }
         out.push('\n');

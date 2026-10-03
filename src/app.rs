@@ -99,7 +99,10 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                 // Progress goes to standard error and only when that is a
                 // terminal, so a pipe, a redirect, and an agent parse stay
                 // clean. The guard clears the line however this scope exits.
-                let _progress = ui.spinner("checking this machine");
+                let total_controls = crate::catalog::all().len();
+                let msg =
+                    format!("Scanning {total_controls} controls across 5 posture dimensions...");
+                let _progress = ui.spinner_for(&msg, format);
                 let host = crate::platform::discover();
                 crate::report::Report::build_filtered(&host, profile.as_str(), &controls, &sections)
             };
@@ -132,6 +135,10 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                 );
                 return 2;
             }
+            let mut progress = ui.spinner_for(
+                "Evaluating posture and planning eligible remediations...",
+                format,
+            );
             let host = crate::platform::discover();
             let context = crate::catalog::Context::live(&host);
             let all_controls = crate::catalog::all();
@@ -226,6 +233,7 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                     }
                 }
             }
+            progress.finish();
 
             let profile_name = if let Some(w) = workload {
                 format!("workload:{}", w.as_str())
@@ -365,6 +373,8 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                 (workload, max_friction)
             };
 
+            let mut eval_progress =
+                ui.spinner_for("Evaluating controls and posture state...", format);
             let host = crate::platform::discover();
             let is_elevated = host.elevated == crate::model::host::Fact::Known(true);
             let context = crate::catalog::Context::live(&host);
@@ -390,6 +400,7 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
 
             if !yes {
                 if !is_interactive {
+                    eval_progress.finish();
                     let _ = writeln!(
                         err,
                         "privr: interactive approval is not implemented; pass --yes"
@@ -461,6 +472,7 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                         }
                     }
                 }
+                eval_progress.finish();
 
                 if planned_items.is_empty() {
                     if unautomated_count > 0 {
@@ -529,6 +541,7 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                     return 0;
                 }
             }
+            eval_progress.finish();
 
             // Check if machine-scope changes require elevation:
             let mut requires_elevation_drift = 0;
@@ -639,12 +652,22 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                     child_args.push(s_arg);
                 }
 
+                let mut elev_progress = ui.spinner_for(
+                    "Requesting administrative elevation (UAC prompt)...",
+                    format,
+                );
                 let res = crate::platform::elevation::run_elevated(&child_args, Some(&temp_file));
+                elev_progress.finish();
                 let _ = std::fs::remove_file(&temp_file);
 
                 match res {
                     crate::platform::elevation::ElevationResult::Success { exit_code, output } => {
-                        let _ = write!(out, "{output}");
+                        if output.trim().is_empty() {
+                            let _ =
+                                writeln!(out, "Applied changes successfully in elevated session.");
+                        } else {
+                            let _ = write!(out, "{output}");
+                        }
                         let _ = out.flush();
                         return exit_code;
                     }
@@ -694,6 +717,7 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
             let mut requires_elevation_drift_applied = 0;
             let mut explicit_elevation_failure = None;
 
+            let mut apply_progress = ui.spinner_for("Applying privacy remediations...", format);
             for c in &all_controls {
                 let matches_control = controls.is_empty()
                     || controls
@@ -790,6 +814,7 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                     }
                 }
             }
+            apply_progress.finish();
 
             if let Some(failed_id) = explicit_elevation_failure {
                 let initial_path = crate::journal::transactions_dir().join(format!("{tx_id}.json"));
@@ -982,8 +1007,13 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                         color_str,
                     ];
 
+                    let mut elev_progress = ui.spinner_for(
+                        "Requesting administrative elevation for rollback (UAC prompt)...",
+                        format,
+                    );
                     let res =
                         crate::platform::elevation::run_elevated(&child_args, Some(&temp_file));
+                    elev_progress.finish();
                     let _ = std::fs::remove_file(&temp_file);
 
                     match res {
@@ -991,7 +1021,14 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                             exit_code,
                             output,
                         } => {
-                            let _ = write!(out, "{output}");
+                            if output.trim().is_empty() {
+                                let _ = writeln!(
+                                    out,
+                                    "Restored changes successfully in elevated session."
+                                );
+                            } else {
+                                let _ = write!(out, "{output}");
+                            }
                             let _ = out.flush();
                             return exit_code;
                         }
@@ -1011,6 +1048,8 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                 }
             }
             let mut restored = 0;
+            let mut restore_progress =
+                ui.spinner_for("Restoring previous privacy settings...", format);
 
             for op in journal.operations.iter().rev() {
                 if let Some(c) = all_controls
@@ -1033,6 +1072,7 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                     }
                 }
             }
+            restore_progress.finish();
 
             let rep = RollbackReport {
                 schema: 1,
@@ -1119,6 +1159,10 @@ Run privr list to see every control in this build."
             max_friction,
             dimension,
         } => {
+            let mut rec_progress = ui.spinner_for(
+                "Analyzing posture and computing workload recommendations...",
+                format,
+            );
             let host = crate::platform::discover();
             let context = crate::catalog::Context::live(&host);
             let all_controls = crate::catalog::all();
@@ -1130,6 +1174,7 @@ Run privr list to see every control in this build."
                 max_friction,
                 dimension,
             );
+            rec_progress.finish();
 
             #[derive(Serialize)]
             struct RecommendReport {
@@ -1228,6 +1273,8 @@ Run privr list to see every control in this build."
             controls,
             sections,
         } => {
+            let mut sim_progress =
+                ui.spinner_for("Simulating counterfactual posture changes...", format);
             let host = crate::platform::discover();
             let context = crate::catalog::Context::live(&host);
             let all_controls = crate::catalog::all();
@@ -1239,6 +1286,7 @@ Run privr list to see every control in this build."
                 &controls,
                 &sections,
             );
+            sim_progress.finish();
 
             #[derive(Serialize)]
             struct SimulateReport {

@@ -11,8 +11,7 @@ fn main() {
     let exit_code = {
         let stdout = std::io::stdout();
         let mut out = stdout.lock();
-        let stderr = std::io::stderr();
-        let mut err = stderr.lock();
+        let mut err = std::io::stderr();
 
         let code = run(cli, &mut out, &mut err);
 

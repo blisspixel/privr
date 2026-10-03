@@ -61,13 +61,15 @@ fn apply_without_confirmation_fails_closed() {
 }
 
 #[test]
-fn rollback_uses_a_transaction_id() {
+fn rollback_fails_when_transaction_record_missing() {
     let mut command = Command::cargo_bin("privr").expect("binary");
     command
         .args(["rollback", "tx-123", "--yes"])
         .assert()
-        .code(3)
-        .stdout(predicate::str::contains("transaction tx-123"));
+        .code(2)
+        .stderr(predicate::str::contains(
+            "no transaction record found with ID 'tx-123'",
+        ));
 }
 
 #[test]

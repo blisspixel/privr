@@ -1201,7 +1201,7 @@ pub fn controls() -> Vec<Control> {
         ),
         toggle_control(
             "windows.capability.account-info",
-            "capabilities",
+            "capability",
             "User account information access",
             "Windows apps can read your account name, email address, and profile picture.",
             "Permitting universal account info access exposes your user identity, \
@@ -1219,7 +1219,7 @@ pub fn controls() -> Vec<Control> {
         ),
         toggle_control(
             "windows.capability.activity",
-            "capabilities",
+            "capability",
             "App activity tracking",
             "Windows apps can track your in-app actions and resume states across app sessions.",
             "App activity tracking records usage workflows across applications. \
@@ -1237,7 +1237,7 @@ pub fn controls() -> Vec<Control> {
         ),
         toggle_control(
             "windows.capability.wifi-data",
-            "capabilities",
+            "capability",
             "Wi-Fi adapter and scan access",
             "Windows apps can scan nearby Wi-Fi networks and adapters, allowing location estimation.",
             "Access to Wi-Fi scan data allows applications to determine geographic \
@@ -1381,7 +1381,7 @@ pub fn controls() -> Vec<Control> {
         diagnostics_level(),
         toggle_control(
             "windows.experience.start-suggestions",
-            "personalization",
+            "experience",
             "Start menu recommendations",
             "Windows shows app recommendations and suggested content in the Start menu.",
             "Recommendations in the Start menu are targeted based on application \
@@ -1399,7 +1399,7 @@ pub fn controls() -> Vec<Control> {
         ),
         toggle_control(
             "windows.experience.suggested-apps",
-            "personalization",
+            "experience",
             "Suggested app installs",
             "Windows can install and pin apps it suggests, without being asked each time.",
             "Choosing what to install is a decision worth keeping. Suggestions are \
@@ -1418,7 +1418,7 @@ pub fn controls() -> Vec<Control> {
         ),
         toggle_control(
             "windows.experience.system-suggestions",
-            "personalization",
+            "experience",
             "Settings suggestions",
             "Windows displays suggestions and tips within system settings and notifications.",
             "Showing recommendations in configuration screens turns system management \
@@ -1436,7 +1436,7 @@ pub fn controls() -> Vec<Control> {
         ),
         toggle_control(
             "windows.experience.tailored",
-            "personalization",
+            "experience",
             "Tailored experiences",
             "Windows uses your diagnostic data to personalise tips, advertisements, \
              and recommendations it shows you.",
@@ -1459,7 +1459,7 @@ pub fn controls() -> Vec<Control> {
         ),
         toggle_control(
             "windows.input.personalization",
-            "personalization",
+            "input",
             "Typing and inking personalisation",
             "Windows can collect what you type and write to improve its own \
              suggestions, and can read your contacts to do it.",

@@ -98,7 +98,22 @@ pub fn save_transaction(tx: &TransactionJournal) -> Result<PathBuf, std::io::Err
     let dir = transactions_dir();
     fs::create_dir_all(&dir)?;
     let final_path = dir.join(format!("{}.json", tx.transaction_id));
-    let tmp_path = dir.join(format!("{}.tmp.{}", tx.transaction_id, std::process::id()));
+    if final_path.is_symlink() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "Symlinks are not permitted for transaction journals",
+        ));
+    }
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let tmp_path = dir.join(format!(
+        "{}.tmp.{}.{}",
+        tx.transaction_id,
+        std::process::id(),
+        nanos
+    ));
     let content = serde_json::to_string_pretty(tx)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     fs::write(&tmp_path, content)?;
@@ -118,6 +133,18 @@ pub fn load_transaction(id: &str) -> Result<TransactionJournal, std::io::Error> 
         ));
     }
     let path = transactions_dir().join(format!("{id}.json"));
+    if path.is_symlink() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "Symlinks are not permitted for transaction journals",
+        ));
+    }
+    if !path.exists() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("Transaction record '{id}' not found"),
+        ));
+    }
     let content = fs::read_to_string(&path)?;
     serde_json::from_str(&content)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
@@ -162,5 +189,43 @@ mod tests {
         assert!(is_valid_transaction_id("tx-1234567890"));
         assert!(is_valid_transaction_id("tx_2026_09_21"));
         assert!(is_valid_transaction_id("a1B2-c3D4"));
+    }
+
+    #[test]
+    fn save_and_load_transaction_round_trips() {
+        let tx = TransactionJournal {
+            schema: JOURNAL_SCHEMA,
+            transaction_id: "tx-test-roundtrip-42".to_owned(),
+            timestamp: "2026-10-02T12:00:00Z".to_owned(),
+            platform: "windows".to_owned(),
+            profile: "baseline".to_owned(),
+            operations: vec![OperationJournal {
+                control_id: "windows.advertising.id".to_owned(),
+                target_key: "HKCU|Software\\Test|Val#native".to_owned(),
+                preimage: Some(RawValue::new(ValueKind::U32, vec![1, 0, 0, 0])),
+                postimage: RawValue::new(ValueKind::U32, vec![0, 0, 0, 0]),
+                verified: true,
+            }],
+        };
+
+        let path = save_transaction(&tx).expect("save transaction");
+        assert!(path.exists());
+
+        let loaded = load_transaction(&tx.transaction_id).expect("load transaction");
+        assert_eq!(loaded, tx);
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn load_nonexistent_transaction_returns_not_found() {
+        let err = load_transaction("tx-nonexistent-id-999").unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+    }
+
+    #[test]
+    fn load_invalid_transaction_id_returns_invalid_input() {
+        let err = load_transaction("../escape").unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
     }
 }

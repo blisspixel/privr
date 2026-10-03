@@ -272,7 +272,7 @@ fn handle_tools_list(allow_apply: bool) -> Value {
 fn handle_tools_call(
     params: Option<&Value>,
     allow_apply: bool,
-    err: &mut impl Write,
+    _err: &mut impl Write,
 ) -> Result<Value, (i64, String)> {
     let params = params.ok_or((-32602, "Missing params".to_owned()))?;
     let name = params
@@ -467,14 +467,11 @@ fn handle_tools_call(
             let all_controls = crate::catalog::all();
             let filter = arguments.get("control").and_then(Value::as_str);
 
-            let timestamp = format!(
-                "{}",
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs()
-            );
-            let tx_id = format!("tx-{timestamp}");
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default();
+            let timestamp = format!("{}.{:03}", now.as_secs(), now.subsec_millis());
+            let tx_id = format!("tx-{}-{}", now.as_secs(), now.subsec_millis());
             let mut journal = crate::journal::TransactionJournal {
                 schema: crate::journal::JOURNAL_SCHEMA,
                 transaction_id: tx_id.clone(),
@@ -483,6 +480,10 @@ fn handle_tools_call(
                 profile: profile.as_str().to_owned(),
                 operations: Vec::new(),
             };
+
+            if let Err(e) = crate::journal::save_transaction(&journal) {
+                return tool_error(format!("Failed to initialize transaction journal: {e}"));
+            }
 
             for c in &all_controls {
                 if let Some(f) = filter
@@ -513,10 +514,10 @@ fn handle_tools_call(
                                 verified: true,
                             });
                             if let Err(e) = crate::journal::save_transaction(&journal) {
-                                let _ = writeln!(
-                                    err,
-                                    "privr: warning: failed to write transaction journal: {e}"
-                                );
+                                return tool_error(format!(
+                                    "Fatal error writing transaction journal: {e}. Applied {} change(s). Halting apply.",
+                                    journal.operations.len()
+                                ));
                             }
                         }
                         Some(Err(e)) => {
@@ -530,6 +531,11 @@ fn handle_tools_call(
                         None => {}
                     }
                 }
+            }
+
+            if journal.operations.is_empty() {
+                let initial_path = crate::journal::transactions_dir().join(format!("{tx_id}.json"));
+                let _ = std::fs::remove_file(initial_path);
             }
 
             let report = json!({
@@ -562,6 +568,10 @@ fn handle_tools_call(
                 .and_then(Value::as_str)
                 .ok_or((-32602, "Missing transaction_id".to_owned()))?;
 
+            if !crate::journal::is_valid_transaction_id(tx_id) {
+                return tool_error(format!("Invalid transaction identifier '{tx_id}'."));
+            }
+
             let journal = match crate::journal::load_transaction(tx_id) {
                 Ok(j) => j,
                 Err(e) => {
@@ -579,7 +589,7 @@ fn handle_tools_call(
                     .iter()
                     .find(|item| item.spec.id == op.control_id)
                 {
-                    match c.rollback(&context, &op.preimage) {
+                    match c.rollback(&context, &op.preimage, &op.postimage) {
                         Some(Ok(())) => {
                             restored += 1;
                         }

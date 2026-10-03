@@ -263,6 +263,15 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                 operations: Vec::new(),
             };
 
+            // Verify journal storage is writable before mutating system state.
+            if let Err(e) = crate::journal::save_transaction(&journal) {
+                let _ = writeln!(
+                    err,
+                    "privr: failed to initialize transaction journal: {e}. Halting apply."
+                );
+                return 4;
+            }
+
             let mut unautomated_drift = 0;
 
             for c in &all_controls {
@@ -297,8 +306,11 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                                 if let Err(e) = crate::journal::save_transaction(&journal) {
                                     let _ = writeln!(
                                         err,
-                                        "privr: warning: failed to write transaction journal: {e}"
+                                        "privr: fatal error writing transaction journal: {e}. Applied {} change(s) (transaction {}). Halting apply.",
+                                        journal.operations.len(),
+                                        tx_id
                                     );
+                                    return 4;
                                 }
                             }
                             Some(Err(e)) => {
@@ -326,6 +338,8 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
             }
 
             if journal.operations.is_empty() {
+                let initial_path = crate::journal::transactions_dir().join(format!("{tx_id}.json"));
+                let _ = std::fs::remove_file(initial_path);
                 match format {
                     OutputFormat::Text => {
                         if unautomated_drift > 0 {
@@ -427,7 +441,7 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                     .iter()
                     .find(|item| item.spec.id == op.control_id)
                 {
-                    match c.rollback(&context, &op.preimage) {
+                    match c.rollback(&context, &op.preimage, &op.postimage) {
                         Some(Ok(())) => {
                             restored += 1;
                         }

@@ -50,11 +50,13 @@ exit.
 
 Mutation (blocks 0.2.0):
 
-- [ ] `apply` writes before journaling, and a failed journal write only warns
-  and continues. The journal must record the operation before the write, and a
-  journal failure must stop the apply.
-- [ ] `rollback` receives only the recorded prior value, so it cannot refuse
-  when current state no longer equals the recorded postimage.
+- [x] `apply` writes before journaling, and a failed journal write only warns
+  and continues. (Fixed: transaction journal establishes writability before
+  mutation, and failed journal writes immediately halt apply).
+- [x] `rollback` receives only the recorded prior value, so it cannot refuse
+  when current state no longer equals the recorded postimage. (Fixed: rollback
+  takes recorded postimage and refuses with conflict error if state changed
+  externally).
 - [ ] The journal directory comes from environment variables and is not
   permission-restricted. (Transaction IDs upgraded to subsecond millisecond
   resolution and protected against symlink redirection).

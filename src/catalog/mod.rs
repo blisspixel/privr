@@ -212,14 +212,20 @@ mod tests {
             let parts: Vec<&str> = control.spec.id.split('.').collect();
             assert!(
                 parts.len() >= 3,
-                "control id '{}' must have at least platform.section.name format",
+                "control id '{}' must have at least 3 parts",
                 control.spec.id
             );
+            let expected_section = if parts[0] == "windows" || parts[0] == "macos" {
+                parts[1]
+            } else {
+                parts[0]
+            };
             assert_eq!(
-                parts[1],
                 control.spec.section.as_str(),
-                "control id '{}' second segment must match section '{}'",
+                expected_section,
+                "control id '{}' section mismatch: expected '{}', got '{}'",
                 control.spec.id,
+                expected_section,
                 control.spec.section
             );
         }

@@ -8,7 +8,7 @@ use crate::catalog;
 use crate::engine::evaluate::{Mode, evaluate};
 use crate::model::Profile;
 use crate::model::host::HostFacts;
-use crate::model::outcome::{ControlResult, Exception, Outcome, Remediation, Summary};
+use crate::model::outcome::{ControlResult, Exception, Outcome, Summary};
 use crate::model::posture::{FrictionTier, PostureVector};
 use crate::ui::{Ui, style};
 
@@ -222,17 +222,18 @@ impl Report {
         // first lets a thin catalogue read as a clean machine.
         let evaluated = self.summary.evaluated();
         let coverage = if self.complete {
-            format!("{evaluated} of {} controls in this build", self.carried)
+            format!(
+                "{evaluated} of {} controls in this build (not a full picture of this machine)",
+                self.carried
+            )
         } else {
             format!(
-                "{evaluated} of {} controls, {} could not be established",
+                "{evaluated} of {} controls, {} could not be established (not a full picture of this machine)",
                 self.carried,
                 self.summary.concealed()
             )
         };
-        out.push_str(&format!("{}{coverage}\n\n", field("Coverage")));
-
-        out.push_str(&self.count_line(ui));
+        out.push_str(&format!("{}{coverage}\n", field("Coverage")));
 
         // Posture Score meter
         let score_label = if let Some(score_pct) = (self.summary.pass * 100).checked_div(evaluated)
@@ -245,9 +246,15 @@ impl Report {
                 ui.paint(style::outcome_style(Outcome::Drift), &score_str)
             };
             let breakdown = if self.summary.drift > 0 {
-                format!("({} pass, {} drift)", self.summary.pass, self.summary.drift)
+                format!(
+                    "({} pass, {} drift, {} not selected)",
+                    self.summary.pass, self.summary.drift, self.summary.not_selected
+                )
             } else {
-                format!("({} pass)", self.summary.pass)
+                format!(
+                    "({} pass, {} not selected)",
+                    self.summary.pass, self.summary.not_selected
+                )
             };
             format!(
                 "{styled_score} {meter} {}",
@@ -262,12 +269,21 @@ impl Report {
         };
         out.push_str(&format!("{}{score_label}\n", field("Posture")));
 
-        if !self.posture.dimensions.is_empty() {
+        let active_dimensions: Vec<_> = self
+            .posture
+            .dimensions
+            .iter()
+            .filter(|(_, metrics)| {
+                show_all || (metrics.compliant + metrics.drift + metrics.concealed > 0)
+            })
+            .collect();
+
+        if !active_dimensions.is_empty() {
             out.push_str(&format!(
                 "\n{}\n",
                 ui.paint(style::HEADING, "Posture Dimensions")
             ));
-            for (dim, metrics) in &self.posture.dimensions {
+            for (dim, metrics) in active_dimensions {
                 let total = metrics.compliant + metrics.drift + metrics.concealed;
                 let (meter, status_col, details) =
                     if let Some(pct) = (metrics.compliant * 100).checked_div(total) {
@@ -337,13 +353,9 @@ impl Report {
         for (section, results) in sections {
             out.push_str(&format!("\n{}\n", ui.paint(style::HEADING, section)));
             for result in results {
-                let label = ui.paint(
-                    style::outcome_style(result.outcome),
-                    style::outcome_label(result.outcome),
-                );
-                out.push_str(&format!("  {label}  {}\n", result.title));
-                out.push_str(&ui.paint(style::MUTED, &format!("            {}", result.id)));
-                out.push('\n');
+                let outcome_txt = style::outcome_label(result.outcome).trim();
+                let label = ui.paint(style::outcome_style(result.outcome), outcome_txt);
+                out.push_str(&format!("  {label:<5}  {}\n", result.title));
 
                 if result.outcome == Outcome::Drift {
                     let friction_badge = match result.friction {
@@ -362,15 +374,6 @@ impl Report {
                         ),
                     };
 
-                    let rem_badge = match result.remediation {
-                        Remediation::Automatic => {
-                            ui.paint(style::outcome_style(Outcome::Review), "[Automatic Fix]")
-                        }
-                        Remediation::Guided => ui.paint(style::CAVEAT, "[Guided Steps]"),
-                        Remediation::AuditOnly => ui.paint(style::MUTED, "[Audit Only]"),
-                        Remediation::None => ui.paint(style::MUTED, "[Manual Only]"),
-                    };
-
                     let elev_tag = if control_map
                         .get(&result.id)
                         .is_some_and(|c| c.spec.requires_elevation)
@@ -381,145 +384,53 @@ impl Report {
                     };
 
                     out.push_str(&format!(
-                        "            {friction_badge}  {rem_badge}{elev_tag}\n"
+                        "         {}  {}{}\n",
+                        ui.paint(style::MUTED, &result.id),
+                        friction_badge,
+                        elev_tag
                     ));
-
-                    if let Some(ctrl) = control_map.get(&result.id) {
-                        let msg = if let Some(tradeoff) = ctrl.tradeoff {
-                            format!("Impact: {tradeoff}")
-                        } else {
-                            format!("Notice: {}", ctrl.summary)
-                        };
-                        out.push_str(&ui.paint(style::MUTED, &ui.wrap(&msg, 12)));
-                        out.push('\n');
-                    }
+                } else {
+                    out.push_str(&format!(
+                        "         {}\n",
+                        ui.paint(style::MUTED, &result.id)
+                    ));
                 }
 
-                // A note is printed even on a pass, because the case it exists
-                // for is precisely a finding that looks fine and is not what
-                // the operator configured.
                 if let Some(note) = &result.note {
-                    out.push_str(&ui.paint(style::CAVEAT, &ui.wrap(note, 12)));
+                    out.push_str(&ui.paint(style::CAVEAT, &ui.wrap(note, 9)));
                     out.push('\n');
                 }
 
-                // Uncertainty is stated in words at the point of the finding,
-                // never left to be inferred from a colour.
                 if result.outcome.conceals_state() {
                     out.push_str(&ui.paint(
                         style::CAVEAT,
-                        "            Reported as unknown, not as passing.",
+                        "         Reported as unknown, not as passing.\n",
                     ));
-                    out.push('\n');
                 }
             }
         }
 
-        out.push('\n');
         if self.results.is_empty() {
-            out.push_str(&ui.wrap(
-                "No controls are implemented for this platform yet, so this says nothing \
-                 about the machine.",
-                0,
+            out.push_str(&format!(
+                "\n{}\n",
+                ui.wrap(
+                    "No controls are implemented for this platform yet, so this says nothing \
+                     about the machine.",
+                    0,
+                )
             ));
-        } else {
-            // Permanent, not a placeholder for a thin catalogue. A report can
-            // only ever speak for the settings it carries, and saying so keeps a
-            // clean summary from reading as a clean machine.
-            let note = format!(
-                "This build carries {} control{}. It is not a full picture of this machine.",
-                self.carried,
-                if self.carried == 1 { "" } else { "s" }
-            );
-            out.push_str(&ui.paint(style::MUTED, &ui.wrap(&note, 0)));
-            out.push('\n');
-
-            if self.summary.drift > 0 {
-                out.push_str(&format!(
-                    "\n{}\n",
-                    ui.paint(style::HEADING, "Actionable Next Steps")
-                ));
-                out.push_str(&format!(
-                    "  {} {}\n",
-                    ui.paint(style::IDENT, "privr fix   (or privr apply)"),
-                    ui.paint(
-                        style::MUTED,
-                        "- Apply recommended daily-driver privacy protections in-place"
-                    )
-                ));
-                out.push_str(&format!(
-                    "  {} {}\n",
-                    ui.paint(style::IDENT, "privr diff  (or privr plan)"),
-                    ui.paint(
-                        style::MUTED,
-                        "- Preview eligible changes, current/desired state, and friction"
-                    )
-                ));
-                out.push_str(&format!(
-                    "  {} {}\n",
-                    ui.paint(style::IDENT, "privr doctor"),
-                    ui.paint(
-                        style::MUTED,
-                        "- Verify platform prerequisites, permissions, and tool health"
-                    )
-                ));
-                out.push_str(&format!(
-                    "  {} {}\n",
-                    ui.paint(style::IDENT, "privr recommend"),
-                    ui.paint(
-                        style::MUTED,
-                        "- Explore tailored recommendations by workload persona"
-                    )
-                ));
-            } else if self.complete && self.summary.drift == 0 {
-                out.push_str(&format!("\n{}\n", ui.paint(style::HEADING, "Status")));
-                out.push_str(
-                    "  All evaluated controls match target policy. Machine is compliant.\n",
-                );
-            }
+        } else if self.summary.drift > 0 {
+            out.push_str(&format!(
+                "\nNext Steps: Run '{}' to preview, or '{}' to apply.\n",
+                ui.paint(style::IDENT, "privr diff"),
+                ui.paint(style::IDENT, "privr fix")
+            ));
+        } else if self.complete && self.summary.drift == 0 {
+            out.push_str("\nStatus: All evaluated controls match policy. Machine is compliant.\n");
         }
         out.push('\n');
 
         out
-    }
-
-    /// The count line.
-    ///
-    /// Empty categories are omitted as noise, except any category that hides
-    /// state, which is always shown so it cannot be missed.
-    fn count_line(&self, ui: &Ui) -> String {
-        let s = &self.summary;
-        let paint = |outcome: Outcome, count: usize, word: &str| {
-            ui.paint(style::outcome_style(outcome), &format!("{count} {word}"))
-        };
-
-        let mut parts = vec![
-            paint(Outcome::Pass, s.pass, "pass"),
-            paint(Outcome::Drift, s.drift, "drift"),
-        ];
-        if s.review > 0 {
-            parts.push(paint(Outcome::Review, s.review, "review"));
-        }
-        if s.unknown > 0 {
-            parts.push(paint(Outcome::Unknown, s.unknown, "unknown"));
-        }
-        if s.not_checked > 0 {
-            parts.push(paint(Outcome::NotChecked, s.not_checked, "not checked"));
-        }
-        if s.error > 0 {
-            parts.push(paint(Outcome::Error, s.error, "error"));
-        }
-        if s.not_applicable > 0 {
-            parts.push(paint(
-                Outcome::NotApplicable,
-                s.not_applicable,
-                "not applicable",
-            ));
-        }
-        if s.not_selected > 0 {
-            parts.push(paint(Outcome::NotSelected, s.not_selected, "not selected"));
-        }
-        format!("{}\n", parts.join("    "))
     }
 }
 

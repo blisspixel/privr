@@ -112,3 +112,36 @@ fn plan_reports_planned_changes_or_honest_drift_summary() {
         .stdout(predicate::str::contains("\"planned_changes\""))
         .stdout(predicate::str::contains("\"unautomated_drift\""));
 }
+
+#[test]
+fn check_profile_ladder_escalation() {
+    let mut cmd_base = Command::cargo_bin("privr").expect("binary");
+    cmd_base
+        .args(["check", "--profile", "baseline", "--format", "json"])
+        .assert()
+        .stdout(predicate::str::contains("\"profile\": \"baseline\""));
+
+    let mut cmd_strict = Command::cargo_bin("privr").expect("binary");
+    cmd_strict
+        .args(["check", "--profile", "strict", "--format", "json"])
+        .assert()
+        .stdout(predicate::str::contains("\"profile\": \"strict\""));
+
+    let mut cmd_restrictive = Command::cargo_bin("privr").expect("binary");
+    cmd_restrictive
+        .args(["check", "--profile", "restrictive", "--format", "json"])
+        .assert()
+        .stdout(predicate::str::contains("\"profile\": \"restrictive\""));
+}
+
+#[test]
+fn list_exposes_profile_tiers() {
+    let mut command = Command::cargo_bin("privr").expect("binary");
+    command
+        .args(["list", "--format", "json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"profile\": \"baseline\""))
+        .stdout(predicate::str::contains("\"profile\": \"strict\""))
+        .stdout(predicate::str::contains("\"profile\": \"restrictive\""));
+}

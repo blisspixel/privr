@@ -15,6 +15,7 @@ use crate::model::applicability::{Applicability, Predicate, Variant};
 use crate::model::evidence::{Evidence, Observation, RawValue};
 use crate::model::host::{HostFacts, ManagementSource, Platform};
 use crate::model::outcome::{Ineffective, Maturity, Remediation, Reversibility};
+use crate::model::profile::Profile;
 use crate::platform::windows::registry::{Hive, Target, View};
 
 fn enabled() -> SemanticState {
@@ -230,6 +231,7 @@ fn diagnostics_level() -> Control {
             verified_through: None,
             remediation: Remediation::AuditOnly,
             remediation_reason: None,
+            min_profile: Profile::Baseline,
         },
         title: "Diagnostic data level",
         summary: "Windows sends diagnostic data about how the machine and its apps                   behave. The optional level adds browsing and typing activity,                   inventory, and memory captured when something crashes.",
@@ -280,6 +282,7 @@ fn advertising_id() -> Control {
             verified_through: None,
             remediation: Remediation::Automatic,
             remediation_reason: None,
+            min_profile: Profile::Baseline,
         },
         title: "Advertising identifier",
         summary: "Windows gives apps a per-user identifier so advertising you see \
@@ -616,6 +619,7 @@ fn security_llmnr() -> Control {
             verified_through: None,
             remediation: Remediation::AuditOnly,
             remediation_reason: None,
+            min_profile: Profile::Restrictive,
         },
         title: "Link-Local Multicast Name Resolution",
         summary: "Windows broadcasts name queries in plaintext across local networks when DNS fails.",
@@ -828,6 +832,24 @@ fn toggle_control(
     )
 }
 
+fn profile_for_control(id: &str, section: &str) -> Profile {
+    match section {
+        "telemetry" | "diagnostics" | "advertising" | "browser" => Profile::Baseline,
+        "delivery-optimization" => Profile::Baseline,
+        "ai" | "clipboard" | "experience" | "input" | "search" => Profile::Strict,
+        "capability" => match id {
+            "windows.capability.activity" => Profile::Strict,
+            _ => Profile::Restrictive,
+        },
+        "storage" => match id {
+            "windows.storage.pagefile-clear" => Profile::Restrictive,
+            _ => Profile::Strict,
+        },
+        "security" => Profile::Restrictive,
+        _ => Profile::Baseline,
+    }
+}
+
 /// Build a control with a specified desired state.
 #[allow(clippy::too_many_arguments)]
 fn toggle_control_with_desired(
@@ -863,6 +885,7 @@ fn toggle_control_with_desired(
                 Remediation::AuditOnly
             },
             remediation_reason: None,
+            min_profile: profile_for_control(id, section),
         },
         title,
         summary,

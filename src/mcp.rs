@@ -355,6 +355,7 @@ fn handle_tools_call(
                         "id": control.spec.id,
                         "title": control.title,
                         "section": control.spec.section,
+                        "profile": control.spec.min_profile.as_str(),
                         "summary": control.summary,
                         "rationale": control.rationale,
                         "tradeoff": control.tradeoff,
@@ -403,9 +404,14 @@ fn handle_tools_call(
                     continue;
                 }
                 let resolution = c.observe(&context);
+                let mode = if c.spec.min_profile <= profile {
+                    crate::engine::evaluate::Mode::Enforce
+                } else {
+                    crate::engine::evaluate::Mode::Ignore
+                };
                 let eval = crate::engine::evaluate::evaluate(
                     &c.spec,
-                    crate::engine::evaluate::Mode::Enforce,
+                    mode,
                     &resolution,
                     &host,
                     crate::model::outcome::Exception::None,
@@ -493,9 +499,14 @@ fn handle_tools_call(
                     continue;
                 }
                 let resolution = c.observe(&context);
+                let mode = if c.spec.min_profile <= profile {
+                    crate::engine::evaluate::Mode::Enforce
+                } else {
+                    crate::engine::evaluate::Mode::Ignore
+                };
                 let eval = crate::engine::evaluate::evaluate(
                     &c.spec,
-                    crate::engine::evaluate::Mode::Enforce,
+                    mode,
                     &resolution,
                     &host,
                     crate::model::outcome::Exception::None,

@@ -8,6 +8,7 @@ use crate::engine::evaluate::{ControlSpec, Resolution, SemanticState, Uncertaint
 use crate::model::applicability::{Applicability, Predicate, Variant};
 use crate::model::host::{ManagementSource, Platform};
 use crate::model::outcome::{Maturity, Remediation, Reversibility};
+use crate::model::profile::Profile;
 
 fn disabled() -> SemanticState {
     SemanticState::new("disabled")
@@ -56,6 +57,7 @@ pub fn controls() -> Vec<Control> {
                 verified_through: None,
                 remediation: Remediation::AuditOnly,
                 remediation_reason: None,
+                min_profile: Profile::Baseline,
             },
             title: "Personalized advertising",
             summary: "Apple personalizes ads in the App Store, Apple News, and Stocks.",
@@ -90,6 +92,7 @@ pub fn controls() -> Vec<Control> {
                 verified_through: None,
                 remediation: Remediation::AuditOnly,
                 remediation_reason: None,
+                min_profile: Profile::Baseline,
             },
             title: "Mac analytics and diagnostics",
             summary: "macOS automatically uploads diagnostic, performance, and usage data to Apple.",
@@ -124,6 +127,7 @@ pub fn controls() -> Vec<Control> {
                 verified_through: None,
                 remediation: Remediation::AuditOnly,
                 remediation_reason: None,
+                min_profile: Profile::Baseline,
             },
             title: "Third-party developer analytics",
             summary: "macOS shares application usage and crash metrics with third-party software developers.",
@@ -156,6 +160,7 @@ pub fn controls() -> Vec<Control> {
                 verified_through: None,
                 remediation: Remediation::AuditOnly,
                 remediation_reason: None,
+                min_profile: Profile::Strict,
             },
             title: "Improve Siri and Dictation",
             summary: "Apple retains and human-reviews audio samples of interactions with Siri.",
@@ -188,6 +193,7 @@ pub fn controls() -> Vec<Control> {
                 verified_through: None,
                 remediation: Remediation::AuditOnly,
                 remediation_reason: None,
+                min_profile: Profile::Restrictive,
             },
             title: "Download quarantine history",
             summary: "macOS Gatekeeper logs file download URLs, bundle IDs, and timestamps in QuarantineEvents.",
@@ -223,6 +229,7 @@ pub fn controls() -> Vec<Control> {
                 verified_through: None,
                 remediation: Remediation::AuditOnly,
                 remediation_reason: None,
+                min_profile: Profile::Strict,
             },
             title: "Quick Look thumbnail cache",
             summary: "macOS generates and retains unencrypted file thumbnails when files are previewed in Finder or Quick Look.",

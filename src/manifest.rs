@@ -22,6 +22,7 @@ pub struct Entry {
     pub id: String,
     pub title: String,
     pub section: String,
+    pub profile: String,
     pub summary: String,
     /// The state this control aims for.
     pub desired: String,
@@ -71,6 +72,7 @@ impl Manifest {
                 id: control.spec.id.clone(),
                 title: control.title.to_owned(),
                 section: control.spec.section.clone(),
+                profile: control.spec.min_profile.as_str().to_owned(),
                 summary: control.summary.to_owned(),
                 desired: control.spec.desired.0.clone(),
                 reversibility: control.spec.reversibility,
@@ -122,7 +124,10 @@ impl Manifest {
                 Remediation::AuditOnly => "reported only",
                 Remediation::None => "not changeable",
             };
-            out.push_str(&ui.paint(style::MUTED, &format!("    {capability}")));
+            out.push_str(&ui.paint(
+                style::MUTED,
+                &format!("    profile: {} | {capability}", entry.profile),
+            ));
             out.push('\n');
         }
 

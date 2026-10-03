@@ -17,6 +17,7 @@ use crate::model::outcome::{
     ControlResult, Effect, Exception, Ineffective, Maturity, Outcome, Remediation,
     RemediationReason, Reversibility, Support,
 };
+use crate::model::profile::Profile;
 
 /// A semantic state, such as `disabled` or `required_only`.
 ///
@@ -230,6 +231,8 @@ pub struct ControlSpec {
     pub remediation: Remediation,
     /// Required when `remediation` is `None`.
     pub remediation_reason: Option<RemediationReason>,
+    /// Minimum profile level required to enforce this control.
+    pub min_profile: Profile,
 }
 
 /// Evaluate one control.
@@ -406,6 +409,7 @@ mod tests {
             verified_through: None,
             remediation: Remediation::Automatic,
             remediation_reason: None,
+            min_profile: Profile::Baseline,
         }
     }
 

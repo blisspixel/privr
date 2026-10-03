@@ -424,6 +424,12 @@ mod tests {
 
     #[test]
     fn write_and_delete_user_registry_value() {
+        // Gated: live registry writes must only occur in isolated VM environments
+        // when explicitly requested, never during regular test runs on developer machines.
+        if std::env::var("PRIVR_LIVE_WRITE_TEST").unwrap_or_default() != "1" {
+            return;
+        }
+
         let test_path = r"Software\PrivrTestTarget";
         let target = Target::new(Hive::CurrentUser, test_path, "TestValue", View::Native);
         let val = RawValue::u32(123);
@@ -445,5 +451,32 @@ mod tests {
             }
         );
         let _ = CURRENT_USER.remove_tree(test_path);
+    }
+
+    #[test]
+    fn recorded_registry_reads_and_retags_cleanly() {
+        let target = Target::new(
+            Hive::CurrentUser,
+            r"Software\Microsoft\Windows\CurrentVersion\AdvertisingInfo",
+            "Enabled",
+            View::Native,
+        );
+        let mut map = std::collections::BTreeMap::new();
+        map.insert(
+            key(&target),
+            Evidence::Present {
+                source: ManagementSource::User,
+                value: RawValue::u32(0),
+            },
+        );
+        let recorded = Registry::Recorded(map);
+        let read = recorded.read(&target, ManagementSource::User);
+        assert_eq!(
+            read,
+            Evidence::Present {
+                source: ManagementSource::User,
+                value: RawValue::u32(0),
+            }
+        );
     }
 }

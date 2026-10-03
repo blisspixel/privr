@@ -140,6 +140,14 @@ fn handle_tools_list(allow_apply: bool) -> Value {
             }
         }),
         json!({
+            "name": "privr_doctor",
+            "description": "Run diagnostic capability, health, and storage integrity checks on the host environment.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {}
+            }
+        }),
+        json!({
             "name": "privr_catalog",
             "description": "Search and inspect compiled privacy controls in the catalogue. Returns candidate control IDs, titles, sections, and summaries without modifying state.",
             "inputSchema": {
@@ -297,6 +305,11 @@ fn handle_tools_call(
             });
             tool_success(serde_json::to_string_pretty(&status).unwrap_or_default())
         }
+        "privr_doctor" => {
+            let host = crate::platform::discover();
+            let report = crate::doctor::diagnose(&host);
+            tool_success(serde_json::to_string_pretty(&report).unwrap_or_default())
+        }
         "privr_catalog" => {
             let query = arguments.get("query").and_then(Value::as_str);
             let manifest = crate::manifest::Manifest::build(query);
@@ -381,6 +394,7 @@ fn handle_tools_call(
             let filter = arguments.get("control").and_then(Value::as_str);
 
             let mut planned = Vec::new();
+            let mut unautomated_drift = 0;
             for c in &all_controls {
                 if let Some(f) = filter
                     && c.spec.id != f
@@ -396,21 +410,24 @@ fn handle_tools_call(
                     &host,
                     crate::model::outcome::Exception::None,
                 );
-                if eval.outcome == crate::model::outcome::Outcome::Drift
-                    && eval.remediation == crate::model::outcome::Remediation::Automatic
-                    && c.apply.is_some()
-                {
-                    let current_str = resolution
-                        .state
-                        .map(|s| s.0)
-                        .unwrap_or_else(|| "drift".to_owned());
-                    planned.push(json!({
-                        "id": c.spec.id,
-                        "title": c.title,
-                        "section": c.spec.section,
-                        "current": current_str,
-                        "desired": c.spec.desired.0
-                    }));
+                if eval.outcome == crate::model::outcome::Outcome::Drift {
+                    if eval.remediation == crate::model::outcome::Remediation::Automatic
+                        && c.apply.is_some()
+                    {
+                        let current_str = resolution
+                            .state
+                            .map(|s| s.0)
+                            .unwrap_or_else(|| "drift".to_owned());
+                        planned.push(json!({
+                            "id": c.spec.id,
+                            "title": c.title,
+                            "section": c.spec.section,
+                            "current": current_str,
+                            "desired": c.spec.desired.0
+                        }));
+                    } else {
+                        unautomated_drift += 1;
+                    }
                 }
             }
 
@@ -419,6 +436,7 @@ fn handle_tools_call(
                 "profile": profile.as_str(),
                 "platform": host.platform.as_str(),
                 "planned_changes": planned.len(),
+                "unautomated_drift": unautomated_drift,
                 "changes": planned
             });
             tool_success(serde_json::to_string_pretty(&report).unwrap_or_default())
@@ -653,6 +671,7 @@ mod tests {
             .map(|t| t["name"].as_str().expect("name"))
             .collect();
         assert!(names.contains(&"privr_status"));
+        assert!(names.contains(&"privr_doctor"));
         assert!(names.contains(&"privr_catalog"));
         assert!(names.contains(&"privr_check"));
         assert!(names.contains(&"privr_explain"));
@@ -708,6 +727,24 @@ mod tests {
         assert_eq!(resp["id"], 2);
         let text = resp["result"]["content"][0]["text"].as_str().expect("text");
         assert!(text.contains("platform"));
+    }
+
+    #[test]
+    fn privr_doctor_returns_health_report() {
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 10,
+            "method": "tools/call",
+            "params": {
+                "name": "privr_doctor"
+            }
+        });
+        let mut err = Vec::new();
+        let resp = handle_message(&req, false, &mut err).expect("response");
+        assert_eq!(resp["id"], 10);
+        let text = resp["result"]["content"][0]["text"].as_str().expect("text");
+        assert!(text.contains("\"healthy\": true"));
+        assert!(text.contains("\"storage\""));
     }
 
     #[test]

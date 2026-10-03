@@ -19,20 +19,21 @@ designed to be driven by an agent harness as readily as by a person.
 
 This repository is under active construction and has no release.
 
-- **Windows `check`, `explain`, and `list` work**, with 28 read-only controls,
-  validated on one Windows 11 Pro machine.
+- **Windows `check`, `explain`, `list`, and `doctor` work**, with 28 read-only
+  controls, capability diagnostics, and reparse-point storage verification.
 - **Windows `plan`, `apply`, and `rollback` are experimental.** They change real
   settings but do not yet meet the safety requirements in the roadmap. Do not
   use them on a machine you care about.
 - **Linux (13 controls) and macOS (6 controls) `check` are experimental** and have
   not been checked against a real desktop. Treat their results as unverified.
 - **Agent integration (`privr mcp`) is implemented**, providing a stdio Model
-  Context Protocol (MCP) server and portable Agent Plugins v1.0.0 package.
+  Context Protocol (MCP) server, `privr_doctor` diagnostics, and portable Agent Plugins v1.0.0 package.
 
 The full state, including known defects, is in
 [ROADMAP.md](ROADMAP.md#current-state).
 
 ![privr check on Windows 11 showing 28 controls](docs/assets/check-windows.svg)
+![privr doctor on Windows 11 showing capability facts and storage integrity](docs/assets/doctor-windows.svg)
 
 
 On the machine this was developed on, one control found something real:
@@ -124,6 +125,7 @@ privr apply
 privr rollback <transaction-id>
 ```
 
+- `doctor` reports capability facts, elevation paths, platform adapters, storage integrity, and schema versions.
 - `check` reads effective state and compares it against a policy.
 - `explain` shows evidence, applicability, management source, and tradeoffs.
 - `plan` is read-only and shows the exact eligible change set.
@@ -143,9 +145,9 @@ stdio server is implemented at `privr mcp`, alongside packaging for the open
 [Agent Plugins](https://agent-plugins.org/) standard (`plugin.json`, `mcp.json`,
 and `skills/privr/SKILL.md`).
 
-- Read-only tool access (`privr_status`, `privr_catalog`, `privr_check`,
-  `privr_explain`, `privr_plan`) over stdio, so an agent can inspect and
-  propose without being able to change anything.
+- Read-only tool access (`privr_status`, `privr_doctor`, `privr_catalog`,
+  `privr_check`, `privr_explain`, `privr_plan`) over stdio, so an agent can
+  inspect and propose without being able to change anything.
 - Mutating tools (`privr_apply`, `privr_rollback`) are absent from discovery
   unless explicitly enabled via `--allow-apply`, and approval cannot be granted
   through an unconfirmed tool call.

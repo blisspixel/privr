@@ -21,6 +21,7 @@ When `privr` is loaded as an MCP server (`privr mcp`), the following tools are a
 ### Read-only tools (always available)
 
 - `privr_status`: Returns host platform, architecture, OS version, and catalogue count. Safe by construction; exposes no user or machine identifiers.
+- `privr_doctor`: Evaluates host capability facts, privilege level, platform adapters, storage integrity, and schema versions.
 - `privr_catalog`: Queries compiled controls in the catalogue. Accepts optional `query` and `platform` filters.
 - `privr_check`: Evaluates host privacy posture against a profile (`baseline`, `strict`, `restrictive`). Accepts `all` boolean to include passing controls, and `control` string to filter by ID or prefix.
 - `privr_explain`: Returns full privacy rationale, tradeoff, mitigation, and primary vendor documentation for a specific control identifier (e.g. `windows.storage.thumbnail-cache`).
@@ -36,6 +37,9 @@ When `privr` is loaded as an MCP server (`privr mcp`), the following tools are a
 When driving `privr` directly via shell commands:
 
 ```bash
+# Diagnostic capability and health verification
+privr doctor --format json
+
 # Non-destructive check with structured JSON output
 privr check --format json
 

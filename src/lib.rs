@@ -9,6 +9,7 @@
 mod app;
 pub mod catalog;
 mod cli;
+pub mod doctor;
 pub mod engine;
 mod explain;
 pub mod journal;

@@ -60,9 +60,36 @@ impl Report {
         control_filter: &[String],
         section_filter: &[String],
     ) -> Self {
-        let selected_profile = profile.parse::<Profile>().unwrap_or_default();
+        Self::build_filtered_workload(host, Some(profile), None, control_filter, section_filter)
+    }
+
+    /// Evaluate filtered controls against this host with optional workload persona.
+    pub fn build_filtered_workload(
+        host: &HostFacts,
+        profile: Option<&str>,
+        workload: Option<crate::model::posture::WorkloadPersona>,
+        control_filter: &[String],
+        section_filter: &[String],
+    ) -> Self {
+        let selected_profile = profile
+            .and_then(|p| p.parse::<Profile>().ok())
+            .unwrap_or_default();
         let context = catalog::Context::live(host);
         let all_controls = catalog::all();
+        let recommended_ids: Option<std::collections::BTreeSet<String>> = workload.map(|w| {
+            crate::engine::recommend::generate_recommendations(
+                &all_controls,
+                &context,
+                host,
+                w,
+                None,
+                None,
+            )
+            .into_iter()
+            .map(|r| r.control_id)
+            .collect()
+        });
+
         let mut results: Vec<ControlResult> = all_controls
             .iter()
             .filter(|c| {
@@ -81,12 +108,16 @@ impl Report {
                 matches_control && matches_section
             })
             .map(|control| {
-                let mode =
-                    if !control_filter.is_empty() || control.spec.min_profile <= selected_profile {
-                        Mode::Enforce
-                    } else {
-                        Mode::Ignore
-                    };
+                let mode = if !control_filter.is_empty()
+                    || recommended_ids
+                        .as_ref()
+                        .is_some_and(|ids| ids.contains(&control.spec.id))
+                    || (recommended_ids.is_none() && control.spec.min_profile <= selected_profile)
+                {
+                    Mode::Enforce
+                } else {
+                    Mode::Ignore
+                };
                 evaluate(
                     &control.spec,
                     mode,
@@ -106,13 +137,19 @@ impl Report {
             posture.record(r.dimension, r.outcome);
         }
 
+        let profile_str = if let Some(w) = workload {
+            format!("workload:{}", w.as_str())
+        } else {
+            profile.unwrap_or("baseline").to_owned()
+        };
+
         Self {
             schema: SCHEMA,
             // A build with no controls has observed nothing, so it cannot claim
             // to be complete however clean the summary looks.
             complete: summary.is_complete() && !results.is_empty(),
             truncated: false,
-            profile: profile.to_owned(),
+            profile: profile_str,
             platform: host.platform.as_str().to_owned(),
             os_version: host.version.known().map(|v| v.display.clone()),
             edition: host.edition.known().cloned(),
@@ -172,19 +209,30 @@ impl Report {
                 ui.paint(style::HEADING, "Posture Dimensions")
             ));
             for (dim, metrics) in &self.posture.dimensions {
-                let status_note = if metrics.drift > 0 {
-                    ui.paint(style::outcome_style(Outcome::Drift), "drift detected")
+                let total = metrics.compliant + metrics.drift + metrics.concealed;
+                let (ratio, status_note) = if metrics.drift > 0 {
+                    (
+                        format!("[{}/{} pass]", metrics.compliant, total),
+                        ui.paint(
+                            style::outcome_style(Outcome::Drift),
+                            &format!("{} drifted", metrics.drift),
+                        ),
+                    )
                 } else if metrics.compliant > 0 {
-                    ui.paint(style::outcome_style(Outcome::Pass), "100% compliant")
+                    (
+                        format!("[{}/{} pass]", metrics.compliant, total),
+                        ui.paint(style::outcome_style(Outcome::Pass), "100% compliant"),
+                    )
                 } else {
-                    ui.paint(style::MUTED, "not in profile")
+                    (
+                        "[0 active]".to_string(),
+                        ui.paint(style::MUTED, "not in profile"),
+                    )
                 };
                 out.push_str(&format!(
-                    "  {:<26} pass: {:>2}   drift: {:>2}   concealed: {:>2}   ({status_note})\n",
+                    "  {:<26} {:<12} ({status_note})\n",
                     dim.display_name(),
-                    metrics.compliant,
-                    metrics.drift,
-                    metrics.concealed
+                    ratio
                 ));
             }
         }
@@ -272,7 +320,7 @@ impl Report {
                 ));
                 out.push_str(&format!(
                     "  {} {}\n",
-                    ui.paint(style::IDENT, "privr apply"),
+                    ui.paint(style::IDENT, "privr apply (or privr fix)"),
                     ui.paint(
                         style::MUTED,
                         "- Apply recommended daily-driver privacy protections in-place"
@@ -280,7 +328,7 @@ impl Report {
                 ));
                 out.push_str(&format!(
                     "  {} {}\n",
-                    ui.paint(style::IDENT, "privr plan"),
+                    ui.paint(style::IDENT, "privr plan (or privr diff)"),
                     ui.paint(
                         style::MUTED,
                         "- Preview eligible changes, current/desired state, and friction"

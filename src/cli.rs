@@ -26,14 +26,21 @@ pub use crate::model::profile::Profile;
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// Check the current machine without changing it.
-    #[command(visible_alias = "audit")]
+    #[command(
+        visible_alias = "status",
+        visible_alias = "audit",
+        visible_alias = "scan"
+    )]
     Check {
         /// Privacy policy profile to evaluate.
-        #[arg(long, value_enum)]
+        #[arg(long, value_enum, conflicts_with = "workload")]
         profile: Option<Profile>,
         /// Evaluate a custom local policy instead of a built-in profile.
         #[arg(long, conflicts_with = "profile")]
         policy: Option<PathBuf>,
+        /// Workload persona to evaluate against (general, developer, creative, mobile, high-assurance).
+        #[arg(long, value_enum, conflicts_with = "profile")]
+        workload: Option<WorkloadPersona>,
         /// Check only an exact control ID or documented ID prefix. Repeatable.
         #[arg(long = "control")]
         controls: Vec<String>,
@@ -45,6 +52,7 @@ pub enum Command {
         all: bool,
     },
     /// Show the exact supported changes without applying them.
+    #[command(visible_alias = "diff")]
     Plan {
         /// Privacy policy profile to evaluate.
         #[arg(long, value_enum, conflicts_with = "workload")]
@@ -66,6 +74,7 @@ pub enum Command {
         sections: Vec<String>,
     },
     /// Recompute, confirm, apply, and verify supported changes.
+    #[command(visible_alias = "fix", visible_alias = "harden")]
     Apply {
         /// Privacy policy profile to apply.
         #[arg(long, value_enum, conflicts_with = "workload")]
@@ -99,10 +108,10 @@ pub enum Command {
         elevated_output: Option<PathBuf>,
     },
     /// Roll back a transaction recorded by `privr apply`.
-    #[command(visible_alias = "restore")]
+    #[command(visible_alias = "restore", visible_alias = "undo")]
     Rollback {
-        /// Internal transaction ID shown by `privr history`.
-        transaction_id: String,
+        /// Internal transaction ID shown by `privr history` (defaults to most recent transaction).
+        transaction_id: Option<String>,
         /// Confirm that settings may be restored.
         #[arg(long)]
         yes: bool,
@@ -113,6 +122,10 @@ pub enum Command {
         #[arg(long, hide = true)]
         elevated_output: Option<PathBuf>,
     },
+    /// Show transaction history of applied changes.
+    #[command(visible_alias = "log")]
+    History,
+
     /// Recommend privacy posture improvements based on workload and friction budget.
     Recommend {
         /// Workload persona (general, developer, creative, mobile, high-assurance).

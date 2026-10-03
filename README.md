@@ -17,7 +17,7 @@ designed to be driven by an agent harness as readily as by a person.
 
 ## Status
 
-- **Windows `check`, `explain`, `list`, `doctor`, `recommend`, `simulate`, `plan`, `apply`, and `rollback` work**, with 28 controls across five posture dimensions, verified rollback journaling, and adaptive elevation handling.
+- **Windows `check`, `explain`, `list`, `doctor`, `recommend`, `simulate`, `plan`, `apply`, `history`, and `rollback` work**, with 28 controls across five posture dimensions, verified rollback journaling, interactive and non-interactive workflows, convenient CLI aliases (`status`, `scan`, `diff`, `fix`, `harden`, `undo`, `log`), and adaptive elevation handling.
 - **Defensive and adaptive application**: `plan` and `apply` accept `--workload` (`general`, `developer`, `creative`, `mobile`, `high-assurance`) and `--max-friction`. When run unprivileged, batch operations apply eligible user-scope controls and report deferred machine-scope controls without failure.
 - **Linux (13 controls) and macOS (6 controls) `check` are experimental** with typed elevation metadata, tested in CI across multiple platforms.
 - **Agent integration (`privr mcp`) is implemented**, providing a stdio Model Context Protocol (MCP) server exposing `privr_check`, `privr_plan`, `privr_apply`, `privr_recommend`, `privr_simulate`, `privr_explain`, and `privr_doctor` with Agent Plugins v1.0.0 packaging.
@@ -110,23 +110,25 @@ This is the canonical workflow. On Windows, all commands in the lifecycle are im
 tested, and verified against real hosts:
 
 ```text
-privr check
+privr check (or privr scan, privr status)
 privr explain windows.advertising.id
 privr recommend --workload developer
 privr simulate --profile baseline
-privr plan
-privr apply
-privr rollback <transaction-id> --yes
+privr plan (or privr diff)
+privr apply (or privr fix)
+privr history (or privr log)
+privr undo (or privr rollback)
 ```
 
 - `doctor` reports capability facts, elevation paths, platform adapters, storage integrity, and schema versions.
-- `check` reads effective state and compares it against a policy across five posture dimensions (behavioral-commercial, forensic-residue, network-exposure, diagnostic-crash, ambient-sensor).
+- `check` (aliases: `status`, `scan`, `audit`) reads effective state and compares it against a policy across five posture dimensions (behavioral-commercial, forensic-residue, network-exposure, diagnostic-crash, ambient-sensor).
 - `explain` shows evidence, applicability, management source, and tradeoffs.
 - `recommend` computes deterministic change recommendations ordered by friction tier (Tier 0 transparent to Tier 3 incompatible/tradeoff), workload persona, or friction budget.
 - `simulate` performs a dry-run counterfactual posture vector projection without mutating host state, reporting transition deltas, friction counts, and reboot or signout requirements.
-- `plan` is read-only and shows the exact eligible change set. Running `privr plan` without arguments defaults to the daily-driver general persona and cosmetic friction ceiling.
-- `apply` executes safe, verified remediation with transaction journaling, interactive plan review, and native in-place elevation (`-e, --elevate`). Running `privr apply` without arguments applies recommended daily-driver controls with zero workflow disruption.
-- `rollback` restores exact prior values, and only when current state still matches what was recorded.
+- `plan` (alias: `diff`) is read-only and shows the exact eligible change set. Running `privr plan` without arguments defaults to the daily-driver general persona and cosmetic friction ceiling.
+- `apply` (aliases: `fix`, `harden`) executes safe, verified remediation with transaction journaling, interactive plan review, and native in-place elevation (`-e, --elevate`). Running `privr apply` without arguments applies recommended daily-driver controls with zero workflow disruption.
+- `history` (alias: `log`) lists previous transactions, timestamps, applied control counts, and profiles.
+- `rollback` (aliases: `restore`, `undo`) restores exact prior values. Running `privr undo` without arguments automatically targets the most recent transaction recorded on disk.
 
 The full command and exit-code contract is in [docs/CLI.md](docs/CLI.md).
 

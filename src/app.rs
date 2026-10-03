@@ -15,6 +15,9 @@ struct PlanItem {
     current: String,
     desired: String,
     requires_elevation: bool,
+    friction: FrictionTier,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    details: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -71,6 +74,7 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
     match cli.command.unwrap_or(Command::Check {
         profile: Some(Profile::Baseline),
         policy: None,
+        workload: None,
         controls: Vec::new(),
         sections: Vec::new(),
         all: false,
@@ -78,6 +82,7 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
         Command::Check {
             profile,
             policy,
+            workload,
             controls,
             sections,
             all,
@@ -89,12 +94,16 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                 let _ = writeln!(
                     err,
                     "privr: custom policy files are not implemented yet; \
-                     omit --policy to use a built-in profile"
+                     omit --policy to use a built-in profile or workload persona"
                 );
                 return 2;
             }
 
-            let profile = profile.unwrap_or_default();
+            let profile_str = if profile.is_none() && workload.is_none() {
+                Some(Profile::Baseline.as_str())
+            } else {
+                profile.map(|p| p.as_str())
+            };
             let report = {
                 // Progress goes to standard error and only when that is a
                 // terminal, so a pipe, a redirect, and an agent parse stay
@@ -104,7 +113,13 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                     format!("Scanning {total_controls} controls across 5 posture dimensions...");
                 let _progress = ui.spinner_for(&msg, format);
                 let host = crate::platform::discover();
-                crate::report::Report::build_filtered(&host, profile.as_str(), &controls, &sections)
+                crate::report::Report::build_filtered_workload(
+                    &host,
+                    profile_str,
+                    workload,
+                    &controls,
+                    &sections,
+                )
             };
 
             match format {
@@ -220,6 +235,7 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                             .state
                             .map(|s| s.0)
                             .unwrap_or_else(|| "drift".to_owned());
+                        let details = c.tradeoff.or(Some(c.summary)).map(|s| s.to_string());
                         planned.push(PlanItem {
                             id: c.spec.id.clone(),
                             title: c.title.to_owned(),
@@ -227,6 +243,8 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                             current: current_str,
                             desired: c.spec.desired.0.clone(),
                             requires_elevation: c.spec.requires_elevation,
+                            friction: c.spec.friction,
+                            details,
                         });
                     } else {
                         unautomated_drift += 1;
@@ -272,11 +290,22 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                     } else {
                         let _ = writeln!(
                             out,
-                            "Planned changes: {} (changes nothing)\n",
+                            "Planned changes: {} (changes nothing without privr apply)\n",
                             plan_report.planned_changes
                         );
+                        let mut last_section = "";
                         for item in &plan_report.changes {
-                            let _ = writeln!(out, "{}", item.section);
+                            if item.section != last_section {
+                                if !last_section.is_empty() {
+                                    let _ = writeln!(out);
+                                }
+                                let _ = writeln!(
+                                    out,
+                                    "{}",
+                                    ui.paint(crate::ui::style::HEADING, &item.section)
+                                );
+                                last_section = &item.section;
+                            }
                             let elev_tag = if item.requires_elevation {
                                 format!(
                                     " {}",
@@ -285,18 +314,44 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                             } else {
                                 String::new()
                             };
-                            let _ = writeln!(out, "  {}{}", item.id, elev_tag);
                             let _ = writeln!(
                                 out,
-                                "    Current: {}",
-                                ui.paint(
-                                    crate::ui::style::outcome_style(
-                                        crate::model::outcome::Outcome::Drift,
-                                    ),
-                                    &item.current,
-                                )
+                                "  {}{}",
+                                ui.paint(crate::ui::style::IDENT, &item.title),
+                                elev_tag
                             );
-                            let _ = writeln!(out, "    Desired: {}", item.desired);
+                            let _ = writeln!(
+                                out,
+                                "    Control:  {}",
+                                ui.paint(crate::ui::style::MUTED, &item.id)
+                            );
+                            let arrow = ui.paint(crate::ui::style::MUTED, "->");
+                            let cur_display = ui.paint(
+                                crate::ui::style::outcome_style(
+                                    crate::model::outcome::Outcome::Drift,
+                                ),
+                                &item.current,
+                            );
+                            let des_display = ui.paint(
+                                crate::ui::style::outcome_style(
+                                    crate::model::outcome::Outcome::Pass,
+                                ),
+                                &item.desired,
+                            );
+                            let _ =
+                                writeln!(out, "    Change:   {cur_display} {arrow} {des_display}");
+                            let _ = writeln!(
+                                out,
+                                "    Friction: {}",
+                                ui.paint(crate::ui::style::MUTED, item.friction.display_name())
+                            );
+                            if let Some(details) = &item.details {
+                                let _ = writeln!(
+                                    out,
+                                    "    Details:  {}",
+                                    ui.paint(crate::ui::style::MUTED, details)
+                                );
+                            }
                         }
                         if plan_report.unautomated_drift > 0 {
                             let _ = writeln!(
@@ -314,7 +369,10 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                                 plan_report.requires_elevation_drift
                             );
                         }
-                        let _ = writeln!(out, "\nRun privr apply to apply these changes.");
+                        let _ = writeln!(
+                            out,
+                            "\nRun privr apply (or privr fix) to apply these changes."
+                        );
                     }
                 }
                 OutputFormat::Json => {
@@ -460,13 +518,17 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                                 .state
                                 .map(|s| s.0)
                                 .unwrap_or_else(|| "drift".to_owned());
-                            planned_items.push((
-                                c.spec.id.clone(),
-                                c.spec.section.clone(),
-                                current_str,
-                                c.spec.desired.0.clone(),
-                                c.spec.requires_elevation,
-                            ));
+                            let details = c.tradeoff.or(Some(c.summary)).map(|s| s.to_string());
+                            planned_items.push(PlanItem {
+                                id: c.spec.id.clone(),
+                                title: c.title.to_owned(),
+                                section: c.spec.section.clone(),
+                                current: current_str,
+                                desired: c.spec.desired.0.clone(),
+                                requires_elevation: c.spec.requires_elevation,
+                                friction: c.spec.friction,
+                                details,
+                            });
                         } else {
                             unautomated_count += 1;
                         }
@@ -494,9 +556,20 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                 let _ = writeln!(out, "Platform {}", host.platform.as_str());
                 let _ = writeln!(out, "Planned changes: {}\n", planned_items.len());
 
-                for (id, sec, cur, des, req_elev) in &planned_items {
-                    let _ = writeln!(out, "{sec}");
-                    let tag = if *req_elev && !is_elevated {
+                let mut last_section = "";
+                for item in &planned_items {
+                    if item.section != last_section {
+                        if !last_section.is_empty() {
+                            let _ = writeln!(out);
+                        }
+                        let _ = writeln!(
+                            out,
+                            "{}",
+                            ui.paint(crate::ui::style::HEADING, &item.section)
+                        );
+                        last_section = &item.section;
+                    }
+                    let elev_tag = if item.requires_elevation && !is_elevated {
                         format!(
                             " {}",
                             ui.paint(crate::ui::style::CAVEAT, "[requires elevation]")
@@ -504,26 +577,57 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                     } else {
                         String::new()
                     };
-                    let _ = writeln!(out, "  {id}{tag}");
                     let _ = writeln!(
                         out,
-                        "    Current: {}",
-                        ui.paint(
-                            crate::ui::style::outcome_style(crate::model::outcome::Outcome::Drift),
-                            cur
-                        )
+                        "  {}{}",
+                        ui.paint(crate::ui::style::IDENT, &item.title),
+                        elev_tag
                     );
-                    let _ = writeln!(out, "    Desired: {des}");
+                    let _ = writeln!(
+                        out,
+                        "    Control:  {}",
+                        ui.paint(crate::ui::style::MUTED, &item.id)
+                    );
+                    let arrow = ui.paint(crate::ui::style::MUTED, "->");
+                    let cur_display = ui.paint(
+                        crate::ui::style::outcome_style(crate::model::outcome::Outcome::Drift),
+                        &item.current,
+                    );
+                    let des_display = ui.paint(
+                        crate::ui::style::outcome_style(crate::model::outcome::Outcome::Pass),
+                        &item.desired,
+                    );
+                    let _ = writeln!(out, "    Change:   {cur_display} {arrow} {des_display}");
+                    let _ = writeln!(
+                        out,
+                        "    Friction: {}",
+                        ui.paint(crate::ui::style::MUTED, item.friction.display_name())
+                    );
+                    if let Some(details) = &item.details {
+                        let _ = writeln!(
+                            out,
+                            "    Details:  {}",
+                            ui.paint(crate::ui::style::MUTED, details)
+                        );
+                    }
                 }
 
-                let prompt_msg = if elevation_count > 0 {
-                    format!(
-                        "\nApply these {} change(s) (requires elevation)? [Y/n]: ",
-                        planned_items.len()
-                    )
-                } else {
-                    format!("\nApply these {} change(s)? [Y/n]: ", planned_items.len())
-                };
+                if elevation_count > 0 && !is_elevated {
+                    let _ = writeln!(
+                        out,
+                        "\nNote: {} change(s) require administrative privileges.",
+                        elevation_count
+                    );
+                    let _ = writeln!(
+                        out,
+                        "A Windows User Account Control (UAC) prompt will request approval to elevate."
+                    );
+                }
+
+                let prompt_msg = format!(
+                    "\nApply these {} change(s)? [Y/n] (Press Enter to confirm): ",
+                    planned_items.len()
+                );
                 let _ = write!(out, "{prompt_msg}");
                 let _ = out.flush();
 
@@ -912,6 +1016,17 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
             elevate,
             elevated_output: _,
         } => {
+            let transaction_id = match transaction_id {
+                Some(id) => id,
+                None => match crate::journal::latest_transaction() {
+                    Some(tx) => tx.transaction_id,
+                    None => {
+                        let _ = writeln!(err, "privr: no transaction history found to roll back.");
+                        return 1;
+                    }
+                },
+            };
+
             use std::io::IsTerminal;
             let is_interactive = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
 
@@ -923,7 +1038,10 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                     );
                     return 2;
                 }
-                let _ = write!(out, "Rollback transaction '{transaction_id}'? [Y/n]: ");
+                let _ = write!(
+                    out,
+                    "Rollback transaction '{transaction_id}'? [Y/n] (Press Enter to confirm): "
+                );
                 let _ = out.flush();
                 let mut input = String::new();
                 if std::io::stdin().read_line(&mut input).is_err() {
@@ -1090,6 +1208,41 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                 }
                 OutputFormat::Json => {
                     if serde_json::to_writer_pretty(&mut *out, &rep).is_ok() {
+                        let _ = writeln!(out);
+                    }
+                }
+            }
+            0
+        }
+        Command::History => {
+            let txs = crate::journal::list_transactions();
+            match format {
+                OutputFormat::Text => {
+                    if txs.is_empty() {
+                        let _ = writeln!(
+                            out,
+                            "No transaction history found. No changes have been applied yet."
+                        );
+                    } else {
+                        let _ = writeln!(out, "Transaction History ({} recorded):\n", txs.len());
+                        for tx in txs.iter().rev() {
+                            let _ = writeln!(
+                                out,
+                                "  {}  [{}]  {} change(s)  profile: {}",
+                                ui.paint(crate::ui::style::IDENT, &tx.transaction_id),
+                                tx.timestamp,
+                                tx.operations.len(),
+                                tx.profile
+                            );
+                        }
+                        let _ = writeln!(
+                            out,
+                            "\nTo reverse the most recent changes: privr undo (or privr rollback)"
+                        );
+                    }
+                }
+                OutputFormat::Json => {
+                    if serde_json::to_writer_pretty(&mut *out, &txs).is_ok() {
                         let _ = writeln!(out);
                     }
                 }
@@ -1483,6 +1636,7 @@ mod tests {
         let (code, stdout, stderr) = run_for_test(Some(Command::Check {
             profile: None,
             policy: Some("laptop.toml".into()),
+            workload: None,
             controls: Vec::new(),
             sections: Vec::new(),
             all: false,
@@ -1583,6 +1737,7 @@ mod tests {
         let (_, stdout, _) = run_for_test(Some(Command::Check {
             profile: Some(Profile::Baseline),
             policy: None,
+            workload: None,
             controls: Vec::new(),
             sections: Vec::new(),
             all: true,
@@ -1619,7 +1774,7 @@ mod tests {
     #[test]
     fn rollback_requires_confirmation() {
         let (code, stdout, stderr) = run_for_test(Some(Command::Rollback {
-            transaction_id: "tx-123".to_owned(),
+            transaction_id: Some("tx-123".to_owned()),
             yes: false,
             elevate: false,
             elevated_output: None,
@@ -1632,7 +1787,7 @@ mod tests {
     #[test]
     fn rollback_reports_missing_transaction_honestly() {
         let (code, stdout, stderr) = run_for_test(Some(Command::Rollback {
-            transaction_id: "tx-nonexistent-999".to_owned(),
+            transaction_id: Some("tx-nonexistent-999".to_owned()),
             yes: true,
             elevate: false,
             elevated_output: None,
@@ -1645,7 +1800,7 @@ mod tests {
     #[test]
     fn rollback_rejects_invalid_transaction_id() {
         let (code, stdout, stderr) = run_for_test(Some(Command::Rollback {
-            transaction_id: "../escaped".to_owned(),
+            transaction_id: Some("../escaped".to_owned()),
             yes: true,
             elevate: false,
             elevated_output: None,
@@ -1801,6 +1956,7 @@ mod tests {
         let (code, stdout, _) = run_for_test(Some(Command::Check {
             profile: Some(Profile::Baseline),
             policy: None,
+            workload: None,
             controls: Vec::new(),
             sections: vec!["advertising".to_owned()],
             all: true,
@@ -1809,6 +1965,57 @@ mod tests {
         if cfg!(windows) {
             assert!(stdout.contains("windows.advertising.id"));
         }
+    }
+
+    #[test]
+    fn check_with_workload_evaluates_persona() {
+        let (code, stdout, stderr) = run_for_test(Some(Command::Check {
+            profile: None,
+            policy: None,
+            workload: Some(WorkloadPersona::Developer),
+            controls: Vec::new(),
+            sections: Vec::new(),
+            all: false,
+        }));
+        assert!(matches!(code, 0 | 1 | 3), "code: {code}, stderr: {stderr}");
+        assert!(stdout.contains("workload:developer"));
+    }
+
+    #[test]
+    fn history_command_renders_text_and_json() {
+        let (code, stdout, stderr) = run_for_test(Some(Command::History));
+        assert_eq!(code, 0, "stderr: {stderr}");
+        assert!(
+            stdout.contains("Transaction History")
+                || stdout.contains("No transaction history found")
+        );
+
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        let json_code = run(
+            Cli {
+                color: crate::cli::ColorWhen::Never,
+                format: OutputFormat::Json,
+                command: Some(Command::History),
+            },
+            &mut out,
+            &mut err,
+        );
+        assert_eq!(json_code, 0);
+        let val: serde_json::Value = serde_json::from_slice(&out).expect("json");
+        assert!(val.is_array());
+    }
+
+    #[test]
+    fn rollback_without_transaction_id_handles_missing_or_latest() {
+        let (code, _, _) = run_for_test(Some(Command::Rollback {
+            transaction_id: None,
+            yes: true,
+            elevate: false,
+            elevated_output: None,
+        }));
+        // If no transactions exist, exit code 1. If one exists, it attempts rollback.
+        assert!(matches!(code, 0 | 1 | 2 | 4));
     }
 
     #[test]

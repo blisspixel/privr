@@ -168,6 +168,33 @@ pub fn load_transaction(id: &str) -> Result<TransactionJournal, std::io::Error> 
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
 }
 
+/// List all saved transactions in chronological order.
+pub fn list_transactions() -> Vec<TransactionJournal> {
+    let dir = transactions_dir();
+    let entries = match fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return Vec::new(),
+    };
+    let mut txs = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_file()
+            && path.extension().is_some_and(|ext| ext == "json")
+            && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+            && let Ok(tx) = load_transaction(stem)
+        {
+            txs.push(tx);
+        }
+    }
+    txs.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+    txs
+}
+
+/// Retrieve the most recent transaction recorded on disk.
+pub fn latest_transaction() -> Option<TransactionJournal> {
+    list_transactions().pop()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -245,5 +272,37 @@ mod tests {
     fn load_invalid_transaction_id_returns_invalid_input() {
         let err = load_transaction("../escape").unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn list_and_latest_transactions_return_saved_entries() {
+        let tx1 = TransactionJournal {
+            schema: JOURNAL_SCHEMA,
+            transaction_id: "tx-test-list-1".to_owned(),
+            timestamp: "2026-10-02T10:00:00Z".to_owned(),
+            platform: "windows".to_owned(),
+            profile: "baseline".to_owned(),
+            operations: Vec::new(),
+        };
+        let tx2 = TransactionJournal {
+            schema: JOURNAL_SCHEMA,
+            transaction_id: "tx-test-list-2".to_owned(),
+            timestamp: "2026-10-02T11:00:00Z".to_owned(),
+            platform: "windows".to_owned(),
+            profile: "baseline".to_owned(),
+            operations: Vec::new(),
+        };
+        let p1 = save_transaction(&tx1).expect("save tx1");
+        let p2 = save_transaction(&tx2).expect("save tx2");
+
+        let txs = list_transactions();
+        assert!(txs.iter().any(|t| t.transaction_id == "tx-test-list-1"));
+        assert!(txs.iter().any(|t| t.transaction_id == "tx-test-list-2"));
+
+        let latest = latest_transaction();
+        assert!(latest.is_some());
+
+        let _ = fs::remove_file(p1);
+        let _ = fs::remove_file(p2);
     }
 }

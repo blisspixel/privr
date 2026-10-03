@@ -33,11 +33,8 @@ privr simulate [--profile <name>] [--control <id-or-prefix>] [--section <name>]
 privr apply [--profile <name> | --policy <path>] [--control <id-or-prefix>]
             [--section <name>] [--yes] [--force] [--accept-risk <control-id>]
 privr purge [--control <id>] [--preview] [--accept-risk <control-id>]
-privr history list
-privr history show <transaction-id>
-privr history diff <older-id> <newer-id>
-privr history purge [--before <date>] [--yes]
-privr rollback <transaction-id> [--section <name>] [--yes]
+privr history
+privr rollback [<transaction-id>] [--section <name>] [--yes] [--elevate]
 privr profiles list
 privr profiles show <name>
 privr profiles validate <path>
@@ -45,8 +42,12 @@ privr mcp [--allow-apply]
 privr doctor
 ```
 
-`privr` without a subcommand means `privr check`. `audit` is an alias for
-`check`, `restore` is an alias for `rollback`.
+`privr` without a subcommand means `privr check`.
+- `check` aliases: `status`, `scan`, `audit`
+- `plan` alias: `diff`
+- `apply` aliases: `fix`, `harden`
+- `rollback` aliases: `restore`, `undo`
+- `history` alias: `log`
 
 ## Global options
 

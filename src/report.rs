@@ -8,7 +8,7 @@ use crate::catalog;
 use crate::engine::evaluate::{Mode, evaluate};
 use crate::model::Profile;
 use crate::model::host::HostFacts;
-use crate::model::outcome::{ControlResult, Exception, Outcome, Summary};
+use crate::model::outcome::{ControlResult, Exception, Outcome, Remediation, Summary};
 use crate::model::posture::PostureVector;
 use crate::ui::{Ui, style};
 
@@ -172,9 +172,16 @@ impl Report {
                 ui.paint(style::HEADING, "Posture Dimensions")
             ));
             for (dim, metrics) in &self.posture.dimensions {
+                let status_note = if metrics.drift > 0 {
+                    ui.paint(style::outcome_style(Outcome::Drift), "drift detected")
+                } else if metrics.compliant > 0 {
+                    ui.paint(style::outcome_style(Outcome::Pass), "100% compliant")
+                } else {
+                    ui.paint(style::MUTED, "not in profile")
+                };
                 out.push_str(&format!(
-                    "  {:<26} pass: {:>2}   drift: {:>2}   concealed: {:>2}\n",
-                    dim.as_str(),
+                    "  {:<26} pass: {:>2}   drift: {:>2}   concealed: {:>2}   ({status_note})\n",
+                    dim.display_name(),
                     metrics.compliant,
                     metrics.drift,
                     metrics.concealed
@@ -201,6 +208,23 @@ impl Report {
                 out.push_str(&format!("  {label}  {}\n", result.title));
                 out.push_str(&ui.paint(style::MUTED, &format!("            {}", result.id)));
                 out.push('\n');
+
+                if result.outcome == Outcome::Drift {
+                    let rem_label = match result.remediation {
+                        Remediation::Automatic => "remediation available",
+                        Remediation::Guided => "guided manual steps",
+                        Remediation::AuditOnly => "audit only",
+                        Remediation::None => "manual only",
+                    };
+                    out.push_str(&ui.paint(
+                        style::MUTED,
+                        &format!(
+                            "            {} | friction: {}\n",
+                            rem_label,
+                            result.friction.display_name()
+                        ),
+                    ));
+                }
 
                 // A note is printed even on a pass, because the case it exists
                 // for is precisely a finding that looks fine and is not what
@@ -239,6 +263,29 @@ impl Report {
                 if self.carried == 1 { "" } else { "s" }
             );
             out.push_str(&ui.paint(style::MUTED, &ui.wrap(&note, 0)));
+            out.push('\n');
+
+            if self.summary.drift > 0 {
+                out.push_str(&format!("\n{}\n", ui.paint(style::HEADING, "Actionable Next Steps")));
+                out.push_str(&format!(
+                    "  {} {}\n",
+                    ui.paint(style::IDENT, "privr apply"),
+                    ui.paint(style::MUTED, "- Apply recommended daily-driver privacy protections in-place")
+                ));
+                out.push_str(&format!(
+                    "  {} {}\n",
+                    ui.paint(style::IDENT, "privr plan"),
+                    ui.paint(style::MUTED, "- Preview eligible changes, current/desired state, and friction")
+                ));
+                out.push_str(&format!(
+                    "  {} {}\n",
+                    ui.paint(style::IDENT, "privr recommend"),
+                    ui.paint(style::MUTED, "- View recommendations by persona (general, developer, creative)")
+                ));
+            } else if self.complete && self.summary.drift == 0 {
+                out.push_str(&format!("\n{}\n", ui.paint(style::HEADING, "Status")));
+                out.push_str("  All evaluated controls match target policy. Machine is compliant.\n");
+            }
         }
         out.push('\n');
 

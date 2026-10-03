@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="580" viewBox="0 0 860 580" role="img" aria-label="Diagram showing an AI agent consuming privr as an MCP toolkit over stdio, requesting evidence for windows.storage.thumbnail-cache.">
+  <rect x="0" y="0" width="860" height="580" rx="8" fill="#141419"/>
+  <rect x="0" y="0" width="860" height="36" rx="8" fill="#1e1e24"/>
+  <rect x="0" y="26" width="860" height="10" fill="#1e1e24"/>
+  <circle cx="20" cy="18" r="5" fill="#e06c75"/>
+  <circle cx="38" cy="18" r="5" fill="#e5c07b"/>
+  <circle cx="56" cy="18" r="5" fill="#98c379"/>
+  <text x="430" y="23" font-family="'Cascadia Code', 'Consolas', monospace" font-size="12" fill="#7d8799" text-anchor="middle">Agent MCP Session - privr stdio</text>
+  <g font-family="'Cascadia Code', 'Consolas', 'Segoe UI Mono', monospace" font-size="13">
+    <text x="24" y="66" fill="#61afef">&gt; Agent Action: tools/call</text>
+    <text x="24" y="88" fill="#e5c07b" xml:space="preserve">  tool:   privr_explain</text>
+    <text x="24" y="108" fill="#e5c07b" xml:space="preserve">  params: { "id": "windows.storage.thumbnail-cache" }</text>
+    <line x1="24" y1="126" x2="836" y2="126" stroke="#2d3139" stroke-width="1"/>
+    <text x="24" y="152" fill="#98c379">&lt; MCP Response (Structured Posture Evidence):</text>
+    <text x="24" y="180" fill="#ffffff" font-weight="bold">File Explorer thumbnail caching</text>
+    <text x="24" y="200" fill="#7d8799">windows.storage.thumbnail-cache</text>
+    <text x="24" y="232" fill="#abb2bf">Windows Explorer renders and caches visual thumbnails of opened images, videos, and documents.</text>
+    <text x="24" y="266"><tspan fill="#e5c07b">Finding     </tspan><tspan fill="#e5c07b" font-weight="bold">drift</tspan></text>
+    <text x="24" y="286"><tspan fill="#7d8799">Current     </tspan><tspan fill="#abb2bf">enabled</tspan></text>
+    <text x="24" y="306"><tspan fill="#7d8799">Desired     </tspan><tspan fill="#98c379">disabled</tspan></text>
+    <text x="24" y="326"><tspan fill="#7d8799">Set by      </tspan><tspan fill="#abb2bf">the platform default</tspan></text>
+    <text x="24" y="360" fill="#61afef" font-weight="bold">Why it matters</text>
+    <text x="24" y="380" fill="#abb2bf">Explorer generates scaled visual thumbnails in global databases (thumbcache_*.db). These</text>
+    <text x="24" y="400" fill="#abb2bf">thumbnails persist unencrypted on disk even after files are deleted or viewed from</text>
+    <text x="24" y="420" fill="#abb2bf">encrypted volumes.</text>
+    <text x="24" y="454" fill="#61afef" font-weight="bold">What it costs</text>
+    <text x="24" y="474" fill="#abb2bf">Explorer displays generic file icons instead of visual picture and video previews.</text>
+    <text x="24" y="494" fill="#abb2bf">Pictures, videos, and documents can still be opened directly inside applications.</text>
+    <text x="24" y="528" fill="#61afef" font-weight="bold">Evidence</text>
+    <text x="24" y="548" fill="#7d8799">https://learn.microsoft.com/windows/client-management/mdm/policy-csp-fileexplorer (reviewed 2026-10-01)</text>
+  </g>
+</svg>

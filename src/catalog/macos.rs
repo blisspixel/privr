@@ -18,6 +18,8 @@ const APPLE_RESTRICTIONS_URL: &str =
 const MAC_ANALYTICS_URL: &str = "https://support.apple.com/guide/mac-help/mh27990/mac";
 const SIRI_PRIVACY_URL: &str = "https://support.apple.com/en-us/127070";
 const QUICKLOOK_DOCS_URL: &str = "https://developer.apple.com/documentation/quicklook";
+const GATEKEEPER_DOCS_URL: &str =
+    "https://support.apple.com/guide/security/gatekeeper-and-runtime-protection-sec5599b520d/web";
 
 fn probe_macos_analytics(_ctx: &Context) -> Resolution {
     let path = std::path::Path::new(
@@ -173,7 +175,42 @@ pub fn controls() -> Vec<Control> {
         },
         Control {
             spec: ControlSpec {
+                id: "macos.storage.quarantine-events".to_owned(),
+                title: "Download quarantine history".to_owned(),
+                section: "storage".to_owned(),
+                applicability: Applicability::new(vec![Variant::new(
+                    "macos",
+                    vec![Predicate::Platform(Platform::Macos)],
+                )]),
+                desired: disabled(),
+                reversibility: Reversibility::Exact,
+                maturity: Maturity::Automated,
+                verified_through: None,
+                remediation: Remediation::AuditOnly,
+                remediation_reason: None,
+            },
+            title: "Download quarantine history",
+            summary: "macOS Gatekeeper logs file download URLs, bundle IDs, and timestamps in QuarantineEvents.",
+            rationale: "Quarantine history permanently retains the originating URL, timestamp, and referring application for all downloaded files, persisting across private browsing sessions.",
+            tradeoff: Some(
+                "Disabling quarantine event logging limits retroactive provenance verification.",
+            ),
+            mitigation: Some(
+                "Real-time Gatekeeper malware scanning and application notarization checks remain active.",
+            ),
+            sources: &[Source {
+                url: GATEKEEPER_DOCS_URL,
+                claim: "Documents Gatekeeper download provenance and quarantine security.",
+                reviewed: "2026-10-01",
+            }],
+            probe: probe_macos_unmanaged_guided,
+            apply: None,
+            rollback: None,
+        },
+        Control {
+            spec: ControlSpec {
                 id: "macos.storage.quicklook-cache".to_owned(),
+
                 title: "Quick Look thumbnail cache".to_owned(),
                 section: "storage".to_owned(),
                 applicability: Applicability::new(vec![Variant::new(

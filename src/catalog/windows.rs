@@ -808,6 +808,38 @@ fn toggle_control(
     apply: Option<super::ApplyFn>,
     rollback: Option<super::RollbackFn>,
 ) -> Control {
+    toggle_control_with_desired(
+        id,
+        section,
+        title,
+        disabled(),
+        summary,
+        rationale,
+        tradeoff,
+        mitigation,
+        sources,
+        probe,
+        apply,
+        rollback,
+    )
+}
+
+/// Build a control with a specified desired state.
+#[allow(clippy::too_many_arguments)]
+fn toggle_control_with_desired(
+    id: &str,
+    section: &str,
+    title: &'static str,
+    desired: SemanticState,
+    summary: &'static str,
+    rationale: &'static str,
+    tradeoff: Option<&'static str>,
+    mitigation: Option<&'static str>,
+    sources: &'static [Source],
+    probe: fn(&Context) -> Resolution,
+    apply: Option<super::ApplyFn>,
+    rollback: Option<super::RollbackFn>,
+) -> Control {
     Control {
         spec: ControlSpec {
             id: id.to_owned(),
@@ -817,7 +849,7 @@ fn toggle_control(
                 "windows",
                 vec![Predicate::Platform(Platform::Windows)],
             )]),
-            desired: disabled(),
+            desired,
             reversibility: Reversibility::Exact,
             maturity: Maturity::Automated,
             verified_through: None,
@@ -1048,6 +1080,86 @@ const FILE_EXPLORER_CSP: &str =
     "https://learn.microsoft.com/windows/client-management/mdm/policy-csp-fileexplorer";
 const EDGE_POLICY_DOCS: &str =
     "https://learn.microsoft.com/deployedge/microsoft-edge-policies/metricsreportingenabled";
+const ERROR_REPORTING_CSP: &str =
+    "https://learn.microsoft.com/windows/client-management/mdm/policy-csp-errorreporting";
+const PAGEFILE_CLEAR_DOCS: &str = "https://learn.microsoft.com/windows/security/threat-protection/security-policy-settings/shutdown-clear-virtual-memory-pagefile";
+const FSUTIL_BEHAVIOR_DOCS: &str =
+    "https://learn.microsoft.com/windows-server/administration/windows-commands/fsutil-behavior";
+
+const ERROR_REPORTING_POLICY: Target = Target::new(
+    Hive::LocalMachine,
+    r"SOFTWARE\Policies\Microsoft\Windows\Windows Error Reporting",
+    "Disabled",
+    View::Native,
+);
+
+fn probe_error_reporting(ctx: &Context) -> Resolution {
+    match ctx
+        .registry
+        .read(&ERROR_REPORTING_POLICY, ManagementSource::LocalPolicy)
+    {
+        Evidence::Present { value, .. } => match value.as_u32() {
+            Some(1) => Resolution::determined(disabled(), ManagementSource::LocalPolicy),
+            Some(_) => Resolution::determined(enabled(), ManagementSource::LocalPolicy),
+            None => Resolution::uncertain(Uncertainty::Malformed, ManagementSource::LocalPolicy),
+        },
+        Evidence::Absent { .. } => Resolution::determined(enabled(), ManagementSource::Default),
+        Evidence::Denied { .. } => {
+            Resolution::uncertain(Uncertainty::Denied, ManagementSource::LocalPolicy)
+        }
+        _ => Resolution::uncertain(Uncertainty::Undetermined, ManagementSource::LocalPolicy),
+    }
+}
+
+const PAGEFILE_CLEAR_POLICY: Target = Target::new(
+    Hive::LocalMachine,
+    r"SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management",
+    "ClearPageFileAtShutdown",
+    View::Native,
+);
+
+fn probe_pagefile_clear(ctx: &Context) -> Resolution {
+    match ctx
+        .registry
+        .read(&PAGEFILE_CLEAR_POLICY, ManagementSource::LocalPolicy)
+    {
+        Evidence::Present { value, .. } => match value.as_u32() {
+            Some(1) => Resolution::determined(enabled(), ManagementSource::LocalPolicy),
+            Some(_) => Resolution::determined(disabled(), ManagementSource::LocalPolicy),
+            None => Resolution::uncertain(Uncertainty::Malformed, ManagementSource::LocalPolicy),
+        },
+        Evidence::Absent { .. } => Resolution::determined(disabled(), ManagementSource::Default),
+        Evidence::Denied { .. } => {
+            Resolution::uncertain(Uncertainty::Denied, ManagementSource::LocalPolicy)
+        }
+        _ => Resolution::uncertain(Uncertainty::Undetermined, ManagementSource::LocalPolicy),
+    }
+}
+
+const TRIM_NOTIFY_POLICY: Target = Target::new(
+    Hive::LocalMachine,
+    r"SYSTEM\CurrentControlSet\Control\FileSystem",
+    "DisableDeleteNotification",
+    View::Native,
+);
+
+fn probe_trim_notify(ctx: &Context) -> Resolution {
+    match ctx
+        .registry
+        .read(&TRIM_NOTIFY_POLICY, ManagementSource::LocalPolicy)
+    {
+        Evidence::Present { value, .. } => match value.as_u32() {
+            Some(0) => Resolution::determined(enabled(), ManagementSource::LocalPolicy),
+            Some(_) => Resolution::determined(disabled(), ManagementSource::LocalPolicy),
+            None => Resolution::uncertain(Uncertainty::Malformed, ManagementSource::LocalPolicy),
+        },
+        Evidence::Absent { .. } => Resolution::determined(enabled(), ManagementSource::Default),
+        Evidence::Denied { .. } => {
+            Resolution::uncertain(Uncertainty::Denied, ManagementSource::LocalPolicy)
+        }
+        _ => Resolution::uncertain(Uncertainty::Undetermined, ManagementSource::LocalPolicy),
+    }
+}
 
 /// Every Windows control, in stable sorted order by identifier.
 pub fn controls() -> Vec<Control> {
@@ -1163,6 +1275,27 @@ pub fn controls() -> Vec<Control> {
                 reviewed: "2026-09-22",
             }],
             probe_crash_dump_scope,
+            None,
+            None,
+        ),
+        toggle_control(
+            "windows.diagnostics.error-reporting",
+            "diagnostics",
+            "Windows Error Reporting",
+            "Windows Error Reporting captures process memory crash dumps and transmits diagnostic reports to Microsoft.",
+            "When applications or system components crash, Windows Error Reporting writes memory minidumps and crash signatures to disk and transmits them over the network. Memory dumps can expose decrypted credentials, tokens, and active document contents.",
+            Some(
+                "Applications that crash will not automatically upload diagnostic telemetry to Microsoft for crash analysis.",
+            ),
+            Some(
+                "Application event logs and crash codes remain logged locally in the Windows Event Log.",
+            ),
+            &[Source {
+                url: ERROR_REPORTING_CSP,
+                claim: "Documents Windows Error Reporting disable policy.",
+                reviewed: "2026-10-01",
+            }],
+            probe_error_reporting,
             None,
             None,
         ),
@@ -1467,6 +1600,26 @@ pub fn controls() -> Vec<Control> {
             None,
             None,
         ),
+        toggle_control_with_desired(
+            "windows.storage.pagefile-clear",
+            "storage",
+            "Paging file clear at shutdown",
+            enabled(),
+            "Windows clears virtual memory paging file sectors during system shutdown.",
+            "The virtual memory pagefile stores inactive RAM pages containing unencrypted credentials, cryptographic keys, and sensitive documents. When clearing is disabled, residual plaintext memory persists on disk sectors across shutdowns.",
+            Some("System shutdown takes longer while Windows writes zeros across the paging file."),
+            Some(
+                "System stability and runtime performance are unaffected; only the final shutdown sequence takes additional seconds.",
+            ),
+            &[Source {
+                url: PAGEFILE_CLEAR_DOCS,
+                claim: "Documents shutdown virtual memory pagefile clear security setting.",
+                reviewed: "2026-10-01",
+            }],
+            probe_pagefile_clear,
+            None,
+            None,
+        ),
         toggle_control(
             "windows.storage.thumbnail-cache",
             "storage",
@@ -1488,7 +1641,28 @@ pub fn controls() -> Vec<Control> {
             None,
             None,
         ),
+        toggle_control_with_desired(
+            "windows.storage.trim-notify",
+            "storage",
+            "Storage delete notification (TRIM)",
+            enabled(),
+            "Windows issues file delete notifications to solid-state drives when files are removed.",
+            "TRIM and UNMAP notifications inform solid-state drive controllers that deleted file blocks are invalid, allowing background wear leveling and physical erasure. When disabled, deleted file contents remain in physical storage cells.",
+            Some("Storage devices process TRIM notifications upon file deletion."),
+            Some(
+                "Standard modern solid-state drives handle TRIM natively with negligible performance overhead.",
+            ),
+            &[Source {
+                url: FSUTIL_BEHAVIOR_DOCS,
+                claim: "Documents filesystem delete notification TRIM behavior.",
+                reviewed: "2026-10-01",
+            }],
+            probe_trim_notify,
+            None,
+            None,
+        ),
     ];
+
     controls.sort_by(|a, b| {
         (a.spec.section.clone(), a.spec.id.clone())
             .cmp(&(b.spec.section.clone(), b.spec.id.clone()))
@@ -2048,5 +2222,122 @@ mod tests {
             result.outcome
         );
         assert!(result.is_coherent());
+    }
+
+    #[test]
+    fn error_reporting_probe_reads_policy() {
+        let host = windows_host();
+        let present = recording(vec![(
+            ERROR_REPORTING_POLICY,
+            Evidence::Present {
+                source: ManagementSource::LocalPolicy,
+                value: RawValue::u32(1),
+            },
+        )]);
+        assert_eq!(
+            probe_error_reporting(&recorded(&host, &present)).state,
+            Some(disabled())
+        );
+
+        let present_enabled = recording(vec![(
+            ERROR_REPORTING_POLICY,
+            Evidence::Present {
+                source: ManagementSource::LocalPolicy,
+                value: RawValue::u32(0),
+            },
+        )]);
+        assert_eq!(
+            probe_error_reporting(&recorded(&host, &present_enabled)).state,
+            Some(enabled())
+        );
+
+        let absent = recording(vec![(
+            ERROR_REPORTING_POLICY,
+            Evidence::Absent {
+                source: ManagementSource::LocalPolicy,
+            },
+        )]);
+        assert_eq!(
+            probe_error_reporting(&recorded(&host, &absent)).state,
+            Some(enabled())
+        );
+    }
+
+    #[test]
+    fn pagefile_clear_probe_reads_policy() {
+        let host = windows_host();
+        let present = recording(vec![(
+            PAGEFILE_CLEAR_POLICY,
+            Evidence::Present {
+                source: ManagementSource::LocalPolicy,
+                value: RawValue::u32(1),
+            },
+        )]);
+        assert_eq!(
+            probe_pagefile_clear(&recorded(&host, &present)).state,
+            Some(enabled())
+        );
+
+        let present_disabled = recording(vec![(
+            PAGEFILE_CLEAR_POLICY,
+            Evidence::Present {
+                source: ManagementSource::LocalPolicy,
+                value: RawValue::u32(0),
+            },
+        )]);
+        assert_eq!(
+            probe_pagefile_clear(&recorded(&host, &present_disabled)).state,
+            Some(disabled())
+        );
+
+        let absent = recording(vec![(
+            PAGEFILE_CLEAR_POLICY,
+            Evidence::Absent {
+                source: ManagementSource::LocalPolicy,
+            },
+        )]);
+        assert_eq!(
+            probe_pagefile_clear(&recorded(&host, &absent)).state,
+            Some(disabled())
+        );
+    }
+
+    #[test]
+    fn trim_notify_probe_reads_policy() {
+        let host = windows_host();
+        let present = recording(vec![(
+            TRIM_NOTIFY_POLICY,
+            Evidence::Present {
+                source: ManagementSource::LocalPolicy,
+                value: RawValue::u32(0),
+            },
+        )]);
+        assert_eq!(
+            probe_trim_notify(&recorded(&host, &present)).state,
+            Some(enabled())
+        );
+
+        let disabled_trim = recording(vec![(
+            TRIM_NOTIFY_POLICY,
+            Evidence::Present {
+                source: ManagementSource::LocalPolicy,
+                value: RawValue::u32(1),
+            },
+        )]);
+        assert_eq!(
+            probe_trim_notify(&recorded(&host, &disabled_trim)).state,
+            Some(disabled())
+        );
+
+        let absent = recording(vec![(
+            TRIM_NOTIFY_POLICY,
+            Evidence::Absent {
+                source: ManagementSource::LocalPolicy,
+            },
+        )]);
+        assert_eq!(
+            probe_trim_notify(&recorded(&host, &absent)).state,
+            Some(enabled())
+        );
     }
 }

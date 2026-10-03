@@ -28,6 +28,9 @@ const SYSTEMD_COREDUMP_URL: &str =
     "https://manpages.debian.org/testing/systemd-coredump/systemd-coredump.conf.5.en.html";
 const FREEDESKTOP_THUMBNAIL_URL: &str =
     "https://specifications.freedesktop.org/thumbnail-spec/thumbnail-spec-latest.html";
+const FSTRIM_DOCS_URL: &str = "https://manpages.debian.org/testing/util-linux/fstrim.8.en.html";
+const SYSTEMD_JOURNALD_URL: &str =
+    "https://manpages.debian.org/testing/systemd/journald.conf.5.en.html";
 
 /// Probe Debian popularity-contest configuration.
 fn probe_debian_popcon(_ctx: &Context) -> Resolution {
@@ -165,6 +168,44 @@ fn probe_systemd_coredump(_ctx: &Context) -> Resolution {
 /// Probe FreeDesktop thumbnail caching.
 fn probe_freedesktop_thumbnails(_ctx: &Context) -> Resolution {
     Resolution::uncertain(Uncertainty::Undetermined, ManagementSource::User)
+}
+
+/// Probe systemd fstrim timer status.
+fn probe_systemd_fstrim(_ctx: &Context) -> Resolution {
+    for path in [
+        "/etc/systemd/system/timers.target.wants/fstrim.timer",
+        "/lib/systemd/system/timers.target.wants/fstrim.timer",
+        "/usr/lib/systemd/system/timers.target.wants/fstrim.timer",
+    ] {
+        if std::path::Path::new(path).exists() {
+            return Resolution::determined(enabled(), ManagementSource::LocalPolicy);
+        }
+    }
+    Resolution::determined(disabled(), ManagementSource::Default)
+}
+
+/// Probe systemd-journald volatile storage.
+fn probe_systemd_journald(_ctx: &Context) -> Resolution {
+    let conf = std::path::Path::new("/etc/systemd/journald.conf");
+    if !conf.exists() {
+        return Resolution::determined(disabled(), ManagementSource::Default);
+    }
+    match std::fs::read_to_string(conf) {
+        Ok(content) => {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if trimmed.starts_with("Storage=") {
+                    let val = trimmed.trim_start_matches("Storage=").trim();
+                    if val.eq_ignore_ascii_case("volatile") {
+                        return Resolution::determined(enabled(), ManagementSource::LocalPolicy);
+                    }
+                    return Resolution::determined(disabled(), ManagementSource::LocalPolicy);
+                }
+            }
+            Resolution::determined(disabled(), ManagementSource::Default)
+        }
+        Err(_) => Resolution::uncertain(Uncertainty::Undetermined, ManagementSource::LocalPolicy),
+    }
 }
 
 /// Return all Linux controls, sorted by identifier.
@@ -485,7 +526,68 @@ pub fn controls() -> Vec<Control> {
         },
         Control {
             spec: ControlSpec {
+                id: "systemd.fstrim.timer".to_owned(),
+                title: "Periodic SSD TRIM timer".to_owned(),
+                section: "systemd".to_owned(),
+                applicability: Applicability::new(vec![Variant::new("linux-systemd", vec![])]),
+                desired: enabled(),
+                reversibility: Reversibility::Exact,
+                maturity: Maturity::Automated,
+                verified_through: None,
+                remediation: Remediation::AuditOnly,
+                remediation_reason: None,
+            },
+            title: "Periodic SSD TRIM timer",
+            summary: "systemd provides fstrim.timer to periodically discard unused filesystem blocks on solid-state drives.",
+            rationale: "Periodic TRIM informs solid-state drives of deleted and unallocated filesystem blocks, enabling wear leveling and physical data erasure.",
+            tradeoff: Some(
+                "fstrim executes a periodic storage discard scan across mounted filesystems.",
+            ),
+            mitigation: Some(
+                "The timer executes once per week during system idle time with negligible I/O impact.",
+            ),
+            sources: &[Source {
+                url: FSTRIM_DOCS_URL,
+                claim: "Documents systemd fstrim service and timer discard operations.",
+                reviewed: "2026-10-01",
+            }],
+            probe: probe_systemd_fstrim,
+            apply: None,
+            rollback: None,
+        },
+        Control {
+            spec: ControlSpec {
+                id: "systemd.journald.storage".to_owned(),
+                title: "Systemd journal memory storage".to_owned(),
+                section: "systemd".to_owned(),
+                applicability: Applicability::new(vec![Variant::new("linux-systemd", vec![])]),
+                desired: enabled(),
+                reversibility: Reversibility::Exact,
+                maturity: Maturity::Automated,
+                verified_through: None,
+                remediation: Remediation::AuditOnly,
+                remediation_reason: None,
+            },
+            title: "Systemd journal memory storage",
+            summary: "systemd-journald stores system event logs in volatile memory instead of persistent disk files.",
+            rationale: "Persistent journal logs record command execution traces, process crashes, and user session metadata to disk, surviving across system shutdowns.",
+            tradeoff: Some("System logs are lost when the system is rebooted or powered down."),
+            mitigation: Some(
+                "Real-time system logging and journalctl query commands remain fully functional during the active session.",
+            ),
+            sources: &[Source {
+                url: SYSTEMD_JOURNALD_URL,
+                claim: "Documents systemd-journald volatile storage configuration.",
+                reviewed: "2026-10-01",
+            }],
+            probe: probe_systemd_journald,
+            apply: None,
+            rollback: None,
+        },
+        Control {
+            spec: ControlSpec {
                 id: "ubuntu.insights.consent".to_owned(),
+
                 title: "Ubuntu Insights telemetry".to_owned(),
                 section: "ubuntu".to_owned(),
                 applicability: Applicability::new(vec![Variant::new(

@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="640" viewBox="0 0 860 640" role="img" aria-label="Terminal output of privr check on Windows 11 showing 28 controls evaluated with 20 passing and 8 drifted controls including storage residue and diagnostics.">
+  <rect x="0" y="0" width="860" height="640" rx="8" fill="#0c0c0c"/>
+  <rect x="0" y="0" width="860" height="36" rx="8" fill="#1f1f1f"/>
+  <rect x="0" y="26" width="860" height="10" fill="#1f1f1f"/>
+  <rect x="12" y="6" width="160" height="24" rx="4" fill="#2d2d2d"/>
+  <text x="24" y="22" font-family="'Cascadia Code', 'Consolas', 'Segoe UI Mono', monospace" font-size="12" fill="#cccccc">PowerShell</text>
+  <g fill="#cccccc" transform="translate(800, 14)">
+    <line x1="0" y1="4" x2="10" y2="4" stroke="#cccccc" stroke-width="1"/>
+    <rect x="18" y="0" width="9" height="9" fill="none" stroke="#cccccc" stroke-width="1"/>
+    <line x1="36" y1="0" x2="45" y2="9" stroke="#cccccc" stroke-width="1"/>
+    <line x1="45" y1="0" x2="36" y2="9" stroke="#cccccc" stroke-width="1"/>
+  </g>
+  <g font-family="'Cascadia Code', 'Consolas', 'Segoe UI Mono', monospace" font-size="13">
+    <text x="24" y="68"><tspan fill="#3a96dd">PS C:\Users\operator&gt;</tspan><tspan fill="#ffffff" xml:space="preserve"> privr check</tspan></text>
+    <text x="24" y="102" fill="#767676">Profile<tspan fill="#cccccc" xml:space="preserve">  baseline</tspan></text>
+    <text x="24" y="122" fill="#767676">Platform<tspan fill="#cccccc" xml:space="preserve"> Windows Professional, 25H2 (10.0.26200.9550)</tspan></text>
+    <text x="24" y="142" fill="#767676">Coverage<tspan fill="#cccccc" xml:space="preserve"> 28 of 28 controls in this build</tspan></text>
+    <text x="24" y="176"><tspan fill="#13a10e" font-weight="bold">20 pass</tspan><tspan fill="#767676" xml:space="preserve">    </tspan><tspan fill="#c19c00" font-weight="bold">8 drift</tspan></text>
+    <text x="24" y="210" fill="#3a96dd" font-weight="bold">delivery-optimization</text>
+    <text x="24" y="230" xml:space="preserve"><tspan fill="#c19c00" font-weight="bold">  drift   </tspan><tspan fill="#cccccc">  Delivery Optimization peer distribution</tspan></text>
+    <text x="24" y="248" fill="#767676" xml:space="preserve">            windows.delivery-optimization.mode</text>
+    <text x="24" y="278" fill="#3a96dd" font-weight="bold">diagnostics</text>
+    <text x="24" y="298" xml:space="preserve"><tspan fill="#c19c00" font-weight="bold">  drift   </tspan><tspan fill="#cccccc">  Windows Error Reporting</tspan></text>
+    <text x="24" y="316" fill="#767676" xml:space="preserve">            windows.diagnostics.error-reporting</text>
+    <text x="24" y="336" xml:space="preserve"><tspan fill="#c19c00" font-weight="bold">  drift   </tspan><tspan fill="#cccccc">  Application and device inventory collection</tspan></text>
+    <text x="24" y="354" fill="#767676" xml:space="preserve">            windows.diagnostics.inventory-collector</text>
+    <text x="24" y="384" fill="#3a96dd" font-weight="bold">security</text>
+    <text x="24" y="404" xml:space="preserve"><tspan fill="#c19c00" font-weight="bold">  drift   </tspan><tspan fill="#cccccc">  Link-Local Multicast Name Resolution</tspan></text>
+    <text x="24" y="422" fill="#767676" xml:space="preserve">            windows.security.llmnr</text>
+    <text x="24" y="442" xml:space="preserve"><tspan fill="#c19c00" font-weight="bold">  drift   </tspan><tspan fill="#cccccc">  Network Connectivity Status Indicator active probing</tspan></text>
+    <text x="24" y="460" fill="#767676" xml:space="preserve">            windows.security.ncsi-probing</text>
+    <text x="24" y="480" xml:space="preserve"><tspan fill="#c19c00" font-weight="bold">  drift   </tspan><tspan fill="#cccccc">  Web Proxy Auto-Discovery</tspan></text>
+    <text x="24" y="498" fill="#767676" xml:space="preserve">            windows.security.wpad</text>
+    <text x="24" y="528" fill="#3a96dd" font-weight="bold">storage</text>
+    <text x="24" y="548" xml:space="preserve"><tspan fill="#c19c00" font-weight="bold">  drift   </tspan><tspan fill="#cccccc">  Paging file clear at shutdown</tspan></text>
+    <text x="24" y="566" fill="#767676" xml:space="preserve">            windows.storage.pagefile-clear</text>
+    <text x="24" y="586" xml:space="preserve"><tspan fill="#c19c00" font-weight="bold">  drift   </tspan><tspan fill="#cccccc">  File Explorer thumbnail caching</tspan></text>
+    <text x="24" y="604" fill="#767676" xml:space="preserve">            windows.storage.thumbnail-cache</text>
+    <text x="24" y="628" fill="#767676">This build carries 28 controls. It is not a full picture of this machine.</text>
+  </g>
+</svg>

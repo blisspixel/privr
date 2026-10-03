@@ -106,7 +106,42 @@ Local privacy residue presents four distinct threat vectors:
 - **Documented purge mechanism:** Edge and Chrome internal crash history clear
   or removal of orphan `.dmp` files from the Crashpad reports folder.
 
+#### Virtual memory paging file residue
+- **Artifact:** `%SystemDrive%\pagefile.sys`
+- **Mechanism:** Windows Memory Manager swaps inactive virtual memory pages
+  from RAM to disk.
+- **Privacy risk:** Memory pages contain unencrypted plaintext passwords,
+  decryption keys, session tokens, and documents that persist in physical media
+  sectors across system shutdowns.
+- **Prevention policy:** `ClearPageFileAtShutdown = 1` under
+  `HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management`
+  or Security Option `Shutdown: Clear virtual memory pagefile`.
+- **Primary source:** [Microsoft security policy settings: Shutdown clear virtual memory pagefile](https://learn.microsoft.com/windows/security/threat-protection/security-policy-settings/shutdown-clear-virtual-memory-pagefile).
+
+#### Storage delete notification (TRIM / UNMAP)
+- **Artifact:** Unallocated flash memory blocks across physical SSD media.
+- **Mechanism:** File system delete notifications inform solid-state drive
+  controllers when file sectors are deallocated.
+- **Privacy risk:** When delete notifications are disabled (`DisableDeleteNotification = 1`),
+  underlying flash cells retain deleted file data indefinitely without
+  background wear leveling or physical block erasure.
+- **Prevention policy:** `DisableDeleteNotification = 0` under
+  `HKLM\SYSTEM\CurrentControlSet\Control\FileSystem`.
+- **Primary source:** [Microsoft fsutil behavior documentation](https://learn.microsoft.com/windows-server/administration/windows-commands/fsutil-behavior).
+
+#### Windows Error Reporting (WER) process crash dumps
+- **Artifact:** `%LOCALAPPDATA%\CrashDumps\*.dmp` and `%ProgramData%\Microsoft\Windows\WER\`
+- **Mechanism:** Windows Error Reporting captures uncompressed process memory
+  dumps when desktop applications crash.
+- **Privacy risk:** Process heap dumps expose user authentication tokens,
+  private cryptographic keys, and active document contents.
+- **Prevention policy:** `Disabled = 1` under
+  `HKLM\SOFTWARE\Policies\Microsoft\Windows\Windows Error Reporting` or Policy CSP
+  `ErrorReporting/DisableWindowsErrorReporting`.
+- **Primary source:** [Microsoft Policy CSP - ErrorReporting](https://learn.microsoft.com/windows/client-management/mdm/policy-csp-errorreporting).
+
 ---
+
 
 ### 2. macOS
 
@@ -191,7 +226,26 @@ Local privacy residue presents four distinct threat vectors:
 - **Documented vendor mechanism:** `abrt-cli rm` on Fedora, Apport service
   management on Ubuntu.
 
+#### Periodic solid-state TRIM timer
+- **Artifact:** `/etc/systemd/system/timers.target.wants/fstrim.timer`
+- **Mechanism:** systemd periodic timer issuing TRIM/discard ioctls to SSD storage.
+- **Privacy risk:** Storage controllers retain deallocated file sectors in flash
+  cells until discard requests are executed.
+- **Prevention policy:** Enabling `fstrim.timer`.
+- **Documented vendor mechanism:** `systemctl enable --now fstrim.timer` and `fstrim -av`.
+- **Primary source:** [fstrim manual](https://manpages.debian.org/testing/util-linux/fstrim.8.en.html).
+
+#### Systemd journal volatile memory storage
+- **Artifact:** `/var/log/journal/*`
+- **Mechanism:** systemd-journald logs service events, user logins, and kernel traces.
+- **Privacy risk:** Detailed session records, executed commands, and process faults
+  persist to disk across system reboots.
+- **Prevention policy:** `/etc/systemd/journald.conf` (`Storage=volatile`).
+- **Documented vendor mechanism:** `journalctl --vacuum-time=0` or `Storage=volatile`.
+- **Primary source:** [systemd-journald manual](https://manpages.debian.org/testing/systemd/journald.conf.5.en.html).
+
 ---
+
 
 ### 4. Developer and AI Assistant Residue (Cross-Platform)
 
@@ -256,9 +310,14 @@ privr purge [--preview] [<target>] [--accept-risk <target>]
 |---|---|---|---|
 | `windows.explorer.thumbnail-cache` | Windows | Moderate | Disk Cleanup API (`Thumbnail Cache`) |
 | `windows.browser.crashpad` | Windows | High | Crashpad report purge |
+| `windows.memory.pagefile` | Windows | High | Security Option (`ClearPageFileAtShutdown`) |
+| `windows.storage.trim` | Windows | Moderate | `fsutil behavior set disabledeletenotify 0` |
 | `macos.quicklook.cache` | macOS | Moderate | `qlmanage -r cache` |
 | `macos.quarantine.events` | macOS | High | QuarantineEvents database truncate |
 | `macos.diagnostics.reports` | macOS | High | Diagnostic reports folder purge |
 | `linux.systemd.coredump` | Linux | High | `coredumpctl rm` |
+| `linux.systemd.fstrim` | Linux | Moderate | `fstrim -av` via systemd timer |
+| `linux.systemd.journal` | Linux | High | `journalctl --vacuum-time=0` / volatile storage |
 | `linux.gnome.recent-files` | Linux | Moderate | `gtk_recent_manager_purge_items()` |
 | `developer.ai.stale-sessions` | All | High | Session pruning older than retention limit |
+

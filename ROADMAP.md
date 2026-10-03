@@ -31,10 +31,11 @@ milestone and its results should not be trusted.
 
 | Area | State |
 |---|---|
-| Windows `check`, `explain`, `list` | Implemented and tested with recorded evidence. 25 read-only controls. Validated on one Windows 11 Pro 25H2 machine. |
+| Windows `check`, `explain`, `list` | Implemented and tested with recorded evidence. 28 read-only controls. Validated on one Windows 11 Pro 25H2 machine. |
 | Windows `plan`, `apply`, `rollback` | Experimental. 14 user-scope controls carry an apply and rollback. Unit tested only; not validated in a disposable VM. Does not meet the 0.2.0 requirements. |
-| Linux `check` | Experimental. Discovery and 11 controls (GNOME, Ubuntu, Debian, Fedora, KDE, FreeDesktop, systemd). Compiled and tested in CI; never checked against a real desktop. |
-| macOS `check` | Experimental. Discovery and 5 controls. Compiled and tested in CI; never checked against a real Mac. |
+| Linux `check` | Experimental. Discovery and 13 controls (GNOME, Ubuntu, Debian, Fedora, KDE, FreeDesktop, systemd). Compiled and tested in CI; never checked against a real desktop. |
+| macOS `check` | Experimental. Discovery and 6 controls. Compiled and tested in CI; never checked against a real Mac. |
+
 | Agent server (`mcp`) | Implemented and tested. Synchronous stdio server with read-only tools and gated mutation. Conforms to Model Context Protocol and Agent Plugins v1.0.0. |
 | `doctor` | Placeholder. Reports that platform adapters are not implemented. |
 | Profile ladder | Not built. Every profile enforces every control. |

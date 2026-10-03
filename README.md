@@ -19,18 +19,21 @@ designed to be driven by an agent harness as readily as by a person.
 
 This repository is under active construction and has no release.
 
-- **Windows `check`, `explain`, and `list` work**, with 25 read-only controls,
+- **Windows `check`, `explain`, and `list` work**, with 28 read-only controls,
   validated on one Windows 11 Pro machine.
 - **Windows `plan`, `apply`, and `rollback` are experimental.** They change real
   settings but do not yet meet the safety requirements in the roadmap. Do not
   use them on a machine you care about.
-- **Linux (11 controls) and macOS (5 controls) `check` are experimental** and have
+- **Linux (13 controls) and macOS (6 controls) `check` are experimental** and have
   not been checked against a real desktop. Treat their results as unverified.
 - **Agent integration (`privr mcp`) is implemented**, providing a stdio Model
   Context Protocol (MCP) server and portable Agent Plugins v1.0.0 package.
 
 The full state, including known defects, is in
 [ROADMAP.md](ROADMAP.md#current-state).
+
+![privr check on Windows 11 showing 28 controls](docs/assets/check-windows.svg)
+
 
 On the machine this was developed on, one control found something real:
 
@@ -151,7 +154,10 @@ and `skills/privr/SKILL.md`).
 - Reports carry no stable machine identifier, so a report is safe to hand to a
   model.
 
+![Agent MCP session showing structured posture evidence](docs/assets/mcp-agent.svg)
+
 `privr` never calls a language model itself. The model is always the caller,
+
 never a dependency, and normal operation stays offline.
 
 ## Safety

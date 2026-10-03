@@ -134,6 +134,10 @@ separate question from "what is true here".
 sections, with dependencies, scope, privilege boundaries, required
 acknowledgements, and pending effects.
 
+`plan` supports `--workload <persona>` and `--max-friction <tier>` to preview
+recommendations tailored to specific operational requirements. Controls that require
+administrative elevation are annotated with `[requires elevation]`.
+
 Plans are not saved as executable files. They create stale-state and local data
 risks. `apply` recomputes from fresh observations and compares each target again
 immediately before writing.
@@ -144,6 +148,17 @@ In an interactive terminal, `apply` displays the fresh plan and requests
 approval section by section. The operator may approve a section, decline it, or
 stop entirely.
 
+`apply` supports `--workload <persona>` and `--max-friction <tier>` to execute
+defensive, adaptive hardening without running ad-hoc scripts.
+
+**Adaptive elevation handling:**
+- User-scope and machine-scope subplans are evaluated with elevation awareness.
+- When run in an unprivileged context, batch operations apply eligible user-scope
+  remediations, defensively defer machine-scope changes requiring administrative rights,
+  report `requires_elevation_drift` honestly, and exit with code 0.
+- If a user explicitly specifies a machine-scope control via `--control <id>` while
+  unelevated, `apply` fails closed with clear elevation guidance and exits with code 4.
+
 **Stopping partway is a success.** Approving two sections and declining the rest
 is a completed operation with exit code `0`, not a partial failure. Every
 approved change is verified and journaled.
@@ -153,6 +168,8 @@ Consent is split rather than blanket:
 | Flag | Authorizes |
 |---|---|
 | `--yes` | Standard-risk changes in noninteractive use. Nothing else. |
+| `--workload <persona>` | Tailor candidate remediations to a persona (`general`, `developer`, `creative`, `mobile`, `high-assurance`). |
+| `--max-friction <tier>` | Cap remediation candidate friction (`tier0-transparent`, `tier1-cosmetic`, `tier2-workflow-altering`, `tier3-incompatible-or-tradeoff`). |
 | `--force` | Proceeding when a non-blocking warning would otherwise stop the run. Never overrides external management, and never substitutes for `--accept-risk`. |
 | `--accept-risk <control-id>` | One named control carrying a security tradeoff, destructive effect, or major functionality change. Repeatable. Never accepts a class or a wildcard. |
 
@@ -163,10 +180,6 @@ control to be named.
 Only controls with verified observation, a compiled typed adapter, exact
 rollback, and successful native tests are eligible for automatic remediation.
 Externally managed controls are not overwritten.
-
-User-scope and machine-scope subplans are separate. Windows elevation uses a
-short-lived allowlisted helper described in [ARCHITECTURE.md](ARCHITECTURE.md),
-and elevation is requested only after the plan has been shown.
 
 ## `recommend`
 

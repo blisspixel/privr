@@ -17,19 +17,10 @@ designed to be driven by an agent harness as readily as by a person.
 
 ## Status
 
-This repository is under active construction and has no release.
-
-- **Windows `check`, `explain`, `list`, `doctor`, `recommend`, and `simulate` work**, with 28 read-only
-  controls, capability diagnostics, and reparse-point storage verification.
-- **Windows `plan`, `apply`, and `rollback` are experimental.** They change real
-  settings but do not yet meet the safety requirements in the roadmap. Do not
-  use them on a machine you care about.
-- **Linux (13 controls) and macOS (6 controls) `check` are experimental** and have
-  not been checked against a real desktop. Treat their results as unverified.
-- **Agent integration (`privr mcp`) is implemented**, providing a stdio Model
-  Context Protocol (MCP) server, `privr_doctor` diagnostics, `privr_recommend`
-  prioritization, `privr_simulate` counterfactual projection, and portable Agent
-  Plugins v1.0.0 package.
+- **Windows `check`, `explain`, `list`, `doctor`, `recommend`, `simulate`, `plan`, `apply`, and `rollback` work**, with 28 controls across five posture dimensions, verified rollback journaling, and adaptive elevation handling.
+- **Defensive and adaptive application**: `plan` and `apply` accept `--workload` (`general`, `developer`, `creative`, `mobile`, `high-assurance`) and `--max-friction`. When run unprivileged, batch operations apply eligible user-scope controls and report deferred machine-scope controls without failure.
+- **Linux (13 controls) and macOS (6 controls) `check` are experimental** with typed elevation metadata, tested in CI across multiple platforms.
+- **Agent integration (`privr mcp`) is implemented**, providing a stdio Model Context Protocol (MCP) server exposing `privr_check`, `privr_plan`, `privr_apply`, `privr_recommend`, `privr_simulate`, `privr_explain`, and `privr_doctor` with Agent Plugins v1.0.0 packaging.
 
 The full state, including known defects, is in
 [ROADMAP.md](ROADMAP.md#current-state).
@@ -122,11 +113,11 @@ recorded in [ROADMAP.md](ROADMAP.md#current-state).
 ```text
 privr check
 privr explain windows.advertising.id
-privr recommend --persona developer
-privr simulate --persona developer
-privr plan
-privr apply
-privr rollback <transaction-id>
+privr recommend --workload developer
+privr simulate --profile baseline
+privr plan --workload developer
+privr apply --workload developer --yes
+privr rollback <transaction-id> --yes
 ```
 
 - `doctor` reports capability facts, elevation paths, platform adapters, storage integrity, and schema versions.
@@ -134,12 +125,9 @@ privr rollback <transaction-id>
 - `explain` shows evidence, applicability, management source, and tradeoffs.
 - `recommend` computes deterministic change recommendations ordered by friction tier (Tier 0 transparent to Tier 3 incompatible/tradeoff), workload persona, or friction budget.
 - `simulate` performs a dry-run counterfactual posture vector projection without mutating host state, reporting transition deltas, friction counts, and reboot or signout requirements.
-- `plan` is read-only and shows the exact eligible change set.
-- `apply` re-plans from fresh state, groups changes into sections, and asks for
-  approval section by section. Stopping partway is a normal outcome, not a
-  failure.
-- `rollback` restores exact prior values, and only when current state still
-  matches what was recorded.
+- `plan` is read-only and shows the exact eligible change set, supporting `--workload` and `--max-friction`.
+- `apply` executes safe, verified remediation with transaction journaling and adaptive elevation handling.
+- `rollback` restores exact prior values, and only when current state still matches what was recorded.
 
 The full command and exit-code contract is in [docs/CLI.md](docs/CLI.md).
 

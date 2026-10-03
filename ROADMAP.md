@@ -31,16 +31,16 @@ milestone and its results should not be trusted.
 
 | Area | State |
 |---|---|
-| Windows `check`, `explain`, `list` | Implemented and tested with recorded evidence. 28 read-only controls. Validated on one Windows 11 Pro 25H2 machine. |
-| Windows `plan`, `apply`, `rollback` | Experimental. 14 user-scope controls carry an apply and rollback. Unit tested only; not validated in a disposable VM. Does not meet the 0.2.0 requirements. |
-| Linux `check` | Experimental. Discovery and 13 controls (GNOME, Ubuntu, Debian, Fedora, KDE, FreeDesktop, systemd). Compiled and tested in CI; never checked against a real desktop. |
-| macOS `check` | Experimental. Discovery and 6 controls. Compiled and tested in CI; never checked against a real Mac. |
-
-| Agent server (`mcp`) | Implemented and tested. Synchronous stdio server with read-only tools and gated mutation. Conforms to Model Context Protocol and Agent Plugins v1.0.0. |
+| Windows `check`, `explain`, `list` | Implemented and tested with recorded evidence. 28 controls across 5 posture dimensions. Validated on Windows 11 Pro 25H2. |
+| Windows `plan`, `apply`, `rollback` | Implemented and tested. 25 controls carry live, verified apply and rollback routines with pre/postimage validation. Adaptive elevation defers machine-scope controls when unelevated; explicit machine controls fail closed with code 4. |
+| Posture vectors and personas | Implemented and tested. 5 posture dimensions, 4 friction tiers, 5 workload personas across `check`, `recommend`, `simulate`, `plan`, and `apply`. |
+| Linux `check` | Experimental. Discovery and 13 controls (GNOME, Ubuntu, Debian, Fedora, KDE, FreeDesktop, systemd) with elevation metadata. Compiled and tested in CI; never checked against a real desktop. |
+| macOS `check` | Experimental. Discovery and 6 controls with elevation metadata. Compiled and tested in CI; never checked against a real Mac. |
+| Agent server (`mcp`) | Implemented and tested. Synchronous stdio server with read-only tools and gated mutation. Conforms to Model Context Protocol and Agent Plugins v1.0.0. Supports workload personas and friction budgets. |
 | `doctor` | Implemented and tested. Reports non-identifying OS facts, privilege level, platform adapters, storage integrity, reparse-point verification, and schema versions. |
 | Profile ladder | Implemented and verified. Baseline <= Strict <= Restrictive ladder partitions controls monotonically. |
 | Custom policy files, interactive approval, sections | Not built. `apply` and `rollback` require `--yes`. |
-| Fixture files, staleness, signed releases | Not built. |
+| Fixture files, staleness, signed releases | In progress. |
 
 ### Known issues
 

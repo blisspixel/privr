@@ -856,3 +856,32 @@ No paid tier, no hosted service, no bundled offers, no product telemetry. The
 reputational fault line in this category is the business model, and every new
 entrant inherits that suspicion. Stating the position explicitly is cheap and
 addresses the assumption directly.
+
+## 25. Multi-dimensional posture vectors, friction budgets, and adaptive elevation
+
+Status: decided.
+
+Scalar 0 to 100 privacy or security scores create perverse incentives: disabling
+all network interfaces, graphics subsystems, and services renders a machine unusable
+while scoring a nominal 100 percent. Posture must be evaluated as an orthogonal
+vector across five independent dimensions rather than collapsed into a scalar:
+
+- behavioral_commercial: advertising identifiers, search tracking, consumer tips, tailored experiences.
+- forensic_residue: local file execution records, thumbnail databases, memory pagefiles, activity timelines.
+- network_exposure: plaintext multicast name resolution (LLMNR), autoproxy probing (WPAD), NCSI network probing.
+- diagnostic_crash: process memory crash dumps, Watson submissions, automated bugcheck uploads.
+- ambient_sensor: location sensors, camera and microphone consent defaults, sensor telemetry.
+
+Operational friction is categorized deterministically into four strict tiers:
+- tier0-transparent: zero operational or visual impact on normal user workflows.
+- tier1-cosmetic: non-disruptive visual interface adjustments (e.g. Bing web suggestions in start menu).
+- tier2-workflow-altering: workflow modifications (e.g. thumbnail cache suppression, pagefile zeroing on shutdown).
+- tier3-incompatible-or-tradeoff: deep compatibility impacts (e.g. complete crash dump deactivation).
+
+Workload personas (general, developer, creative, mobile, high-assurance) define
+deterministic friction ceilings and dimension priorities.
+
+Defensive elevation handling enforces honest execution boundaries:
+- Machine-scope writes target protected system hives (HKEY_LOCAL_MACHINE) or system configuration (/etc/, sysctl).
+- When invoked in an unprivileged user context, batch profile or workload applications apply eligible user-scope controls without disruption, defensively defer machine-scope controls, honestly report requires_elevation_drift, and exit with code 0.
+- Explicit requests for machine-scope controls (--control <id>) in an unprivileged context fail closed with clear elevation guidance and exit code 4.

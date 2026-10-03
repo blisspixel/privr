@@ -160,10 +160,11 @@ pub enum Command {
         #[arg(long)]
         query: Option<String>,
     },
-    /// Explain one check, including impact and source.
+    /// Explain the posture scoring model and critical controls, or inspect one check in detail.
     Explain {
-        /// Exact check ID.
-        id: String,
+        /// Exact check ID, or topic (score, posture, critical, overview). Defaults to overview.
+        #[arg(value_name = "CONTROL_ID_OR_TOPIC")]
+        id: Option<String>,
     },
     /// Check whether commands needed by the current platform are available.
     Doctor,

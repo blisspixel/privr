@@ -187,6 +187,182 @@ pub fn render(control: &Control, host: &HostFacts, ui: &Ui) -> String {
     out
 }
 
+/// Renders an educational walkthrough of the posture scoring model, orthogonal dimensions,
+/// friction tiers, and most critical privacy/security controls in the current build.
+pub fn render_overview(ui: &Ui) -> String {
+    let mut out = String::new();
+    out.push_str(&format!(
+        "{}\n\n",
+        ui.paint(style::HEADING, "privr Posture Model & Critical Controls")
+    ));
+
+    out.push_str(&format!(
+        "{}\n",
+        ui.paint(style::HEADING, "1. How Posture Is Calculated")
+    ));
+    out.push_str(&ui.wrap(
+        "Posture is not an arbitrary marketing score or opaque scalar. It represents the exact \
+         proportion of evaluated controls in the active profile matching your target privacy policy:",
+        2,
+    ));
+    out.push('\n');
+    out.push_str(&format!(
+        "    {}\n\n",
+        ui.paint(
+            style::MUTED,
+            "Posture = Compliant Controls / Evaluated Controls (e.g. 5 of 10 passing = 50% Hardened)"
+        )
+    ));
+    out.push_str(&ui.wrap(
+        "Controls not selected by the active profile do not enter the denominator, ensuring honest \
+         completeness without penalizing tailored personas.",
+        2,
+    ));
+    out.push_str("\n\n");
+
+    out.push_str(&format!(
+        "{}\n",
+        ui.paint(style::HEADING, "2. Five Orthogonal Posture Dimensions")
+    ));
+    let dims = [
+        (
+            "Behavioral & Commercial",
+            "Advertising IDs, consumer telemetry, tailored suggestions, web search highlights.",
+        ),
+        (
+            "Forensic Residue",
+            "Shell MRU, Jump Lists, TypedPaths, thumbnail caches, cloud clipboard sync.",
+        ),
+        (
+            "Network Exposure",
+            "Active probing (NCSI), LLMNR, NetBIOS broadcast, WPAD, captive portal checks.",
+        ),
+        (
+            "Diagnostic & Crash",
+            "Windows Error Reporting crash dumps, diagnostic telemetry level, inventory collection.",
+        ),
+        (
+            "Sensor & Perimeter",
+            "Geolocation, background camera/microphone permissions, speech and inking dictionaries.",
+        ),
+    ];
+    for (name, desc) in dims {
+        out.push_str(&format!(
+            "  {:26} {}\n",
+            ui.paint(style::IDENT, name),
+            ui.paint(style::MUTED, desc)
+        ));
+    }
+    out.push('\n');
+
+    out.push_str(&format!(
+        "{}\n",
+        ui.paint(style::HEADING, "3. Four Operational Friction Tiers")
+    ));
+    let tiers = [
+        (
+            "Tier 0 (Transparent)",
+            "Zero workflow disruption, zero visible UI changes, zero breakage risk.",
+        ),
+        (
+            "Tier 1 (Cosmetic)",
+            "Minor visual indicators (e.g. web results omitted from local Start search).",
+        ),
+        (
+            "Tier 2 (Workflow Altering)",
+            "Disables user-facing conveniences (e.g. multi-device cloud clipboard sync).",
+        ),
+        (
+            "Tier 3 (Incompatible / Tradeoff)",
+            "High friction; requires specific developer or enterprise compatibility exceptions.",
+        ),
+    ];
+    for (name, desc) in tiers {
+        out.push_str(&format!(
+            "  {:26} {}\n",
+            ui.paint(style::IDENT, name),
+            ui.paint(style::MUTED, desc)
+        ));
+    }
+    out.push('\n');
+
+    out.push_str(&format!(
+        "{}\n",
+        ui.paint(
+            style::HEADING,
+            "4. Most Critical Privacy & Security Controls"
+        )
+    ));
+    let critical = [
+        (
+            "windows.security.llmnr",
+            "Link-Local Multicast Name Resolution",
+            "Multicast queries broadcast host presence and allow credential theft via rogue LLMNR responders on local networks.",
+        ),
+        (
+            "windows.security.wpad",
+            "Web Proxy Auto-Discovery",
+            "Automated broadcast WPAD queries allow local network attackers to inject rogue proxy servers and intercept HTTP traffic.",
+        ),
+        (
+            "windows.diagnostics.error-reporting",
+            "Windows Error Reporting",
+            "Crash dumps transmit user memory, call stacks, and application data to remote Microsoft telemetry services.",
+        ),
+        (
+            "windows.diagnostics.inventory-collector",
+            "Inventory Collection",
+            "Continuously scans installed software, drivers, and device hardware to upload compatibility telemetry.",
+        ),
+        (
+            "windows.delivery-optimization.mode",
+            "Delivery Optimization",
+            "P2P update sharing broadcasts machine presence and consumes local bandwidth sharing updates with external peers.",
+        ),
+    ];
+    for (id, title, impact) in critical {
+        out.push_str(&format!(
+            "  {} {}\n",
+            ui.paint(style::IDENT, title),
+            ui.paint(style::MUTED, &format!("({id})"))
+        ));
+        out.push_str(&ui.paint(style::MUTED, &ui.wrap(impact, 4)));
+        out.push('\n');
+    }
+    out.push('\n');
+
+    out.push_str(&format!(
+        "{}\n",
+        ui.paint(style::HEADING, "Actionable Commands")
+    ));
+    out.push_str(&format!(
+        "  {:18} {}\n",
+        ui.paint(style::IDENT, "privr diff"),
+        ui.paint(
+            style::MUTED,
+            "Preview eligible changes, current/desired state, and friction"
+        )
+    ));
+    out.push_str(&format!(
+        "  {:18} {}\n",
+        ui.paint(style::IDENT, "privr fix"),
+        ui.paint(
+            style::MUTED,
+            "Apply recommended daily-driver privacy protections in-place"
+        )
+    ));
+    out.push_str(&format!(
+        "  {:18} {}\n",
+        ui.paint(style::IDENT, "privr explain <id>"),
+        ui.paint(
+            style::MUTED,
+            "Inspect technical evidence, registry paths, and citations for any control"
+        )
+    ));
+
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -306,5 +482,18 @@ mod tests {
             // The operator should not have to know the internal vocabulary.
             assert!(!label.contains('_'));
         }
+    }
+
+    #[test]
+    fn overview_renders_educational_walkthrough() {
+        let plain_ui = Ui::plain();
+        let text = render_overview(&plain_ui);
+        assert!(text.contains("privr Posture Model & Critical Controls"));
+        assert!(text.contains("1. How Posture Is Calculated"));
+        assert!(text.contains("2. Five Orthogonal Posture Dimensions"));
+        assert!(text.contains("3. Four Operational Friction Tiers"));
+        assert!(text.contains("4. Most Critical Privacy & Security Controls"));
+        assert!(text.contains("windows.security.llmnr"));
+        assert!(!text.contains('\u{1b}'));
     }
 }

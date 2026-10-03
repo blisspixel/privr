@@ -136,13 +136,29 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                         && std::io::stdin().is_terminal()
                         && std::io::stdout().is_terminal()
                     {
-                        let prompt_text = "Action? [y] apply safe fixes, [d] preview diff, [q] quit (default: q): ";
+                        let prompt_text = "Action? [y] apply safe fixes, [d] preview diff, [e] explain score & critical items, [q] quit (default: q): ";
                         let _ = write!(out, "{}", ui.paint(crate::ui::style::HEADING, prompt_text));
                         let _ = out.flush();
 
                         let mut input = String::new();
                         if std::io::stdin().read_line(&mut input).is_ok() {
-                            let trimmed = input.trim().to_lowercase();
+                            let mut trimmed = input.trim().to_lowercase();
+                            if trimmed == "e" || trimmed == "explain" {
+                                let overview = crate::explain::render_overview(&ui);
+                                let _ = write!(out, "\n{overview}\n");
+                                let _ = out.flush();
+                                let next_prompt = "Next action? [y] apply safe fixes, [d] preview diff, [q] quit (default: q): ";
+                                let _ = write!(
+                                    out,
+                                    "{}",
+                                    ui.paint(crate::ui::style::HEADING, next_prompt)
+                                );
+                                let _ = out.flush();
+                                input.clear();
+                                if std::io::stdin().read_line(&mut input).is_ok() {
+                                    trimmed = input.trim().to_lowercase();
+                                }
+                            }
                             if trimmed == "y"
                                 || trimmed == "yes"
                                 || trimmed == "a"
@@ -841,19 +857,28 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                 let workload_str;
                 if let Some(w) = workload {
                     child_args.push("--workload");
-                    workload_str = w.as_str().to_owned();
+                    workload_str = clap::ValueEnum::to_possible_value(&w)
+                        .expect("valid value")
+                        .get_name()
+                        .to_string();
                     child_args.push(&workload_str);
                 }
                 let friction_str;
                 if let Some(f) = max_friction {
                     child_args.push("--max-friction");
-                    friction_str = f.as_str().to_owned();
+                    friction_str = clap::ValueEnum::to_possible_value(&f)
+                        .expect("valid value")
+                        .get_name()
+                        .to_string();
                     child_args.push(&friction_str);
                 }
                 let profile_str_val;
                 if profile.is_some() {
                     child_args.push("--profile");
-                    profile_str_val = profile_val.as_str().to_owned();
+                    profile_str_val = clap::ValueEnum::to_possible_value(&profile_val)
+                        .expect("valid value")
+                        .get_name()
+                        .to_string();
                     child_args.push(&profile_str_val);
                 }
                 for c_arg in &controls {
@@ -875,13 +900,27 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
 
                 match res {
                     crate::platform::elevation::ElevationResult::Success { exit_code, output } => {
-                        if output.trim().is_empty() {
-                            let _ =
-                                writeln!(out, "Applied changes successfully in elevated session.");
+                        if exit_code == 0 {
+                            if output.trim().is_empty() {
+                                let _ = writeln!(
+                                    out,
+                                    "Applied changes successfully in elevated session."
+                                );
+                            } else {
+                                let _ = write!(out, "{output}");
+                            }
                         } else {
-                            let _ = write!(out, "{output}");
+                            if output.trim().is_empty() {
+                                let _ = writeln!(
+                                    err,
+                                    "privr: elevated process failed with exit code {exit_code}."
+                                );
+                            } else {
+                                let _ = write!(err, "{output}");
+                            }
                         }
                         let _ = out.flush();
+                        let _ = err.flush();
                         return exit_code;
                     }
                     crate::platform::elevation::ElevationResult::Cancelled => {
@@ -1248,15 +1287,27 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                             exit_code,
                             output,
                         } => {
-                            if output.trim().is_empty() {
-                                let _ = writeln!(
-                                    out,
-                                    "Restored changes successfully in elevated session."
-                                );
+                            if exit_code == 0 {
+                                if output.trim().is_empty() {
+                                    let _ = writeln!(
+                                        out,
+                                        "Restored changes successfully in elevated session."
+                                    );
+                                } else {
+                                    let _ = write!(out, "{output}");
+                                }
                             } else {
-                                let _ = write!(out, "{output}");
+                                if output.trim().is_empty() {
+                                    let _ = writeln!(
+                                        err,
+                                        "privr: elevated rollback process failed with exit code {exit_code}."
+                                    );
+                                } else {
+                                    let _ = write!(err, "{output}");
+                                }
                             }
                             let _ = out.flush();
+                            let _ = err.flush();
                             return exit_code;
                         }
                         crate::platform::elevation::ElevationResult::Cancelled => {
@@ -1387,35 +1438,45 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
             }
             0
         }
-        Command::Explain { id } => match crate::explain::find(&id) {
-            Ok(control) => {
-                let host = crate::platform::discover();
-                let _ = write!(out, "{}", crate::explain::render(&control, &host, &ui));
-                0
+        Command::Explain { id } => {
+            let topic_or_id = id.as_deref().unwrap_or("overview");
+            if matches!(
+                topic_or_id.to_ascii_lowercase().as_str(),
+                "overview" | "score" | "posture" | "critical"
+            ) {
+                let _ = write!(out, "{}", crate::explain::render_overview(&ui));
+                return 0;
             }
-            Err(_) => {
-                // A bare failure wastes the caller's next step. Naming close
-                // matches costs nothing and helps a person and an agent alike.
-                let _ = writeln!(err, "privr: no control with the identifier '{id}'");
-                let hits = crate::explain::suggestions(&id);
-                if !hits.is_empty() {
+            match crate::explain::find(topic_or_id) {
+                Ok(control) => {
+                    let host = crate::platform::discover();
+                    let _ = write!(out, "{}", crate::explain::render(&control, &host, &ui));
+                    0
+                }
+                Err(_) => {
+                    // A bare failure wastes the caller's next step. Naming close
+                    // matches costs nothing and helps a person and an agent alike.
+                    let _ = writeln!(err, "privr: no control with the identifier '{topic_or_id}'");
+                    let hits = crate::explain::suggestions(topic_or_id);
+                    if !hits.is_empty() {
+                        let _ = writeln!(
+                            err,
+                            "
+Did you mean:"
+                        );
+                        for hit in hits {
+                            let _ = writeln!(err, "  {hit}");
+                        }
+                    }
                     let _ = writeln!(
                         err,
                         "
-Did you mean:"
+Run privr explain without arguments for the posture overview, or privr list to see every control in this build."
                     );
-                    for hit in hits {
-                        let _ = writeln!(err, "  {hit}");
-                    }
+                    2
                 }
-                let _ = writeln!(
-                    err,
-                    "
-Run privr list to see every control in this build."
-                );
-                2
             }
-        },
+        }
         Command::Recommend {
             workload,
             max_friction,
@@ -1832,13 +1893,34 @@ mod tests {
     #[test]
     fn explaining_an_unknown_identifier_fails_with_guidance() {
         let (code, stdout, stderr) = run_for_test(Some(Command::Explain {
-            id: "missing.check".to_owned(),
+            id: Some("missing.check".to_owned()),
         }));
         // A usage error, not an incomplete report: the machine was never asked.
         assert_eq!(code, 2);
         assert!(stdout.is_empty());
         assert!(stderr.contains("missing.check"));
         assert!(stderr.contains("privr list"), "no next step offered");
+    }
+
+    #[test]
+    fn explain_overview_without_arguments_renders_scoring_model() {
+        let (code, stdout, stderr) = run_for_test(Some(Command::Explain { id: None }));
+        assert_eq!(code, 0, "stderr: {stderr}");
+        assert!(stdout.contains("privr Posture Model & Critical Controls"));
+        assert!(stdout.contains("1. How Posture Is Calculated"));
+        assert!(stdout.contains("2. Five Orthogonal Posture Dimensions"));
+        assert!(stdout.contains("4. Most Critical Privacy & Security Controls"));
+    }
+
+    #[test]
+    fn explain_topic_keywords_render_scoring_model() {
+        for topic in ["score", "posture", "critical", "overview"] {
+            let (code, stdout, stderr) = run_for_test(Some(Command::Explain {
+                id: Some(topic.to_owned()),
+            }));
+            assert_eq!(code, 0, "topic {topic} failed with stderr: {stderr}");
+            assert!(stdout.contains("privr Posture Model & Critical Controls"));
+        }
     }
 
     #[test]

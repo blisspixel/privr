@@ -228,3 +228,36 @@ fn apply_help_shows_elevate_flag() {
         .stdout(predicate::str::contains("--elevate"))
         .stdout(predicate::str::contains("-e"));
 }
+
+#[test]
+fn explain_without_arguments_shows_scoring_and_critical_controls() {
+    let mut command = Command::cargo_bin("privr").expect("binary");
+    command
+        .arg("explain")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "privr Posture Model & Critical Controls",
+        ))
+        .stdout(predicate::str::contains("How Posture Is Calculated"))
+        .stdout(predicate::str::contains(
+            "Five Orthogonal Posture Dimensions",
+        ))
+        .stdout(predicate::str::contains(
+            "Most Critical Privacy & Security Controls",
+        ));
+}
+
+#[test]
+fn explain_topic_keywords_show_scoring_model() {
+    for topic in ["score", "posture", "critical", "overview"] {
+        let mut command = Command::cargo_bin("privr").expect("binary");
+        command
+            .args(["explain", topic])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains(
+                "privr Posture Model & Critical Controls",
+            ));
+    }
+}

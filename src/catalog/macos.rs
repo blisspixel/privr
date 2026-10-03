@@ -193,7 +193,7 @@ pub fn controls() -> Vec<Control> {
                 verified_through: None,
                 remediation: Remediation::AuditOnly,
                 remediation_reason: None,
-                min_profile: Profile::Strict,
+                min_profile: Profile::Restrictive,
             },
             title: "Download quarantine history",
             summary: "macOS Gatekeeper logs file download URLs, bundle IDs, and timestamps in QuarantineEvents.",

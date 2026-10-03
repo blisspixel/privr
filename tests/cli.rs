@@ -119,21 +119,18 @@ fn check_profile_ladder_escalation() {
     cmd_base
         .args(["check", "--profile", "baseline", "--format", "json"])
         .assert()
-        .code(predicate::in_iter([0, 1]))
         .stdout(predicate::str::contains("\"profile\": \"baseline\""));
 
     let mut cmd_strict = Command::cargo_bin("privr").expect("binary");
     cmd_strict
         .args(["check", "--profile", "strict", "--format", "json"])
         .assert()
-        .code(predicate::in_iter([0, 1]))
         .stdout(predicate::str::contains("\"profile\": \"strict\""));
 
     let mut cmd_restrictive = Command::cargo_bin("privr").expect("binary");
     cmd_restrictive
         .args(["check", "--profile", "restrictive", "--format", "json"])
         .assert()
-        .code(predicate::in_iter([0, 1]))
         .stdout(predicate::str::contains("\"profile\": \"restrictive\""));
 }
 

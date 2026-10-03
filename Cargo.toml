@@ -1,6 +1,6 @@
 [package]
 name = "privr"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "Privacy-first settings audit, drift detection, remediation, and rollback"
 license = "Apache-2.0"

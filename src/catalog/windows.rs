@@ -649,7 +649,7 @@ fn security_llmnr() -> Control {
             verified_through: None,
             remediation: Remediation::Automatic,
             remediation_reason: None,
-            min_profile: Profile::Restrictive,
+            min_profile: Profile::Baseline,
             requires_elevation: true,
         },
 
@@ -887,7 +887,11 @@ fn profile_for_control(id: &str, section: &str) -> Profile {
             "windows.storage.pagefile-clear" => Profile::Restrictive,
             _ => Profile::Strict,
         },
-        "security" => Profile::Restrictive,
+        "security" => match id {
+            "windows.security.llmnr" | "windows.security.wpad" => Profile::Baseline,
+            "windows.security.ncsi-probing" => Profile::Strict,
+            _ => Profile::Restrictive,
+        },
         _ => Profile::Baseline,
     }
 }

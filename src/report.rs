@@ -9,7 +9,7 @@ use crate::engine::evaluate::{Mode, evaluate};
 use crate::model::Profile;
 use crate::model::host::HostFacts;
 use crate::model::outcome::{ControlResult, Exception, Outcome, Remediation, Summary};
-use crate::model::posture::PostureVector;
+use crate::model::posture::{FrictionTier, PostureVector};
 use crate::ui::{Ui, style};
 
 /// Capitalise a lowercase platform identifier for display.
@@ -47,6 +47,41 @@ pub struct Report {
     pub results: Vec<ControlResult>,
 }
 
+fn render_meter(ui: &Ui, compliant: usize, total: usize, width: usize) -> String {
+    if total == 0 {
+        let empty_char = if ui.unicode() { "·" } else { "." };
+        let bar = empty_char.repeat(width);
+        return format!("[{}]", ui.paint(style::MUTED, &bar));
+    }
+
+    let filled_count = ((compliant as f64 / total as f64) * width as f64).round() as usize;
+    let filled_count = filled_count.min(width);
+    let empty_count = width.saturating_sub(filled_count);
+
+    let (fill_char, empty_char) = if ui.unicode() {
+        ("█", "░")
+    } else {
+        ("=", ".")
+    };
+
+    let filled_str = fill_char.repeat(filled_count);
+    let empty_str = empty_char.repeat(empty_count);
+
+    let colored_fill = if filled_count > 0 {
+        ui.paint(style::outcome_style(Outcome::Pass), &filled_str)
+    } else {
+        String::new()
+    };
+
+    let colored_empty = if empty_count > 0 {
+        ui.paint(style::outcome_style(Outcome::Drift), &empty_str)
+    } else {
+        String::new()
+    };
+
+    format!("[{colored_fill}{colored_empty}]")
+}
+
 impl Report {
     /// Evaluate every applicable control against this host.
     pub fn build(host: &HostFacts, profile: &str) -> Self {
@@ -77,17 +112,13 @@ impl Report {
         let context = catalog::Context::live(host);
         let all_controls = catalog::all();
         let recommended_ids: Option<std::collections::BTreeSet<String>> = workload.map(|w| {
-            crate::engine::recommend::generate_recommendations(
-                &all_controls,
-                &context,
-                host,
-                w,
-                None,
-                None,
-            )
-            .into_iter()
-            .map(|r| r.control_id)
-            .collect()
+            all_controls
+                .iter()
+                .filter(|c| {
+                    crate::engine::recommend::is_control_recommended_for_workload(&c.spec, w, None)
+                })
+                .map(|c| c.spec.id.clone())
+                .collect()
         });
 
         let mut results: Vec<ControlResult> = all_controls
@@ -203,6 +234,34 @@ impl Report {
 
         out.push_str(&self.count_line(ui));
 
+        // Posture Score meter
+        let score_label = if let Some(score_pct) = (self.summary.pass * 100).checked_div(evaluated)
+        {
+            let meter = render_meter(ui, self.summary.pass, evaluated, 10);
+            let score_str = format!("{score_pct:>3}% Hardened");
+            let styled_score = if score_pct >= 70 {
+                ui.paint(style::outcome_style(Outcome::Pass), &score_str)
+            } else {
+                ui.paint(style::outcome_style(Outcome::Drift), &score_str)
+            };
+            let breakdown = if self.summary.drift > 0 {
+                format!("({} pass, {} drift)", self.summary.pass, self.summary.drift)
+            } else {
+                format!("({} pass)", self.summary.pass)
+            };
+            format!(
+                "{styled_score} {meter} {}",
+                ui.paint(style::MUTED, &breakdown)
+            )
+        } else {
+            let meter = render_meter(ui, 0, 0, 10);
+            format!(
+                "  0% Hardened {meter} {}",
+                ui.paint(style::MUTED, "(no active controls evaluated)")
+            )
+        };
+        out.push_str(&format!("{}{score_label}\n", field("Posture")));
+
         if !self.posture.dimensions.is_empty() {
             out.push_str(&format!(
                 "\n{}\n",
@@ -210,32 +269,61 @@ impl Report {
             ));
             for (dim, metrics) in &self.posture.dimensions {
                 let total = metrics.compliant + metrics.drift + metrics.concealed;
-                let (ratio, status_note) = if metrics.drift > 0 {
-                    (
-                        format!("[{}/{} pass]", metrics.compliant, total),
-                        ui.paint(
-                            style::outcome_style(Outcome::Drift),
-                            &format!("{} drifted", metrics.drift),
-                        ),
-                    )
-                } else if metrics.compliant > 0 {
-                    (
-                        format!("[{}/{} pass]", metrics.compliant, total),
-                        ui.paint(style::outcome_style(Outcome::Pass), "100% compliant"),
-                    )
+                let (meter, status_col, details) =
+                    if let Some(pct) = (metrics.compliant * 100).checked_div(total) {
+                        let meter = render_meter(ui, metrics.compliant, total, 8);
+                        let pct_str = format!("{pct:>3}% compliant");
+                        let styled_pct = if metrics.drift > 0 {
+                            ui.paint(style::outcome_style(Outcome::Drift), &pct_str)
+                        } else {
+                            ui.paint(style::outcome_style(Outcome::Pass), &pct_str)
+                        };
+                        let detail_str = if metrics.concealed > 0 {
+                            format!(
+                                "({}/{} pass, {} drifted, {} unknown)",
+                                metrics.compliant, total, metrics.drift, metrics.concealed
+                            )
+                        } else if metrics.drift > 0 {
+                            format!(
+                                "({}/{} pass, {} drifted)",
+                                metrics.compliant, total, metrics.drift
+                            )
+                        } else {
+                            format!("({}/{} pass)", metrics.compliant, total)
+                        };
+                        (meter, styled_pct, ui.paint(style::MUTED, &detail_str))
+                    } else {
+                        let meter = render_meter(ui, 0, 0, 8);
+                        (
+                            meter,
+                            ui.paint(style::MUTED, "not in profile"),
+                            String::new(),
+                        )
+                    };
+
+                if details.is_empty() {
+                    out.push_str(&format!(
+                        "  {:<26} {}  {}\n",
+                        dim.display_name(),
+                        meter,
+                        status_col
+                    ));
                 } else {
-                    (
-                        "[0 active]".to_string(),
-                        ui.paint(style::MUTED, "not in profile"),
-                    )
-                };
-                out.push_str(&format!(
-                    "  {:<26} {:<12} ({status_note})\n",
-                    dim.display_name(),
-                    ratio
-                ));
+                    out.push_str(&format!(
+                        "  {:<26} {}  {} {}\n",
+                        dim.display_name(),
+                        meter,
+                        status_col,
+                        details
+                    ));
+                }
             }
         }
+
+        let control_map: BTreeMap<String, catalog::Control> = catalog::all()
+            .into_iter()
+            .map(|c| (c.spec.id.clone(), c))
+            .collect();
 
         let mut sections: BTreeMap<&str, Vec<&ControlResult>> = BTreeMap::new();
         for result in &self.results {
@@ -258,20 +346,53 @@ impl Report {
                 out.push('\n');
 
                 if result.outcome == Outcome::Drift {
-                    let rem_label = match result.remediation {
-                        Remediation::Automatic => "remediation available",
-                        Remediation::Guided => "guided manual steps",
-                        Remediation::AuditOnly => "audit only",
-                        Remediation::None => "manual only",
-                    };
-                    out.push_str(&ui.paint(
-                        style::MUTED,
-                        &format!(
-                            "            {} | friction: {}\n",
-                            rem_label,
-                            result.friction.display_name()
+                    let friction_badge = match result.friction {
+                        FrictionTier::Tier0Transparent => {
+                            ui.paint(style::outcome_style(Outcome::Pass), "[Safe: Zero Breakage]")
+                        }
+                        FrictionTier::Tier1Cosmetic => {
+                            ui.paint(style::INFO, "[Cosmetic: Minor Indicator]")
+                        }
+                        FrictionTier::Tier2WorkflowAltering => {
+                            ui.paint(style::CAVEAT, "[Workflow: Disables Feature]")
+                        }
+                        FrictionTier::Tier3IncompatibleOrTradeoff => ui.paint(
+                            style::outcome_style(Outcome::Error),
+                            "[Tradeoff: Compatibility Risk]",
                         ),
+                    };
+
+                    let rem_badge = match result.remediation {
+                        Remediation::Automatic => {
+                            ui.paint(style::outcome_style(Outcome::Review), "[Automatic Fix]")
+                        }
+                        Remediation::Guided => ui.paint(style::CAVEAT, "[Guided Steps]"),
+                        Remediation::AuditOnly => ui.paint(style::MUTED, "[Audit Only]"),
+                        Remediation::None => ui.paint(style::MUTED, "[Manual Only]"),
+                    };
+
+                    let elev_tag = if control_map
+                        .get(&result.id)
+                        .is_some_and(|c| c.spec.requires_elevation)
+                    {
+                        format!(" {}", ui.paint(style::MUTED, "[requires elevation]"))
+                    } else {
+                        String::new()
+                    };
+
+                    out.push_str(&format!(
+                        "            {friction_badge}  {rem_badge}{elev_tag}\n"
                     ));
+
+                    if let Some(ctrl) = control_map.get(&result.id) {
+                        let msg = if let Some(tradeoff) = ctrl.tradeoff {
+                            format!("Impact: {tradeoff}")
+                        } else {
+                            format!("Notice: {}", ctrl.summary)
+                        };
+                        out.push_str(&ui.paint(style::MUTED, &ui.wrap(&msg, 12)));
+                        out.push('\n');
+                    }
                 }
 
                 // A note is printed even on a pass, because the case it exists
@@ -320,7 +441,7 @@ impl Report {
                 ));
                 out.push_str(&format!(
                     "  {} {}\n",
-                    ui.paint(style::IDENT, "privr apply (or privr fix)"),
+                    ui.paint(style::IDENT, "privr fix   (or privr apply)"),
                     ui.paint(
                         style::MUTED,
                         "- Apply recommended daily-driver privacy protections in-place"
@@ -328,7 +449,7 @@ impl Report {
                 ));
                 out.push_str(&format!(
                     "  {} {}\n",
-                    ui.paint(style::IDENT, "privr plan (or privr diff)"),
+                    ui.paint(style::IDENT, "privr diff  (or privr plan)"),
                     ui.paint(
                         style::MUTED,
                         "- Preview eligible changes, current/desired state, and friction"
@@ -336,10 +457,18 @@ impl Report {
                 ));
                 out.push_str(&format!(
                     "  {} {}\n",
+                    ui.paint(style::IDENT, "privr doctor"),
+                    ui.paint(
+                        style::MUTED,
+                        "- Verify platform prerequisites, permissions, and tool health"
+                    )
+                ));
+                out.push_str(&format!(
+                    "  {} {}\n",
                     ui.paint(style::IDENT, "privr recommend"),
                     ui.paint(
                         style::MUTED,
-                        "- View recommendations by persona (general, developer, creative)"
+                        "- Explore tailored recommendations by workload persona"
                     )
                 ));
             } else if self.complete && self.summary.drift == 0 {
@@ -553,5 +682,27 @@ mod tests {
         // Evaluated controls (pass + drift + review) grow monotonically.
         assert!(baseline.summary.evaluated() <= strict.summary.evaluated());
         assert!(strict.summary.evaluated() <= restrictive.summary.evaluated());
+    }
+
+    #[test]
+    fn test_render_meter_modes() {
+        let plain = Ui::plain();
+        assert_eq!(render_meter(&plain, 0, 0, 8), "[........]");
+        assert_eq!(render_meter(&plain, 8, 8, 8), "[========]");
+        assert_eq!(render_meter(&plain, 4, 8, 8), "[====....]");
+        assert_eq!(render_meter(&plain, 0, 8, 8), "[........]");
+    }
+
+    #[test]
+    fn test_to_text_renders_posture_and_dimensions() {
+        let host = platform::discover();
+        let report = Report::build(&host, "baseline");
+        let plain = Ui::plain();
+        let text = report.to_text(&plain, true);
+
+        assert!(text.contains("Posture"));
+        assert!(text.contains("Hardened"));
+        assert!(text.contains("Posture Dimensions"));
+        assert!(text.contains("Behavioral & Commercial"));
     }
 }

@@ -105,6 +105,15 @@ impl FrictionTier {
     pub const fn is_unattended_safe(self) -> bool {
         matches!(self, Self::Tier0Transparent)
     }
+
+    pub const fn badge(self) -> &'static str {
+        match self {
+            Self::Tier0Transparent => "[Safe: Zero Breakage]",
+            Self::Tier1Cosmetic => "[Cosmetic: Minor Indicator]",
+            Self::Tier2WorkflowAltering => "[Workflow: Disables Feature]",
+            Self::Tier3IncompatibleOrTradeoff => "[Tradeoff: Compatibility Risk]",
+        }
+    }
 }
 
 impl fmt::Display for FrictionTier {
@@ -362,6 +371,22 @@ mod tests {
         }
         assert!(FrictionTier::Tier0Transparent.is_unattended_safe());
         assert!(!FrictionTier::Tier1Cosmetic.is_unattended_safe());
+        assert_eq!(
+            FrictionTier::Tier0Transparent.badge(),
+            "[Safe: Zero Breakage]"
+        );
+        assert_eq!(
+            FrictionTier::Tier1Cosmetic.badge(),
+            "[Cosmetic: Minor Indicator]"
+        );
+        assert_eq!(
+            FrictionTier::Tier2WorkflowAltering.badge(),
+            "[Workflow: Disables Feature]"
+        );
+        assert_eq!(
+            FrictionTier::Tier3IncompatibleOrTradeoff.badge(),
+            "[Tradeoff: Compatibility Risk]"
+        );
     }
 
     #[test]

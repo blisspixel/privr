@@ -29,6 +29,9 @@ pub const IDENT: Style = Style::new().bold();
 /// Text that qualifies a result and must not be skimmed past.
 pub const CAVEAT: Style = Style::new().fg_color(Some(Color::Ansi(AnsiColor::Yellow)));
 
+/// Secondary informational text or cosmetic notice badges.
+pub const INFO: Style = Style::new().fg_color(Some(Color::Ansi(AnsiColor::Cyan)));
+
 /// The style for an outcome label.
 ///
 /// Grouped by what the reader should do, not by severity:

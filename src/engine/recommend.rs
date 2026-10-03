@@ -9,6 +9,37 @@ use crate::model::host::HostFacts;
 use crate::model::outcome::{Exception, Outcome};
 use crate::model::posture::{FrictionTier, PostureDimension, Recommendation, WorkloadPersona};
 
+/// Determine whether a control specification is applicable to a given workload persona and friction ceiling.
+pub fn is_control_recommended_for_workload(
+    spec: &crate::engine::evaluate::ControlSpec,
+    workload: WorkloadPersona,
+    max_friction: Option<FrictionTier>,
+) -> bool {
+    if let Some(budget) = max_friction
+        && spec.friction > budget
+    {
+        return false;
+    }
+
+    if workload == WorkloadPersona::Creative
+        && (spec.id == "windows.storage.thumbnail-cache"
+            || spec.id == "freedesktop.thumbnails.caching"
+            || spec.id == "macos.storage.quicklook-cache")
+    {
+        return false;
+    }
+
+    if workload == WorkloadPersona::Mobile && spec.id == "windows.storage.pagefile-clear" {
+        return false;
+    }
+
+    if workload == WorkloadPersona::General && spec.id == "windows.security.ncsi-probing" {
+        return false;
+    }
+
+    true
+}
+
 /// Generate deterministic recommendations for a host given a workload persona and budget.
 pub fn generate_recommendations(
     controls: &[Control],
@@ -30,10 +61,7 @@ pub fn generate_recommendations(
             continue;
         }
 
-        // Apply friction budget filter.
-        if let Some(budget) = max_friction
-            && spec.friction > budget
-        {
+        if !is_control_recommended_for_workload(spec, workload, max_friction) {
             continue;
         }
 
@@ -42,18 +70,6 @@ pub fn generate_recommendations(
         let eval = evaluate(spec, Mode::Enforce, &resolution, host, Exception::None);
 
         if eval.outcome != Outcome::Drift {
-            continue;
-        }
-
-        // Check persona-specific policy rules:
-        // 1. Creative Persona:
-        //    Must preserve thumbnail caching for visual asset curation.
-        if workload == WorkloadPersona::Creative
-            && (spec.id == "windows.storage.thumbnail-cache"
-                || spec.id == "freedesktop.thumbnails.caching"
-                || spec.id == "macos.storage.quicklook-cache")
-        {
-            // Omit thumbnail caching disablement from creative workflow recommendations.
             continue;
         }
 

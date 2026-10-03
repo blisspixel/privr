@@ -15,9 +15,14 @@ pub mod applicability;
 pub mod evidence;
 pub mod host;
 pub mod outcome;
+pub mod posture;
 pub mod profile;
 
 pub use outcome::Reversibility;
+pub use posture::{
+    DimensionMetrics, FrictionTier, PostureDimension, PostureVector, Recommendation,
+    WorkloadPersona,
+};
 pub use profile::Profile;
 
 pub use applicability::{Applicability, Applies, Predicate, Variant};

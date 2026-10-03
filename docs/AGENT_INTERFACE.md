@@ -75,13 +75,17 @@ Read-only tools, always available:
 | Tool | Purpose |
 |---|---|
 | `privr_status` | Host facts, capability, and catalogue staleness |
+| `privr_doctor` | Environment health, storage integrity, and schema versions |
 | `privr_catalog` | Bounded query over the catalogue, returning candidate controls |
 | `privr_check` | Evaluate the host against a profile |
 | `privr_explain` | Full detail for one control |
 | `privr_plan` | Read-only proposed change set |
+| `privr_recommend` | Prioritized remediation recommendations based on workload persona and friction budget |
+| `privr_simulate` | Counterfactual projection of policy application without machine state mutation |
 
-All five declare themselves read-only, non-destructive, idempotent, and closed
-world.
+All declare themselves read-only, non-destructive, idempotent, and closed
+world. The deterministic engine provides invariant calculations, while external
+agents reason dynamically over operator context and trade-offs.
 
 Mutating tools, **absent from tool discovery entirely** unless the server is
 started with `--allow-apply`:

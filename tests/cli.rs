@@ -145,3 +145,53 @@ fn list_exposes_profile_tiers() {
         .stdout(predicate::str::contains("\"profile\": \"strict\""))
         .stdout(predicate::str::contains("\"profile\": \"restrictive\""));
 }
+
+#[test]
+fn recommend_cli_generates_persona_recommendations() {
+    let mut command = Command::cargo_bin("privr").expect("binary");
+    command
+        .args(["recommend", "--workload", "developer", "--format", "json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"schema\": 1"))
+        .stdout(predicate::str::contains("\"workload\": \"developer\""))
+        .stdout(predicate::str::contains("\"recommendations\""));
+}
+
+#[test]
+fn simulate_cli_projects_counterfactual_posture() {
+    let mut command = Command::cargo_bin("privr").expect("binary");
+    command
+        .args(["simulate", "--profile", "baseline", "--format", "json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"schema\": 1"))
+        .stdout(predicate::str::contains("\"current_posture\""))
+        .stdout(predicate::str::contains("\"simulated_posture\""));
+}
+
+#[test]
+fn check_cli_with_section_filter() {
+    let mut command = Command::cargo_bin("privr").expect("binary");
+    command
+        .args([
+            "check",
+            "--section",
+            "advertising",
+            "--format",
+            "json",
+            "--all",
+        ])
+        .assert()
+        .stdout(predicate::str::contains("\"schema\": 1"));
+}
+
+#[test]
+fn plan_cli_with_section_filter() {
+    let mut command = Command::cargo_bin("privr").expect("binary");
+    command
+        .args(["plan", "--section", "advertising", "--format", "json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"schema\": 1"));
+}

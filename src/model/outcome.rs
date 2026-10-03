@@ -209,6 +209,8 @@ pub struct ControlResult {
     /// explaining a finding never requires a second lookup.
     pub title: String,
     pub section: String,
+    pub dimension: super::posture::PostureDimension,
+    pub friction: super::posture::FrictionTier,
     pub outcome: Outcome,
     pub management_source: ManagementSource,
     pub remediation: Remediation,
@@ -334,7 +336,10 @@ mod tests {
             id: "windows.example".to_owned(),
             title: "Example control".to_owned(),
             section: "diagnostics".to_owned(),
+            dimension: crate::model::PostureDimension::DiagnosticCrash,
+            friction: crate::model::FrictionTier::Tier0Transparent,
             outcome: Outcome::Pass,
+
             management_source: ManagementSource::User,
             remediation: Remediation::Automatic,
             remediation_reason: None,

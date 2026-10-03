@@ -27,6 +27,9 @@ privr explain <control-id>
 privr list [--platform <name>] [--profile <name>] [--section <name>]
 privr plan [--profile <name> | --policy <path>] [--control <id-or-prefix>]
            [--section <name>]
+privr recommend [--workload <general|developer|creative|mobile|high-assurance>]
+                [--max-friction <tier>] [--dimension <dimension>]
+privr simulate [--profile <name>] [--control <id-or-prefix>] [--section <name>]
 privr apply [--profile <name> | --policy <path>] [--control <id-or-prefix>]
             [--section <name>] [--yes] [--force] [--accept-risk <control-id>]
 privr purge [--control <id>] [--preview] [--accept-risk <control-id>]
@@ -164,6 +167,34 @@ Externally managed controls are not overwritten.
 User-scope and machine-scope subplans are separate. Windows elevation uses a
 short-lived allowlisted helper described in [ARCHITECTURE.md](ARCHITECTURE.md),
 and elevation is requested only after the plan has been shown.
+
+## `recommend`
+
+`recommend` generates prioritized, explainable remediation recommendations
+based on evaluated machine drift, workload personas, and friction budgets.
+
+Instead of reducing complex operational trade-offs to a lossy scalar score,
+recommendations are ordered by friction tier (Tier 0 Transparent, Tier 1 Cosmetic,
+Tier 2 Workflow-Altering, Tier 3 Incompatible/Tradeoff) and tailored to specific
+workload personas:
+
+- `general`: daily-driver workstation with zero workflow disruption;
+- `developer`: preserves local crash minidumps for debugging;
+- `creative`: preserves local thumbnail caching for image and video asset curation;
+- `mobile`: suppresses broadcast protocols (LLMNR, WPAD) on untrusted Wi-Fi while
+  omitting slow pagefile clearing on shutdown;
+- `high-assurance`: air-gapped workstation with maximum memory and disk lockdown.
+
+## `simulate`
+
+`simulate` performs an in-memory counterfactual dry run projecting posture
+vector transitions, friction tier breakdowns, and pending restart or signout
+requirements without modifying machine state.
+
+It computes the exact transition from current posture to simulated posture across
+all five posture dimensions (`behavioral-commercial`, `forensic-residue`,
+`network-exposure`, `diagnostic-crash`, `ambient-sensor`), distinguishing automated
+remediation candidates from unautomated drift.
 
 ## `purge`
 

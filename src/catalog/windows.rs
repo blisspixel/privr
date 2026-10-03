@@ -15,6 +15,7 @@ use crate::model::applicability::{Applicability, Predicate, Variant};
 use crate::model::evidence::{Evidence, Observation, RawValue};
 use crate::model::host::{HostFacts, ManagementSource, Platform};
 use crate::model::outcome::{Ineffective, Maturity, Remediation, Reversibility};
+use crate::model::posture::{FrictionTier, PostureDimension};
 use crate::model::profile::Profile;
 use crate::platform::windows::registry::{Hive, Target, View};
 
@@ -219,6 +220,8 @@ fn diagnostics_level() -> Control {
             id: "windows.diagnostics.level".to_owned(),
             title: "Diagnostic data level".to_owned(),
             section: "diagnostics".to_owned(),
+            dimension: PostureDimension::DiagnosticCrash,
+            friction: FrictionTier::Tier0Transparent,
             applicability: Applicability::new(vec![Variant::new(
                 "windows",
                 vec![Predicate::Platform(Platform::Windows)],
@@ -233,6 +236,7 @@ fn diagnostics_level() -> Control {
             remediation_reason: None,
             min_profile: Profile::Baseline,
         },
+
         title: "Diagnostic data level",
         summary: "Windows sends diagnostic data about how the machine and its apps                   behave. The optional level adds browsing and typing activity,                   inventory, and memory captured when something crashes.",
         rationale: "Microsoft's own field lists for the optional level include text                     typed in the address bar and search box, available network names,                     the device serial number, files identified as a possible cause of a                     crash, and memory dumps that can contain everything in use at the                     time. The required level is the floor on ordinary editions.",
@@ -272,6 +276,8 @@ fn advertising_id() -> Control {
             id: "windows.advertising.id".to_owned(),
             title: "Advertising identifier".to_owned(),
             section: "advertising".to_owned(),
+            dimension: PostureDimension::BehavioralCommercial,
+            friction: FrictionTier::Tier0Transparent,
             applicability: Applicability::new(vec![Variant::new(
                 "windows",
                 vec![Predicate::Platform(Platform::Windows)],
@@ -284,6 +290,7 @@ fn advertising_id() -> Control {
             remediation_reason: None,
             min_profile: Profile::Baseline,
         },
+
         title: "Advertising identifier",
         summary: "Windows gives apps a per-user identifier so advertising you see \
                   can be linked across different apps.",
@@ -609,6 +616,8 @@ fn security_llmnr() -> Control {
             id: "windows.security.llmnr".to_owned(),
             title: "Link-Local Multicast Name Resolution".to_owned(),
             section: "security".to_owned(),
+            dimension: PostureDimension::NetworkExposure,
+            friction: FrictionTier::Tier0Transparent,
             applicability: Applicability::new(vec![Variant::new(
                 "windows",
                 vec![Predicate::Platform(Platform::Windows)],
@@ -621,6 +630,7 @@ fn security_llmnr() -> Control {
             remediation_reason: None,
             min_profile: Profile::Restrictive,
         },
+
         title: "Link-Local Multicast Name Resolution",
         summary: "Windows broadcasts name queries in plaintext across local networks when DNS fails.",
         rationale: "LLMNR multicasts queries over UDP port 5355 without encryption or authentication. Attackers on the local network can spoof answers and harvest NetNTLM credentials.",
@@ -850,6 +860,88 @@ fn profile_for_control(id: &str, section: &str) -> Profile {
     }
 }
 
+fn dimension_and_friction_for_control(id: &str, section: &str) -> (PostureDimension, FrictionTier) {
+    match section {
+        "advertising" => (
+            PostureDimension::BehavioralCommercial,
+            FrictionTier::Tier0Transparent,
+        ),
+        "experience" => match id {
+            "windows.experience.start-suggestions" => (
+                PostureDimension::BehavioralCommercial,
+                FrictionTier::Tier1Cosmetic,
+            ),
+            _ => (
+                PostureDimension::BehavioralCommercial,
+                FrictionTier::Tier0Transparent,
+            ),
+        },
+        "search" => match id {
+            "windows.search.web" => (
+                PostureDimension::BehavioralCommercial,
+                FrictionTier::Tier1Cosmetic,
+            ),
+            _ => (
+                PostureDimension::ForensicResidue,
+                FrictionTier::Tier0Transparent,
+            ),
+        },
+        "storage" => match id {
+            "windows.storage.thumbnail-cache" => (
+                PostureDimension::ForensicResidue,
+                FrictionTier::Tier2WorkflowAltering,
+            ),
+            "windows.storage.pagefile-clear" => (
+                PostureDimension::ForensicResidue,
+                FrictionTier::Tier2WorkflowAltering,
+            ),
+            _ => (
+                PostureDimension::ForensicResidue,
+                FrictionTier::Tier0Transparent,
+            ),
+        },
+        "security" => match id {
+            "windows.security.ncsi-probing" => (
+                PostureDimension::NetworkExposure,
+                FrictionTier::Tier1Cosmetic,
+            ),
+            _ => (
+                PostureDimension::NetworkExposure,
+                FrictionTier::Tier0Transparent,
+            ),
+        },
+        "diagnostics" => (
+            PostureDimension::DiagnosticCrash,
+            FrictionTier::Tier0Transparent,
+        ),
+        "delivery-optimization" => (
+            PostureDimension::NetworkExposure,
+            FrictionTier::Tier0Transparent,
+        ),
+        "input" => (
+            PostureDimension::AmbientSensor,
+            FrictionTier::Tier0Transparent,
+        ),
+        "clipboard" => (
+            PostureDimension::ForensicResidue,
+            FrictionTier::Tier2WorkflowAltering,
+        ),
+        "ai" => (
+            PostureDimension::BehavioralCommercial,
+            FrictionTier::Tier0Transparent,
+        ),
+        "browser" => (
+            PostureDimension::BehavioralCommercial,
+            FrictionTier::Tier0Transparent,
+        ),
+        "capability" => (PostureDimension::AmbientSensor, FrictionTier::Tier1Cosmetic),
+        _ => (
+            PostureDimension::BehavioralCommercial,
+            FrictionTier::Tier0Transparent,
+        ),
+    }
+}
+
 /// Build a control with a specified desired state.
 #[allow(clippy::too_many_arguments)]
 fn toggle_control_with_desired(
@@ -866,15 +958,19 @@ fn toggle_control_with_desired(
     apply: Option<super::ApplyFn>,
     rollback: Option<super::RollbackFn>,
 ) -> Control {
+    let (dimension, friction) = dimension_and_friction_for_control(id, section);
     Control {
         spec: ControlSpec {
             id: id.to_owned(),
             title: title.to_owned(),
             section: section.to_owned(),
+            dimension,
+            friction,
             applicability: Applicability::new(vec![Variant::new(
                 "windows",
                 vec![Predicate::Platform(Platform::Windows)],
             )]),
+
             desired,
             reversibility: Reversibility::Exact,
             maturity: Maturity::Automated,

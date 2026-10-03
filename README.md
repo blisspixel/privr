@@ -19,7 +19,7 @@ designed to be driven by an agent harness as readily as by a person.
 
 This repository is under active construction and has no release.
 
-- **Windows `check`, `explain`, `list`, and `doctor` work**, with 28 read-only
+- **Windows `check`, `explain`, `list`, `doctor`, `recommend`, and `simulate` work**, with 28 read-only
   controls, capability diagnostics, and reparse-point storage verification.
 - **Windows `plan`, `apply`, and `rollback` are experimental.** They change real
   settings but do not yet meet the safety requirements in the roadmap. Do not
@@ -27,7 +27,9 @@ This repository is under active construction and has no release.
 - **Linux (13 controls) and macOS (6 controls) `check` are experimental** and have
   not been checked against a real desktop. Treat their results as unverified.
 - **Agent integration (`privr mcp`) is implemented**, providing a stdio Model
-  Context Protocol (MCP) server, `privr_doctor` diagnostics, and portable Agent Plugins v1.0.0 package.
+  Context Protocol (MCP) server, `privr_doctor` diagnostics, `privr_recommend`
+  prioritization, `privr_simulate` counterfactual projection, and portable Agent
+  Plugins v1.0.0 package.
 
 The full state, including known defects, is in
 [ROADMAP.md](ROADMAP.md#current-state).
@@ -110,24 +112,28 @@ release. The installer will place an unprivileged binary and nothing else;
 ## Workflow
 
 ```text
-check -> explain -> plan -> apply -> verify -> rollback
+check -> explain -> recommend -> simulate -> plan -> apply -> verify -> rollback
 ```
 
-This is the target workflow. `check`, `explain`, and `list` behave as described
-on Windows; `plan`, `apply`, and `rollback` do not yet, as recorded in
-[ROADMAP.md](ROADMAP.md#current-state).
+This is the target workflow. `check`, `explain`, `list`, `recommend`, and `simulate`
+behave as described on Windows; `plan`, `apply`, and `rollback` do not yet, as
+recorded in [ROADMAP.md](ROADMAP.md#current-state).
 
 ```text
 privr check
 privr explain windows.advertising.id
+privr recommend --persona developer
+privr simulate --persona developer
 privr plan
 privr apply
 privr rollback <transaction-id>
 ```
 
 - `doctor` reports capability facts, elevation paths, platform adapters, storage integrity, and schema versions.
-- `check` reads effective state and compares it against a policy.
+- `check` reads effective state and compares it against a policy across five posture dimensions (behavioral-commercial, forensic-residue, network-exposure, diagnostic-crash, ambient-sensor).
 - `explain` shows evidence, applicability, management source, and tradeoffs.
+- `recommend` computes deterministic change recommendations ordered by friction tier (Tier 0 transparent to Tier 3 incompatible/tradeoff), workload persona, or friction budget.
+- `simulate` performs a dry-run counterfactual posture vector projection without mutating host state, reporting transition deltas, friction counts, and reboot or signout requirements.
 - `plan` is read-only and shows the exact eligible change set.
 - `apply` re-plans from fresh state, groups changes into sections, and asks for
   approval section by section. Stopping partway is a normal outcome, not a
@@ -146,8 +152,9 @@ stdio server is implemented at `privr mcp`, alongside packaging for the open
 and `skills/privr/SKILL.md`).
 
 - Read-only tool access (`privr_status`, `privr_doctor`, `privr_catalog`,
-  `privr_check`, `privr_explain`, `privr_plan`) over stdio, so an agent can
-  inspect and propose without being able to change anything.
+  `privr_check`, `privr_explain`, `privr_plan`, `privr_recommend`, `privr_simulate`)
+  over stdio, so an agent can inspect, simulate, and propose without being able
+  to change anything.
 - Mutating tools (`privr_apply`, `privr_rollback`) are absent from discovery
   unless explicitly enabled via `--allow-apply`, and approval cannot be granted
   through an unconfirmed tool call.

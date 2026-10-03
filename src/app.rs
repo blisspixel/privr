@@ -1,4 +1,4 @@
-use std::io::Write;
+use std::io::{IsTerminal, Write};
 
 use serde::Serialize;
 
@@ -71,6 +71,7 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
         crate::platform::elevation::DualWriter::new(err, elevated_output_path.as_deref());
     let out = &mut dual_out;
     let err = &mut dual_err;
+    let is_default_entry = cli.command.is_none();
     match cli.command.unwrap_or(Command::Check {
         profile: Some(Profile::Baseline),
         policy: None,
@@ -125,6 +126,108 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
             match format {
                 OutputFormat::Text => {
                     let _ = write!(out, "{}", report.to_text(&ui, all));
+                    let _ = out.flush();
+
+                    // Modern 2026 CLI: In interactive terminal sessions, running default 'privr'
+                    // provides an actionable prompt to preview or fix detected drift in-place
+                    // without forcing users to re-type one-off commands manually.
+                    if is_default_entry
+                        && report.summary.drift > 0
+                        && std::io::stdin().is_terminal()
+                        && std::io::stdout().is_terminal()
+                    {
+                        let prompt_text = "Action? [y] apply safe fixes, [d] preview diff, [q] quit (default: q): ";
+                        let _ = write!(out, "{}", ui.paint(crate::ui::style::HEADING, prompt_text));
+                        let _ = out.flush();
+
+                        let mut input = String::new();
+                        if std::io::stdin().read_line(&mut input).is_ok() {
+                            let trimmed = input.trim().to_lowercase();
+                            if trimmed == "y"
+                                || trimmed == "yes"
+                                || trimmed == "a"
+                                || trimmed == "apply"
+                            {
+                                return run(
+                                    Cli {
+                                        format,
+                                        color: cli.color,
+                                        command: Some(Command::Apply {
+                                            profile,
+                                            policy: None,
+                                            workload,
+                                            max_friction: None,
+                                            dry_run: false,
+                                            yes: false,
+                                            controls,
+                                            sections,
+                                            elevate: false,
+                                            elevated_output: None,
+                                        }),
+                                    },
+                                    out,
+                                    err,
+                                );
+                            } else if trimmed == "d"
+                                || trimmed == "diff"
+                                || trimmed == "p"
+                                || trimmed == "plan"
+                            {
+                                let plan_code = run(
+                                    Cli {
+                                        format,
+                                        color: cli.color,
+                                        command: Some(Command::Plan {
+                                            profile,
+                                            policy: None,
+                                            workload,
+                                            max_friction: None,
+                                            controls: controls.clone(),
+                                            sections: sections.clone(),
+                                        }),
+                                    },
+                                    out,
+                                    err,
+                                );
+                                if plan_code == 0 {
+                                    let apply_prompt =
+                                        "Apply these changes now? [y/N] (default: N): ";
+                                    let _ = write!(
+                                        out,
+                                        "{}",
+                                        ui.paint(crate::ui::style::HEADING, apply_prompt)
+                                    );
+                                    let _ = out.flush();
+                                    let mut plan_input = String::new();
+                                    if std::io::stdin().read_line(&mut plan_input).is_ok() {
+                                        let plan_trimmed = plan_input.trim().to_lowercase();
+                                        if plan_trimmed == "y" || plan_trimmed == "yes" {
+                                            return run(
+                                                Cli {
+                                                    format,
+                                                    color: cli.color,
+                                                    command: Some(Command::Apply {
+                                                        profile,
+                                                        policy: None,
+                                                        workload,
+                                                        max_friction: None,
+                                                        dry_run: false,
+                                                        yes: false,
+                                                        controls,
+                                                        sections,
+                                                        elevate: false,
+                                                        elevated_output: None,
+                                                    }),
+                                                },
+                                                out,
+                                                err,
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
                 OutputFormat::Json => {
                     if serde_json::to_writer_pretty(&mut *out, &report).is_ok() {
@@ -302,7 +405,10 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                                 let _ = writeln!(
                                     out,
                                     "{}",
-                                    ui.paint(crate::ui::style::HEADING, &item.section)
+                                    ui.paint(
+                                        crate::ui::style::HEADING,
+                                        crate::report::humanize_section(&item.section)
+                                    )
                                 );
                                 last_section = &item.section;
                             }
@@ -565,7 +671,10 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                         let _ = writeln!(
                             out,
                             "{}",
-                            ui.paint(crate::ui::style::HEADING, &item.section)
+                            ui.paint(
+                                crate::ui::style::HEADING,
+                                crate::report::humanize_section(&item.section)
+                            )
                         );
                         last_section = &item.section;
                     }

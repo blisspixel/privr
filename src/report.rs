@@ -206,7 +206,7 @@ impl Report {
 
     pub fn to_text(&self, ui: &Ui, show_all: bool) -> String {
         let mut out = String::new();
-        let field = |name: &str| ui.paint(style::MUTED, &format!("{name:<9}"));
+        let field = |name: &str| ui.paint(style::MUTED, &format!("{name:<10}"));
 
         out.push_str(&format!("{}{}\n", field("Profile"), self.profile));
 
@@ -290,9 +290,15 @@ impl Report {
                         let meter = render_meter(ui, metrics.compliant, total, 8);
                         let pct_str = format!("{pct:>3}% compliant");
                         let styled_pct = if metrics.drift > 0 {
-                            ui.paint(style::outcome_style(Outcome::Drift), &pct_str)
+                            ui.paint(
+                                style::outcome_style(Outcome::Drift),
+                                &format!("{pct_str:<15}"),
+                            )
                         } else {
-                            ui.paint(style::outcome_style(Outcome::Pass), &pct_str)
+                            ui.paint(
+                                style::outcome_style(Outcome::Pass),
+                                &format!("{pct_str:<15}"),
+                            )
                         };
                         let detail_str = if metrics.concealed > 0 {
                             format!(
@@ -312,7 +318,7 @@ impl Report {
                         let meter = render_meter(ui, 0, 0, 8);
                         (
                             meter,
-                            ui.paint(style::MUTED, "not in profile"),
+                            ui.paint(style::MUTED, &format!("{:<15}", "not in profile")),
                             String::new(),
                         )
                     };
@@ -351,60 +357,83 @@ impl Report {
         }
 
         for (section, results) in sections {
-            out.push_str(&format!("\n{}\n", ui.paint(style::HEADING, section)));
+            let section_title = humanize_section(section);
+            out.push_str(&format!("\n{}\n", ui.paint(style::HEADING, section_title)));
             for result in results {
-                let outcome_txt = style::outcome_label(result.outcome).trim();
-                let label = ui.paint(style::outcome_style(result.outcome), outcome_txt);
-                out.push_str(&format!("  {label:<5}  {}\n", result.title));
+                let (sym, word) = match result.outcome {
+                    Outcome::Drift => ("!", "drift"),
+                    Outcome::Pass => {
+                        if ui.unicode() {
+                            ("✓", "pass")
+                        } else {
+                            ("+", "pass")
+                        }
+                    }
+                    Outcome::Review => ("?", "review"),
+                    Outcome::Unknown => ("?", "unknown"),
+                    Outcome::Error => ("x", "error"),
+                    Outcome::NotApplicable => ("-", "n/a"),
+                    Outcome::NotSelected => ("·", "skip"),
+                    Outcome::NotChecked => ("?", "unchecked"),
+                };
+                let badge_txt = format!("{sym} {word}");
+                let label = ui.paint(
+                    style::outcome_style(result.outcome),
+                    &format!("{badge_txt:<9}"),
+                );
+                out.push_str(&format!("  {label} {}\n", result.title));
 
                 if result.outcome == Outcome::Drift {
+                    let dot = if ui.unicode() { "·" } else { "-" };
                     let friction_badge = match result.friction {
                         FrictionTier::Tier0Transparent => {
-                            ui.paint(style::outcome_style(Outcome::Pass), "[Safe: Zero Breakage]")
+                            ui.paint(style::outcome_style(Outcome::Pass), "Safe: Zero Breakage")
                         }
-                        FrictionTier::Tier1Cosmetic => {
-                            ui.paint(style::INFO, "[Cosmetic: Minor Indicator]")
-                        }
+                        FrictionTier::Tier1Cosmetic => ui.paint(style::INFO, "Cosmetic Impact"),
                         FrictionTier::Tier2WorkflowAltering => {
-                            ui.paint(style::CAVEAT, "[Workflow: Disables Feature]")
+                            ui.paint(style::CAVEAT, "Workflow Altering")
                         }
-                        FrictionTier::Tier3IncompatibleOrTradeoff => ui.paint(
-                            style::outcome_style(Outcome::Error),
-                            "[Tradeoff: Compatibility Risk]",
-                        ),
+                        FrictionTier::Tier3IncompatibleOrTradeoff => {
+                            ui.paint(style::outcome_style(Outcome::Error), "Compatibility Risk")
+                        }
                     };
 
                     let elev_tag = if control_map
                         .get(&result.id)
                         .is_some_and(|c| c.spec.requires_elevation)
                     {
-                        format!(" {}", ui.paint(style::MUTED, "[requires elevation]"))
+                        format!(
+                            " {} {}",
+                            ui.paint(style::MUTED, dot),
+                            ui.paint(style::CAVEAT, "requires elevation")
+                        )
                     } else {
                         String::new()
                     };
 
                     out.push_str(&format!(
-                        "         {}  {}{}\n",
+                        "            {} {} {}{}\n",
                         ui.paint(style::MUTED, &result.id),
+                        ui.paint(style::MUTED, dot),
                         friction_badge,
                         elev_tag
                     ));
                 } else {
                     out.push_str(&format!(
-                        "         {}\n",
+                        "            {}\n",
                         ui.paint(style::MUTED, &result.id)
                     ));
                 }
 
                 if let Some(note) = &result.note {
-                    out.push_str(&ui.paint(style::CAVEAT, &ui.wrap(note, 9)));
+                    out.push_str(&ui.paint(style::CAVEAT, &ui.wrap(note, 12)));
                     out.push('\n');
                 }
 
                 if result.outcome.conceals_state() {
                     out.push_str(&ui.paint(
                         style::CAVEAT,
-                        "         Reported as unknown, not as passing.\n",
+                        "            Reported as unknown, not as passing.\n",
                     ));
                 }
             }
@@ -420,8 +449,14 @@ impl Report {
                 )
             ));
         } else if self.summary.drift > 0 {
+            let divider = if ui.unicode() {
+                "─".repeat(ui.width().min(76))
+            } else {
+                "-".repeat(ui.width().min(76))
+            };
+            out.push_str(&format!("\n{}\n", ui.paint(style::MUTED, &divider)));
             out.push_str(&format!(
-                "\nNext Steps: Run '{}' to preview, or '{}' to apply.\n",
+                "Next Steps: Run '{}' to preview, or '{}' to apply safe remediations.\n",
                 ui.paint(style::IDENT, "privr diff"),
                 ui.paint(style::IDENT, "privr fix")
             ));
@@ -431,6 +466,25 @@ impl Report {
         out.push('\n');
 
         out
+    }
+}
+
+/// Translate an internal section key into a polished, human-facing category title.
+pub fn humanize_section(section: &str) -> &str {
+    match section {
+        "delivery-optimization" => "Delivery Optimization",
+        "diagnostics" => "Diagnostics & Crash Telemetry",
+        "security" => "Network & Perimeter Security",
+        "advertising" => "Advertising & Commercial Tracking",
+        "personalization" => "Input & Personalization",
+        "location" => "Location & Sensors",
+        "search" => "Search & Web Results",
+        "activity" => "Activity History & Cloud Sync",
+        "clipboard" => "Cloud Clipboard",
+        "sensory" => "Sensors & Biometrics",
+        "storage" => "Storage & Retention",
+        "recall" => "Windows Recall & AI Analysis",
+        _ => section,
     }
 }
 

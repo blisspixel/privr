@@ -73,7 +73,7 @@ pub struct AppliedOp {
 }
 
 pub type ApplyFn = fn(&Context) -> Result<AppliedOp, String>;
-pub type RollbackFn = fn(&Context, &Option<RawValue>) -> Result<(), String>;
+pub type RollbackFn = fn(&Context, &Option<RawValue>, &RawValue) -> Result<(), String>;
 
 /// A compiled control definition.
 pub struct Control {
@@ -112,8 +112,9 @@ impl Control {
         &self,
         context: &Context,
         preimage: &Option<RawValue>,
+        postimage: &RawValue,
     ) -> Option<Result<(), String>> {
-        self.rollback.map(|f| f(context, preimage))
+        self.rollback.map(|f| f(context, preimage, postimage))
     }
 }
 

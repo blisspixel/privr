@@ -299,7 +299,7 @@ fn advertising_id() -> Control {
         }],
         probe: probe_advertising_id,
         apply: Some(|ctx| ADVERTISING_TOGGLE.apply(ctx)),
-        rollback: Some(|ctx, pre| ADVERTISING_TOGGLE.rollback(ctx, pre)),
+        rollback: Some(|ctx, pre, post| ADVERTISING_TOGGLE.rollback(ctx, pre, post)),
     }
 }
 
@@ -379,10 +379,15 @@ impl Toggle {
         })
     }
 
-    fn rollback(&self, ctx: &Context, preimage: &Option<RawValue>) -> Result<(), String> {
+    fn rollback(
+        &self,
+        ctx: &Context,
+        preimage: &Option<RawValue>,
+        postimage: &RawValue,
+    ) -> Result<(), String> {
         let current = ctx.registry.read(&self.target, ManagementSource::User);
         let current_matches = match current {
-            Evidence::Present { value, .. } => value.as_u32() == Some(self.private_value),
+            Evidence::Present { value, .. } => value == *postimage,
             _ => false,
         };
         if !current_matches {
@@ -486,16 +491,15 @@ impl StringToggle {
         })
     }
 
-    fn rollback(&self, ctx: &Context, preimage: &Option<RawValue>) -> Result<(), String> {
+    fn rollback(
+        &self,
+        ctx: &Context,
+        preimage: &Option<RawValue>,
+        postimage: &RawValue,
+    ) -> Result<(), String> {
         let current = ctx.registry.read(&self.target, ManagementSource::User);
         let current_matches = match current {
-            Evidence::Present { value, .. } => {
-                value
-                    .as_str_lossy()
-                    .as_deref()
-                    .map(|s| s.eq_ignore_ascii_case(self.private_value))
-                    == Some(true)
-            }
+            Evidence::Present { value, .. } => value == *postimage,
             _ => false,
         };
         if !current_matches {
@@ -1180,7 +1184,7 @@ pub fn controls() -> Vec<Control> {
             }],
             |ctx| COPILOT_SHELL.probe(ctx),
             Some(|ctx| COPILOT_SHELL.apply(ctx)),
-            Some(|ctx, pre| COPILOT_SHELL.rollback(ctx, pre)),
+            Some(|ctx, pre, post| COPILOT_SHELL.rollback(ctx, pre, post)),
         ),
         toggle_control(
             "windows.ai.recall-snapshot",
@@ -1215,7 +1219,7 @@ pub fn controls() -> Vec<Control> {
             }],
             |ctx| ACCOUNT_INFO_ACCESS.probe(ctx),
             Some(|ctx| ACCOUNT_INFO_ACCESS.apply(ctx)),
-            Some(|ctx, pre| ACCOUNT_INFO_ACCESS.rollback(ctx, pre)),
+            Some(|ctx, pre, post| ACCOUNT_INFO_ACCESS.rollback(ctx, pre, post)),
         ),
         toggle_control(
             "windows.capability.activity",
@@ -1233,7 +1237,7 @@ pub fn controls() -> Vec<Control> {
             }],
             |ctx| APP_ACTIVITY_ACCESS.probe(ctx),
             Some(|ctx| APP_ACTIVITY_ACCESS.apply(ctx)),
-            Some(|ctx, pre| APP_ACTIVITY_ACCESS.rollback(ctx, pre)),
+            Some(|ctx, pre, post| APP_ACTIVITY_ACCESS.rollback(ctx, pre, post)),
         ),
         toggle_control(
             "windows.capability.wifi-data",
@@ -1255,7 +1259,7 @@ pub fn controls() -> Vec<Control> {
             }],
             |ctx| WIFI_DATA_ACCESS.probe(ctx),
             Some(|ctx| WIFI_DATA_ACCESS.apply(ctx)),
-            Some(|ctx, pre| WIFI_DATA_ACCESS.rollback(ctx, pre)),
+            Some(|ctx, pre, post| WIFI_DATA_ACCESS.rollback(ctx, pre, post)),
         ),
         toggle_control(
             "windows.diagnostics.crash-dump-scope",
@@ -1315,7 +1319,7 @@ pub fn controls() -> Vec<Control> {
             }],
             |ctx| FEEDBACK_FREQUENCY.probe(ctx),
             Some(|ctx| FEEDBACK_FREQUENCY.apply(ctx)),
-            Some(|ctx, pre| FEEDBACK_FREQUENCY.rollback(ctx, pre)),
+            Some(|ctx, pre, post| FEEDBACK_FREQUENCY.rollback(ctx, pre, post)),
         ),
         toggle_control(
             "windows.diagnostics.inventory-collector",
@@ -1354,7 +1358,7 @@ pub fn controls() -> Vec<Control> {
             }],
             |ctx| CLOUD_CLIPBOARD_SYNC.probe(ctx),
             Some(|ctx| CLOUD_CLIPBOARD_SYNC.apply(ctx)),
-            Some(|ctx, pre| CLOUD_CLIPBOARD_SYNC.rollback(ctx, pre)),
+            Some(|ctx, pre, post| CLOUD_CLIPBOARD_SYNC.rollback(ctx, pre, post)),
         ),
         toggle_control(
             "windows.clipboard.cross-device",
@@ -1376,7 +1380,7 @@ pub fn controls() -> Vec<Control> {
             }],
             |ctx| CLOUD_CLIPBOARD.probe(ctx),
             Some(|ctx| CLOUD_CLIPBOARD.apply(ctx)),
-            Some(|ctx, pre| CLOUD_CLIPBOARD.rollback(ctx, pre)),
+            Some(|ctx, pre, post| CLOUD_CLIPBOARD.rollback(ctx, pre, post)),
         ),
         diagnostics_level(),
         toggle_control(
@@ -1395,7 +1399,7 @@ pub fn controls() -> Vec<Control> {
             }],
             |ctx| START_SUGGESTIONS.probe(ctx),
             Some(|ctx| START_SUGGESTIONS.apply(ctx)),
-            Some(|ctx, pre| START_SUGGESTIONS.rollback(ctx, pre)),
+            Some(|ctx, pre, post| START_SUGGESTIONS.rollback(ctx, pre, post)),
         ),
         toggle_control(
             "windows.experience.suggested-apps",
@@ -1414,7 +1418,7 @@ pub fn controls() -> Vec<Control> {
             }],
             |ctx| SUGGESTED_APPS.probe(ctx),
             Some(|ctx| SUGGESTED_APPS.apply(ctx)),
-            Some(|ctx, pre| SUGGESTED_APPS.rollback(ctx, pre)),
+            Some(|ctx, pre, post| SUGGESTED_APPS.rollback(ctx, pre, post)),
         ),
         toggle_control(
             "windows.experience.system-suggestions",
@@ -1432,7 +1436,7 @@ pub fn controls() -> Vec<Control> {
             }],
             |ctx| SYSTEM_SUGGESTIONS.probe(ctx),
             Some(|ctx| SYSTEM_SUGGESTIONS.apply(ctx)),
-            Some(|ctx, pre| SYSTEM_SUGGESTIONS.rollback(ctx, pre)),
+            Some(|ctx, pre, post| SYSTEM_SUGGESTIONS.rollback(ctx, pre, post)),
         ),
         toggle_control(
             "windows.experience.tailored",
@@ -1455,7 +1459,7 @@ pub fn controls() -> Vec<Control> {
             }],
             |ctx| TAILORED_EXPERIENCES.probe(ctx),
             Some(|ctx| TAILORED_EXPERIENCES.apply(ctx)),
-            Some(|ctx, pre| TAILORED_EXPERIENCES.rollback(ctx, pre)),
+            Some(|ctx, pre, post| TAILORED_EXPERIENCES.rollback(ctx, pre, post)),
         ),
         toggle_control(
             "windows.input.personalization",
@@ -1499,7 +1503,7 @@ pub fn controls() -> Vec<Control> {
             }],
             |ctx| DEVICE_SEARCH_HISTORY.probe(ctx),
             Some(|ctx| DEVICE_SEARCH_HISTORY.apply(ctx)),
-            Some(|ctx, pre| DEVICE_SEARCH_HISTORY.rollback(ctx, pre)),
+            Some(|ctx, pre, post| DEVICE_SEARCH_HISTORY.rollback(ctx, pre, post)),
         ),
         toggle_control(
             "windows.search.web",
@@ -1519,7 +1523,7 @@ pub fn controls() -> Vec<Control> {
             }],
             |ctx| WEB_SEARCH.probe(ctx),
             Some(|ctx| WEB_SEARCH.apply(ctx)),
-            Some(|ctx, pre| WEB_SEARCH.rollback(ctx, pre)),
+            Some(|ctx, pre, post| WEB_SEARCH.rollback(ctx, pre, post)),
         ),
         toggle_control(
             "windows.delivery-optimization.mode",

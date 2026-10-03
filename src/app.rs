@@ -4,19 +4,6 @@ use serde::Serialize;
 
 use crate::cli::{Cli, Command, OutputFormat, Platform, Profile};
 
-const CONCEPT_NOTICE: &str = "concept build: policy checks are not implemented yet";
-
-#[derive(Serialize)]
-struct ConceptResponse<'a> {
-    schema: u8,
-    complete: bool,
-    status: &'a str,
-    command: &'a str,
-    platform: &'a str,
-    profile: Option<&'a str>,
-    message: &'a str,
-}
-
 #[derive(Serialize)]
 struct PlanItem {
     id: String,
@@ -262,14 +249,11 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
             let context = crate::catalog::Context::live(&host);
             let all_controls = crate::catalog::all();
 
-            let timestamp = format!(
-                "{}",
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs()
-            );
-            let tx_id = format!("tx-{timestamp}");
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default();
+            let timestamp = format!("{}.{:03}", now.as_secs(), now.subsec_millis());
+            let tx_id = format!("tx-{}-{}", now.as_secs(), now.subsec_millis());
             let mut journal = crate::journal::TransactionJournal {
                 schema: crate::journal::JOURNAL_SCHEMA,
                 transaction_id: tx_id.clone(),
@@ -414,26 +398,22 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                 return 2;
             }
 
+            if !crate::journal::is_valid_transaction_id(&transaction_id) {
+                let _ = writeln!(
+                    err,
+                    "privr: invalid transaction identifier '{transaction_id}'"
+                );
+                return 2;
+            }
+
             let journal = match crate::journal::load_transaction(&transaction_id) {
                 Ok(j) => j,
                 Err(_) => {
-                    let message = format!(
-                        "{CONCEPT_NOTICE}; transaction {transaction_id}; restored changes: 0"
+                    let _ = writeln!(
+                        err,
+                        "privr: no transaction record found with ID '{transaction_id}'"
                     );
-                    write_response(
-                        out,
-                        format,
-                        ConceptResponse {
-                            schema: 1,
-                            complete: false,
-                            status: "concept",
-                            command: "rollback",
-                            platform: current_platform(),
-                            profile: None,
-                            message: &message,
-                        },
-                    );
-                    return 3;
+                    return 2;
                 }
             };
 
@@ -564,30 +544,6 @@ Run privr list to see every control in this build."
             let reader = stdin.lock();
             crate::mcp::run_stdio(allow_apply, reader, out, err)
         }
-    }
-}
-
-fn write_response(out: &mut impl Write, format: OutputFormat, response: ConceptResponse<'_>) {
-    match format {
-        OutputFormat::Text => {
-            let _ = writeln!(out, "privr {} [{}]", response.command, response.platform);
-            let _ = writeln!(out, "{}", response.message);
-        }
-        OutputFormat::Json => {
-            if serde_json::to_writer_pretty(&mut *out, &response).is_ok() {
-                let _ = writeln!(out);
-            }
-        }
-    }
-}
-
-fn current_platform() -> &'static str {
-    if cfg!(target_os = "windows") {
-        "windows"
-    } else if cfg!(target_os = "macos") {
-        "macos"
-    } else {
-        "linux"
     }
 }
 
@@ -761,14 +717,25 @@ mod tests {
     }
 
     #[test]
-    fn rollback_accepts_an_internal_transaction_id() {
+    fn rollback_reports_missing_transaction_honestly() {
         let (code, stdout, stderr) = run_for_test(Some(Command::Rollback {
-            transaction_id: "tx-123".to_owned(),
+            transaction_id: "tx-nonexistent-999".to_owned(),
             yes: true,
         }));
-        assert_eq!(code, 3);
-        assert!(stdout.contains("transaction tx-123"));
-        assert!(stderr.is_empty());
+        assert_eq!(code, 2);
+        assert!(stdout.is_empty());
+        assert!(stderr.contains("no transaction record found with ID 'tx-nonexistent-999'"));
+    }
+
+    #[test]
+    fn rollback_rejects_invalid_transaction_id() {
+        let (code, stdout, stderr) = run_for_test(Some(Command::Rollback {
+            transaction_id: "../escaped".to_owned(),
+            yes: true,
+        }));
+        assert_eq!(code, 2);
+        assert!(stdout.is_empty());
+        assert!(stderr.contains("invalid transaction identifier '../escaped'"));
     }
 
     #[test]

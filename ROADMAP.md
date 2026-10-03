@@ -56,12 +56,13 @@ Mutation (blocks 0.2.0):
 - [ ] `rollback` receives only the recorded prior value, so it cannot refuse
   when current state no longer equals the recorded postimage.
 - [ ] The journal directory comes from environment variables and is not
-  permission-restricted. Transaction IDs have one-second resolution and can
-  collide.
+  permission-restricted. (Transaction IDs upgraded to subsecond millisecond
+  resolution and protected against symlink redirection).
 - [ ] `apply` has no plan review or section approval; `--yes` applies every
   eligible change at once.
-- [ ] `rollback` of an unknown transaction prints the old concept-build notice
-  and exits `3`, where the contract calls for a clear usage error.
+- [x] `rollback` of an unknown transaction prints the old concept-build notice
+  and exits `3`, where the contract calls for a clear usage error. (Fixed:
+  rollback validates transaction IDs, emits honest stderr guidance, and exits 2).
 - [ ] A registry test writes to the live `HKEY_CURRENT_USER` hive of whoever
   runs the suite. Mutation must be tested through recorded context, with live
   writes proven only in disposable VMs.

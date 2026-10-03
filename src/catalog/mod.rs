@@ -205,4 +205,62 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn every_control_id_matches_its_section() {
+        for control in all() {
+            let parts: Vec<&str> = control.spec.id.split('.').collect();
+            assert!(
+                parts.len() >= 3,
+                "control id '{}' must have at least 3 parts",
+                control.spec.id
+            );
+            let expected_section = if parts[0] == "windows" || parts[0] == "macos" {
+                parts[1]
+            } else {
+                parts[0]
+            };
+            assert_eq!(
+                control.spec.section.as_str(),
+                expected_section,
+                "control id '{}' section mismatch: expected '{}', got '{}'",
+                control.spec.id,
+                expected_section,
+                control.spec.section
+            );
+        }
+    }
+
+    #[test]
+    fn no_control_contains_emojis_or_em_dashes() {
+        for control in all() {
+            let mut text_fields = vec![control.title, control.summary, control.rationale];
+            if let Some(t) = control.tradeoff {
+                text_fields.push(t);
+            }
+            if let Some(m) = control.mitigation {
+                text_fields.push(m);
+            }
+            for source in control.sources {
+                text_fields.push(source.claim);
+            }
+
+            for text in text_fields {
+                for ch in text.chars() {
+                    assert!(
+                        ch != '\u{2014}' && ch != '\u{2013}',
+                        "control '{}' contains em or en dash: '{}'",
+                        control.spec.id,
+                        text
+                    );
+                    assert!(
+                        !matches!(ch, '\u{1F000}'..='\u{1FAFF}' | '\u{2600}'..='\u{27BF}' | '\u{FE0F}'),
+                        "control '{}' contains emoji character: '{}'",
+                        control.spec.id,
+                        text
+                    );
+                }
+            }
+        }
+    }
 }

@@ -235,18 +235,21 @@ pub fn sanitize_storage_path(path: &Path) -> String {
     {
         if let Ok(appdata) = std::env::var("LOCALAPPDATA")
             && path_str.len() >= appdata.len()
+            && path_str.is_char_boundary(appdata.len())
             && path_str[..appdata.len()].eq_ignore_ascii_case(&appdata)
         {
             return format!(r"%LocalAppData%{}", &path_str[appdata.len()..]);
         }
         if let Ok(profile) = std::env::var("USERPROFILE")
             && path_str.len() >= profile.len()
+            && path_str.is_char_boundary(profile.len())
             && path_str[..profile.len()].eq_ignore_ascii_case(&profile)
         {
             return format!(r"%UserProfile%{}", &path_str[profile.len()..]);
         }
         let prog_data = r"C:\ProgramData";
         if path_str.len() >= prog_data.len()
+            && path_str.is_char_boundary(prog_data.len())
             && path_str[..prog_data.len()].eq_ignore_ascii_case(prog_data)
         {
             return format!(r"%ProgramData%{}", &path_str[prog_data.len()..]);
@@ -257,6 +260,7 @@ pub fn sanitize_storage_path(path: &Path) -> String {
     {
         if let Ok(home) = std::env::var("HOME")
             && path_str.starts_with(&home)
+            && path_str.is_char_boundary(home.len())
         {
             return format!("~{}", &path_str[home.len()..]);
         }

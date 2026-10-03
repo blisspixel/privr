@@ -68,7 +68,7 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
         crate::platform::elevation::DualWriter::new(err, elevated_output_path.as_deref());
     let out = &mut dual_out;
     let err = &mut dual_err;
-    let code = match cli.command.unwrap_or(Command::Check {
+    match cli.command.unwrap_or(Command::Check {
         profile: Some(Profile::Baseline),
         policy: None,
         controls: Vec::new(),
@@ -580,28 +580,10 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
             }
 
             let mut perform_elevation = elevate;
-            if !perform_elevation && !is_elevated && requires_elevation_drift > 0 {
-                if !yes {
-                    // The user was interactively prompted "[requires elevation]" and confirmed
-                    perform_elevation = true;
-                } else if is_interactive {
-                    let _ = write!(
-                        out,
-                        "{} change(s) require administrative privileges. Request elevation (UAC) to apply them now? [Y/n]: ",
-                        requires_elevation_drift
-                    );
-                    let _ = out.flush();
-                    let mut input = String::new();
-                    if std::io::stdin().read_line(&mut input).is_ok() {
-                        let trimmed = input.trim();
-                        if trimmed.is_empty()
-                            || trimmed.eq_ignore_ascii_case("y")
-                            || trimmed.eq_ignore_ascii_case("yes")
-                        {
-                            perform_elevation = true;
-                        }
-                    }
-                }
+            if !perform_elevation && !is_elevated && requires_elevation_drift > 0 && !yes {
+                // In interactive mode without --yes, the user was already shown
+                // the plan with "[requires elevation]" and confirmed with 'y'.
+                perform_elevation = true;
             }
 
             if perform_elevation && !is_elevated && requires_elevation_drift > 0 {
@@ -969,22 +951,6 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                 let mut perform_elevation = elevate;
                 if !perform_elevation && !yes {
                     perform_elevation = true;
-                } else if !perform_elevation && is_interactive {
-                    let _ = write!(
-                        out,
-                        "Rolling back transaction '{transaction_id}' modifies machine-scope settings. Request elevation (UAC)? [Y/n]: "
-                    );
-                    let _ = out.flush();
-                    let mut input = String::new();
-                    if std::io::stdin().read_line(&mut input).is_ok() {
-                        let trimmed = input.trim();
-                        if trimmed.is_empty()
-                            || trimmed.eq_ignore_ascii_case("y")
-                            || trimmed.eq_ignore_ascii_case("yes")
-                        {
-                            perform_elevation = true;
-                        }
-                    }
                 }
 
                 if perform_elevation {
@@ -1420,12 +1386,7 @@ Run privr list to see every control in this build."
             let reader = stdin.lock();
             crate::mcp::run_stdio(allow_apply, reader, out, err)
         }
-    };
-    if let Some(ref p) = elevated_output_path {
-        let done_path = p.with_extension("done");
-        let _ = std::fs::write(done_path, code.to_string());
     }
-    code
 }
 
 #[cfg(test)]

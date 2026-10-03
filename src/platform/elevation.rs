@@ -87,6 +87,30 @@ impl<'a> std::io::Write for DualWriter<'a> {
 mod windows_impl {
     use super::*;
 
+    pub(crate) fn base64_encode(data: &[u8]) -> String {
+        const CHARSET: &[u8; 64] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+        for chunk in data.chunks(3) {
+            let b0 = chunk[0];
+            let b1 = if chunk.len() > 1 { chunk[1] } else { 0 };
+            let b2 = if chunk.len() > 2 { chunk[2] } else { 0 };
+            out.push(CHARSET[(b0 >> 2) as usize] as char);
+            out.push(CHARSET[(((b0 & 0x03) << 4) | (b1 >> 4)) as usize] as char);
+            if chunk.len() > 1 {
+                out.push(CHARSET[(((b1 & 0x0f) << 2) | (b2 >> 6)) as usize] as char);
+            } else {
+                out.push('=');
+            }
+            if chunk.len() > 2 {
+                out.push(CHARSET[(b2 & 0x3f) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+        out
+    }
+
     pub fn run_elevated_windows(args: &[&str], temp_file: Option<&Path>) -> ElevationResult {
         let current_exe = match std::env::current_exe() {
             Ok(p) => p,
@@ -100,7 +124,6 @@ mod windows_impl {
         let exe_str = current_exe.to_string_lossy().into_owned();
         let mut full_args = args.to_vec();
         let temp_str;
-        let done_path = temp_file.map(|p| p.with_extension("done"));
 
         if let Some(path) = temp_file {
             temp_str = path.to_string_lossy().into_owned();
@@ -110,60 +133,47 @@ mod windows_impl {
 
         let cmdline = build_command_line(&full_args);
 
-        // Escape for PowerShell single-quote string literal
+        // Escape single quotes for PowerShell single-quoted string literals
         let ps_exe = exe_str.replace('\'', "''");
         let ps_args = cmdline.replace('\'', "''");
 
         let script = format!(
-            "$exe = '{ps_exe}'; \
-             $params = '{ps_args}'; \
+            "$ErrorActionPreference = 'Stop'; \
              try {{ \
-                 $app = New-Object -ComObject Shell.Application; \
-                 $app.ShellExecute($exe, $params, '', 'runas', 0); \
+                 $p = Start-Process -FilePath '{ps_exe}' -ArgumentList '{ps_args}' -Verb RunAs -Wait -PassThru; \
+                 if ($null -ne $p) {{ exit $p.ExitCode; }} else {{ exit 0; }} \
              }} catch {{ \
                  exit 1223; \
              }}"
         );
 
+        let utf16_bytes: Vec<u8> = script
+            .encode_utf16()
+            .flat_map(|u| u.to_le_bytes())
+            .collect();
+        let encoded = base64_encode(&utf16_bytes);
+
         let status = std::process::Command::new("powershell")
-            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+            .args(["-NoProfile", "-NonInteractive", "-EncodedCommand", &encoded])
             .status();
 
         match status {
             Ok(s) => {
-                if s.code() == Some(1223) {
+                let code = s.code().unwrap_or(1);
+                if code == 1223 {
                     return ElevationResult::Cancelled;
                 }
-            }
-            Err(e) => {
-                return ElevationResult::Failed(format!("failed to launch elevation host: {e}"));
-            }
-        }
-
-        if let (Some(temp_path), Some(done)) = (temp_file, done_path) {
-            let start = std::time::Instant::now();
-            let timeout = std::time::Duration::from_secs(300);
-
-            while !done.exists() {
-                if start.elapsed() > timeout {
-                    let _ = std::fs::remove_file(&done);
-                    return ElevationResult::Failed("elevation execution timed out".into());
+                let output = if let Some(path) = temp_file {
+                    std::fs::read_to_string(path).unwrap_or_default()
+                } else {
+                    String::new()
+                };
+                ElevationResult::Success {
+                    exit_code: code,
+                    output,
                 }
-                std::thread::sleep(std::time::Duration::from_millis(100));
             }
-
-            let code_str = std::fs::read_to_string(&done).unwrap_or_else(|_| "0".into());
-            let exit_code = code_str.trim().parse::<i32>().unwrap_or(0);
-            let output = std::fs::read_to_string(temp_path).unwrap_or_default();
-
-            let _ = std::fs::remove_file(&done);
-
-            ElevationResult::Success { exit_code, output }
-        } else {
-            ElevationResult::Success {
-                exit_code: 0,
-                output: String::new(),
-            }
+            Err(e) => ElevationResult::Failed(format!("failed to launch elevation host: {e}")),
         }
     }
 }
@@ -277,5 +287,36 @@ mod tests {
             writer.flush().expect("flush");
         }
         assert_eq!(primary_buf, b"direct write");
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn base64_encode_round_trips() {
+        use windows_impl::base64_encode;
+        assert_eq!(base64_encode(b""), "");
+        assert_eq!(base64_encode(b"f"), "Zg==");
+        assert_eq!(base64_encode(b"fo"), "Zm8=");
+        assert_eq!(base64_encode(b"foo"), "Zm9v");
+        assert_eq!(base64_encode(b"foob"), "Zm9vYg==");
+        assert_eq!(base64_encode(b"fooba"), "Zm9vYmE=");
+        assert_eq!(base64_encode(b"foobar"), "Zm9vYmFy");
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn test_powershell_encoded_script_execution() {
+        use windows_impl::base64_encode;
+        let script = "Write-Output 'OK'; exit 0;";
+        let utf16_bytes: Vec<u8> = script
+            .encode_utf16()
+            .flat_map(|u| u.to_le_bytes())
+            .collect();
+        let encoded = base64_encode(&utf16_bytes);
+        let out = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-EncodedCommand", &encoded])
+            .output()
+            .expect("exec");
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(stdout.contains("OK"));
     }
 }

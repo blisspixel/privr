@@ -3,7 +3,8 @@ use std::io::Write;
 use serde::Serialize;
 
 use crate::cli::{
-    Cli, Command, FrictionTier, OutputFormat, Platform, PostureDimension, Profile, WorkloadPersona,
+    Cli, ColorWhen, Command, FrictionTier, OutputFormat, Platform, PostureDimension, Profile,
+    WorkloadPersona,
 };
 
 #[derive(Serialize)]
@@ -50,7 +51,24 @@ struct RollbackReport {
 pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
     let format = cli.format;
     let ui = crate::ui::Ui::for_stdout(cli.color.into());
-    match cli.command.unwrap_or(Command::Check {
+    let elevated_output_path = match &cli.command {
+        Some(Command::Apply {
+            elevated_output: Some(p),
+            ..
+        }) => Some(p.clone()),
+        Some(Command::Rollback {
+            elevated_output: Some(p),
+            ..
+        }) => Some(p.clone()),
+        _ => None,
+    };
+    let mut dual_out =
+        crate::platform::elevation::DualWriter::new(out, elevated_output_path.as_deref());
+    let mut dual_err =
+        crate::platform::elevation::DualWriter::new(err, elevated_output_path.as_deref());
+    let out = &mut dual_out;
+    let err = &mut dual_err;
+    let code = match cli.command.unwrap_or(Command::Check {
         profile: Some(Profile::Baseline),
         policy: None,
         controls: Vec::new(),
@@ -117,6 +135,14 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
             let host = crate::platform::discover();
             let context = crate::catalog::Context::live(&host);
             let all_controls = crate::catalog::all();
+            let (workload, max_friction) = if profile.is_none() && workload.is_none() {
+                (
+                    Some(WorkloadPersona::General),
+                    Some(FrictionTier::Tier1Cosmetic),
+                )
+            } else {
+                (workload, max_friction)
+            };
             let profile_val = profile.unwrap_or_default();
 
             let recommended_ids: Option<std::collections::BTreeSet<String>> = workload.map(|w| {
@@ -276,11 +302,11 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                         {
                             let _ = writeln!(
                                 out,
-                                "\nNote: {} change(s) require administrative privileges (run privr apply as Administrator to apply machine-scope changes).",
+                                "\nNote: {} change(s) require administrative privileges (run privr apply to elevate in-place).",
                                 plan_report.requires_elevation_drift
                             );
                         }
-                        let _ = writeln!(out, "\nRun privr apply --yes to apply these changes.");
+                        let _ = writeln!(out, "\nRun privr apply to apply these changes.");
                     }
                 }
                 OutputFormat::Json => {
@@ -300,6 +326,8 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
             yes,
             controls,
             sections,
+            elevate,
+            elevated_output: _,
         } => {
             if dry_run {
                 return run(
@@ -319,13 +347,6 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                     err,
                 );
             }
-            if !yes {
-                let _ = writeln!(
-                    err,
-                    "privr: interactive approval is not implemented; use plan or pass --yes"
-                );
-                return 2;
-            }
             if policy.is_some() {
                 let _ = writeln!(
                     err,
@@ -334,6 +355,16 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                 );
                 return 2;
             }
+
+            let (workload, max_friction) = if profile.is_none() && workload.is_none() {
+                (
+                    Some(WorkloadPersona::General),
+                    Some(FrictionTier::Tier1Cosmetic),
+                )
+            } else {
+                (workload, max_friction)
+            };
+
             let host = crate::platform::discover();
             let is_elevated = host.elevated == crate::model::host::Fact::Known(true);
             let context = crate::catalog::Context::live(&host);
@@ -353,6 +384,301 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                 .map(|r| r.control_id)
                 .collect()
             });
+
+            use std::io::IsTerminal;
+            let is_interactive = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+
+            if !yes {
+                if !is_interactive {
+                    let _ = writeln!(
+                        err,
+                        "privr: interactive approval is not implemented; pass --yes"
+                    );
+                    return 2;
+                }
+
+                let mut planned_items = Vec::new();
+                let mut unautomated_count = 0;
+                let mut elevation_count = 0;
+
+                for c in &all_controls {
+                    let matches_control = controls.is_empty()
+                        || controls
+                            .iter()
+                            .any(|sel| c.spec.id == *sel || c.spec.id.starts_with(sel));
+                    let matches_section = sections.is_empty()
+                        || sections.iter().any(|sec| {
+                            c.spec.section.eq_ignore_ascii_case(sec)
+                                || c.spec
+                                    .section
+                                    .to_ascii_lowercase()
+                                    .starts_with(&sec.to_ascii_lowercase())
+                        });
+                    if !matches_control || !matches_section {
+                        continue;
+                    }
+                    if let Some(recs) = &recommended_ids
+                        && !recs.contains(&c.spec.id)
+                    {
+                        continue;
+                    }
+                    let resolution = c.observe(&context);
+                    let mode = if !controls.is_empty()
+                        || recommended_ids.is_some()
+                        || c.spec.min_profile <= profile_val
+                    {
+                        crate::engine::evaluate::Mode::Enforce
+                    } else {
+                        crate::engine::evaluate::Mode::Ignore
+                    };
+                    let eval = crate::engine::evaluate::evaluate(
+                        &c.spec,
+                        mode,
+                        &resolution,
+                        &host,
+                        crate::model::outcome::Exception::None,
+                    );
+                    if eval.outcome == crate::model::outcome::Outcome::Drift {
+                        if eval.remediation == crate::model::outcome::Remediation::Automatic
+                            && c.apply.is_some()
+                        {
+                            if c.spec.requires_elevation && !is_elevated {
+                                elevation_count += 1;
+                            }
+                            let current_str = resolution
+                                .state
+                                .map(|s| s.0)
+                                .unwrap_or_else(|| "drift".to_owned());
+                            planned_items.push((
+                                c.spec.id.clone(),
+                                c.spec.section.clone(),
+                                current_str,
+                                c.spec.desired.0.clone(),
+                                c.spec.requires_elevation,
+                            ));
+                        } else {
+                            unautomated_count += 1;
+                        }
+                    }
+                }
+
+                if planned_items.is_empty() {
+                    if unautomated_count > 0 {
+                        let _ = writeln!(
+                            out,
+                            "Planned changes: 0 (drift exists with no automatic remediation; run privr check to review)"
+                        );
+                    } else {
+                        let _ = writeln!(out, "Planned changes: 0 (machine matches policy)");
+                    }
+                    return 0;
+                }
+
+                if let Some(w) = workload {
+                    let _ = writeln!(out, "Workload {}", w.as_str());
+                } else {
+                    let _ = writeln!(out, "Profile  {}", profile_val.as_str());
+                }
+                let _ = writeln!(out, "Platform {}", host.platform.as_str());
+                let _ = writeln!(out, "Planned changes: {}\n", planned_items.len());
+
+                for (id, sec, cur, des, req_elev) in &planned_items {
+                    let _ = writeln!(out, "{sec}");
+                    let tag = if *req_elev && !is_elevated {
+                        format!(
+                            " {}",
+                            ui.paint(crate::ui::style::CAVEAT, "[requires elevation]")
+                        )
+                    } else {
+                        String::new()
+                    };
+                    let _ = writeln!(out, "  {id}{tag}");
+                    let _ = writeln!(
+                        out,
+                        "    Current: {}",
+                        ui.paint(
+                            crate::ui::style::outcome_style(crate::model::outcome::Outcome::Drift),
+                            cur
+                        )
+                    );
+                    let _ = writeln!(out, "    Desired: {des}");
+                }
+
+                let prompt_msg = if elevation_count > 0 {
+                    format!(
+                        "\nApply these {} change(s) (requires elevation)? [Y/n]: ",
+                        planned_items.len()
+                    )
+                } else {
+                    format!("\nApply these {} change(s)? [Y/n]: ", planned_items.len())
+                };
+                let _ = write!(out, "{prompt_msg}");
+                let _ = out.flush();
+
+                let mut input = String::new();
+                if std::io::stdin().read_line(&mut input).is_err() {
+                    let _ = writeln!(err, "privr: failed to read confirmation input");
+                    return 1;
+                }
+                let trimmed = input.trim();
+                if !trimmed.is_empty()
+                    && !trimmed.eq_ignore_ascii_case("y")
+                    && !trimmed.eq_ignore_ascii_case("yes")
+                {
+                    let _ = writeln!(out, "privr: apply cancelled by user.");
+                    return 0;
+                }
+            }
+
+            // Check if machine-scope changes require elevation:
+            let mut requires_elevation_drift = 0;
+            for c in &all_controls {
+                let matches_control = controls.is_empty()
+                    || controls
+                        .iter()
+                        .any(|sel| c.spec.id == *sel || c.spec.id.starts_with(sel));
+                let matches_section = sections.is_empty()
+                    || sections.iter().any(|sec| {
+                        c.spec.section.eq_ignore_ascii_case(sec)
+                            || c.spec
+                                .section
+                                .to_ascii_lowercase()
+                                .starts_with(&sec.to_ascii_lowercase())
+                    });
+                if !matches_control || !matches_section {
+                    continue;
+                }
+                if let Some(recs) = &recommended_ids
+                    && !recs.contains(&c.spec.id)
+                {
+                    continue;
+                }
+                if !c.spec.requires_elevation || c.apply.is_none() {
+                    continue;
+                }
+                let resolution = c.observe(&context);
+                let mode = if !controls.is_empty()
+                    || recommended_ids.is_some()
+                    || c.spec.min_profile <= profile_val
+                {
+                    crate::engine::evaluate::Mode::Enforce
+                } else {
+                    crate::engine::evaluate::Mode::Ignore
+                };
+                let eval = crate::engine::evaluate::evaluate(
+                    &c.spec,
+                    mode,
+                    &resolution,
+                    &host,
+                    crate::model::outcome::Exception::None,
+                );
+                if eval.outcome == crate::model::outcome::Outcome::Drift
+                    && eval.remediation == crate::model::outcome::Remediation::Automatic
+                {
+                    requires_elevation_drift += 1;
+                }
+            }
+
+            let mut perform_elevation = elevate;
+            if !perform_elevation && !is_elevated && requires_elevation_drift > 0 {
+                if !yes {
+                    // The user was interactively prompted "[requires elevation]" and confirmed
+                    perform_elevation = true;
+                } else if is_interactive {
+                    let _ = write!(
+                        out,
+                        "{} change(s) require administrative privileges. Request elevation (UAC) to apply them now? [Y/n]: ",
+                        requires_elevation_drift
+                    );
+                    let _ = out.flush();
+                    let mut input = String::new();
+                    if std::io::stdin().read_line(&mut input).is_ok() {
+                        let trimmed = input.trim();
+                        if trimmed.is_empty()
+                            || trimmed.eq_ignore_ascii_case("y")
+                            || trimmed.eq_ignore_ascii_case("yes")
+                        {
+                            perform_elevation = true;
+                        }
+                    }
+                }
+            }
+
+            if perform_elevation && !is_elevated && requires_elevation_drift > 0 {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default();
+                let temp_file = std::env::temp_dir().join(format!(
+                    "privr-elev-{}-{}.tmp",
+                    std::process::id(),
+                    now.as_millis()
+                ));
+
+                let mut child_args = vec!["apply", "--yes"];
+                let format_str = match format {
+                    OutputFormat::Text => "text",
+                    OutputFormat::Json => "json",
+                };
+                child_args.push("--format");
+                child_args.push(format_str);
+
+                let color_str = match cli.color {
+                    ColorWhen::Auto => "auto",
+                    ColorWhen::Always => "always",
+                    ColorWhen::Never => "never",
+                };
+                child_args.push("--color");
+                child_args.push(color_str);
+
+                let workload_str;
+                if let Some(w) = workload {
+                    child_args.push("--workload");
+                    workload_str = w.as_str().to_owned();
+                    child_args.push(&workload_str);
+                }
+                let friction_str;
+                if let Some(f) = max_friction {
+                    child_args.push("--max-friction");
+                    friction_str = f.as_str().to_owned();
+                    child_args.push(&friction_str);
+                }
+                let profile_str_val;
+                if profile.is_some() {
+                    child_args.push("--profile");
+                    profile_str_val = profile_val.as_str().to_owned();
+                    child_args.push(&profile_str_val);
+                }
+                for c_arg in &controls {
+                    child_args.push("--control");
+                    child_args.push(c_arg);
+                }
+                for s_arg in &sections {
+                    child_args.push("--section");
+                    child_args.push(s_arg);
+                }
+
+                let res = crate::platform::elevation::run_elevated(&child_args, Some(&temp_file));
+                let _ = std::fs::remove_file(&temp_file);
+
+                match res {
+                    crate::platform::elevation::ElevationResult::Success { exit_code, output } => {
+                        let _ = write!(out, "{output}");
+                        let _ = out.flush();
+                        return exit_code;
+                    }
+                    crate::platform::elevation::ElevationResult::Cancelled => {
+                        let _ = writeln!(err, "privr: elevation request was cancelled by user.");
+                        return 1;
+                    }
+                    crate::platform::elevation::ElevationResult::Failed(reason) => {
+                        let _ = writeln!(
+                            err,
+                            "privr: elevation failed: {reason}. Run privr as Administrator to apply machine-scope changes."
+                        );
+                        return 4;
+                    }
+                }
+            }
 
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -383,7 +709,7 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
             }
 
             let mut unautomated_drift = 0;
-            let mut requires_elevation_drift = 0;
+            let mut requires_elevation_drift_applied = 0;
             let mut explicit_elevation_failure = None;
 
             for c in &all_controls {
@@ -428,7 +754,6 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                         && c.apply.is_some()
                     {
                         if c.spec.requires_elevation && !is_elevated {
-                            // If the user explicitly requested this exact control via --control:
                             if !controls.is_empty()
                                 && controls
                                     .iter()
@@ -437,8 +762,7 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                                 explicit_elevation_failure = Some(c.spec.id.clone());
                                 break;
                             }
-                            // Defensively defer machine-scope changes when unelevated
-                            requires_elevation_drift += 1;
+                            requires_elevation_drift_applied += 1;
                             continue;
                         }
 
@@ -490,7 +814,7 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                 let _ = std::fs::remove_file(initial_path);
                 let _ = writeln!(
                     err,
-                    "privr: failed to apply {failed_id}: applying this control requires administrative privileges (run privr apply as Administrator)"
+                    "privr: failed to apply {failed_id}: applying this control requires administrative privileges (pass --elevate or run as Administrator)"
                 );
                 return 4;
             }
@@ -500,11 +824,11 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                 let _ = std::fs::remove_file(initial_path);
                 match format {
                     OutputFormat::Text => {
-                        if requires_elevation_drift > 0 {
+                        if requires_elevation_drift_applied > 0 {
                             let _ = writeln!(
                                 out,
-                                "No user-scope changes to apply ({} change(s) require administrative privileges; run privr apply as Administrator).",
-                                requires_elevation_drift
+                                "No user-scope changes to apply ({} change(s) require administrative privileges; pass --elevate or run as Administrator).",
+                                requires_elevation_drift_applied
                             );
                         } else if unautomated_drift > 0 {
                             let _ = writeln!(
@@ -527,7 +851,7 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                             transaction_id: String::new(),
                             applied_changes: 0,
                             unautomated_drift,
-                            requires_elevation_drift,
+                            requires_elevation_drift: requires_elevation_drift_applied,
                         };
                         let _ = serde_json::to_writer_pretty(&mut *out, &rep);
                         let _ = writeln!(out);
@@ -544,7 +868,7 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                 transaction_id: tx_id,
                 applied_changes: journal.operations.len(),
                 unautomated_drift,
-                requires_elevation_drift,
+                requires_elevation_drift: requires_elevation_drift_applied,
             };
 
             match format {
@@ -559,11 +883,11 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                         "All changes verified. To reverse, run: privr rollback {} --yes",
                         apply_report.transaction_id
                     );
-                    if requires_elevation_drift > 0 {
+                    if requires_elevation_drift_applied > 0 {
                         let _ = writeln!(
                             out,
-                            "\nNote: {} change(s) require administrative privileges (run privr apply as Administrator to apply machine-scope changes).",
-                            requires_elevation_drift
+                            "\nNote: {} change(s) require administrative privileges (run privr apply --elevate --yes to apply machine-scope changes).",
+                            requires_elevation_drift_applied
                         );
                     }
                 }
@@ -578,13 +902,35 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
         Command::Rollback {
             transaction_id,
             yes,
+            elevate,
+            elevated_output: _,
         } => {
+            use std::io::IsTerminal;
+            let is_interactive = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+
             if !yes {
-                let _ = writeln!(
-                    err,
-                    "privr: interactive approval is not implemented; pass --yes to confirm rollback"
-                );
-                return 2;
+                if !is_interactive {
+                    let _ = writeln!(
+                        err,
+                        "privr: interactive approval is not implemented; pass --yes to confirm rollback"
+                    );
+                    return 2;
+                }
+                let _ = write!(out, "Rollback transaction '{transaction_id}'? [Y/n]: ");
+                let _ = out.flush();
+                let mut input = String::new();
+                if std::io::stdin().read_line(&mut input).is_err() {
+                    let _ = writeln!(err, "privr: failed to read confirmation input");
+                    return 1;
+                }
+                let trimmed = input.trim();
+                if !trimmed.is_empty()
+                    && !trimmed.eq_ignore_ascii_case("y")
+                    && !trimmed.eq_ignore_ascii_case("yes")
+                {
+                    let _ = writeln!(out, "privr: rollback cancelled by user.");
+                    return 0;
+                }
             }
 
             if !crate::journal::is_valid_transaction_id(&transaction_id) {
@@ -607,8 +953,97 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
             };
 
             let host = crate::platform::discover();
+            let is_elevated = host.elevated == crate::model::host::Fact::Known(true);
             let context = crate::catalog::Context::live(&host);
             let all_controls = crate::catalog::all();
+
+            let has_machine_scope = journal.operations.iter().any(|op| {
+                all_controls
+                    .iter()
+                    .find(|c| c.spec.id == op.control_id)
+                    .map(|c| c.spec.requires_elevation)
+                    .unwrap_or(false)
+            });
+
+            if has_machine_scope && !is_elevated {
+                let mut perform_elevation = elevate;
+                if !perform_elevation && !yes {
+                    perform_elevation = true;
+                } else if !perform_elevation && is_interactive {
+                    let _ = write!(
+                        out,
+                        "Rolling back transaction '{transaction_id}' modifies machine-scope settings. Request elevation (UAC)? [Y/n]: "
+                    );
+                    let _ = out.flush();
+                    let mut input = String::new();
+                    if std::io::stdin().read_line(&mut input).is_ok() {
+                        let trimmed = input.trim();
+                        if trimmed.is_empty()
+                            || trimmed.eq_ignore_ascii_case("y")
+                            || trimmed.eq_ignore_ascii_case("yes")
+                        {
+                            perform_elevation = true;
+                        }
+                    }
+                }
+
+                if perform_elevation {
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default();
+                    let temp_file = std::env::temp_dir().join(format!(
+                        "privr-elev-rb-{}-{}.tmp",
+                        std::process::id(),
+                        now.as_millis()
+                    ));
+
+                    let format_str = match format {
+                        OutputFormat::Text => "text",
+                        OutputFormat::Json => "json",
+                    };
+                    let color_str = match cli.color {
+                        ColorWhen::Auto => "auto",
+                        ColorWhen::Always => "always",
+                        ColorWhen::Never => "never",
+                    };
+                    let child_args = [
+                        "rollback",
+                        &transaction_id,
+                        "--yes",
+                        "--format",
+                        format_str,
+                        "--color",
+                        color_str,
+                    ];
+
+                    let res =
+                        crate::platform::elevation::run_elevated(&child_args, Some(&temp_file));
+                    let _ = std::fs::remove_file(&temp_file);
+
+                    match res {
+                        crate::platform::elevation::ElevationResult::Success {
+                            exit_code,
+                            output,
+                        } => {
+                            let _ = write!(out, "{output}");
+                            let _ = out.flush();
+                            return exit_code;
+                        }
+                        crate::platform::elevation::ElevationResult::Cancelled => {
+                            let _ =
+                                writeln!(err, "privr: elevation request was cancelled by user.");
+                            return 1;
+                        }
+                        crate::platform::elevation::ElevationResult::Failed(reason) => {
+                            let _ = writeln!(
+                                err,
+                                "privr: elevation failed: {reason}. Run privr as Administrator to rollback machine-scope changes."
+                            );
+                            return 5;
+                        }
+                    }
+                }
+            }
             let mut restored = 0;
 
             for op in journal.operations.iter().rev() {
@@ -811,10 +1246,7 @@ Run privr list to see every control in this build."
                             }
                             let _ = writeln!(out);
                         }
-                        let _ = writeln!(
-                            out,
-                            "To apply recommended controls, run: privr apply --control <id> --yes"
-                        );
+                        let _ = writeln!(out, "To apply recommended controls, run: privr apply");
                     }
                 }
                 OutputFormat::Json => {
@@ -988,7 +1420,12 @@ Run privr list to see every control in this build."
             let reader = stdin.lock();
             crate::mcp::run_stdio(allow_apply, reader, out, err)
         }
+    };
+    if let Some(ref p) = elevated_output_path {
+        let done_path = p.with_extension("done");
+        let _ = std::fs::write(done_path, code.to_string());
     }
+    code
 }
 
 #[cfg(test)]
@@ -1057,6 +1494,8 @@ mod tests {
             yes: false,
             controls: Vec::new(),
             sections: Vec::new(),
+            elevate: false,
+            elevated_output: None,
         }));
         assert_eq!(code, 2);
         assert!(stdout.is_empty());
@@ -1089,6 +1528,8 @@ mod tests {
             yes: false,
             controls: Vec::new(),
             sections: Vec::new(),
+            elevate: false,
+            elevated_output: None,
         }));
         assert_eq!(code, 0);
         assert!(stdout.contains("Profile"));
@@ -1154,6 +1595,8 @@ mod tests {
             yes: true,
             controls: Vec::new(),
             sections: Vec::new(),
+            elevate: false,
+            elevated_output: None,
         }));
         assert_eq!(code, 0, "stderr: {stderr}");
         assert!(
@@ -1169,6 +1612,8 @@ mod tests {
         let (code, stdout, stderr) = run_for_test(Some(Command::Rollback {
             transaction_id: "tx-123".to_owned(),
             yes: false,
+            elevate: false,
+            elevated_output: None,
         }));
         assert_eq!(code, 2);
         assert!(stdout.is_empty());
@@ -1180,6 +1625,8 @@ mod tests {
         let (code, stdout, stderr) = run_for_test(Some(Command::Rollback {
             transaction_id: "tx-nonexistent-999".to_owned(),
             yes: true,
+            elevate: false,
+            elevated_output: None,
         }));
         assert_eq!(code, 2);
         assert!(stdout.is_empty());
@@ -1191,6 +1638,8 @@ mod tests {
         let (code, stdout, stderr) = run_for_test(Some(Command::Rollback {
             transaction_id: "../escaped".to_owned(),
             yes: true,
+            elevate: false,
+            elevated_output: None,
         }));
         assert_eq!(code, 2);
         assert!(stdout.is_empty());
@@ -1379,6 +1828,8 @@ mod tests {
             yes: false,
             controls: Vec::new(),
             sections: Vec::new(),
+            elevate: false,
+            elevated_output: None,
         }));
         assert_eq!(code, 0, "stderr: {stderr}");
         assert!(stdout.contains("Workload developer"));
@@ -1395,6 +1846,8 @@ mod tests {
             yes: true,
             controls: Vec::new(),
             sections: Vec::new(),
+            elevate: false,
+            elevated_output: None,
         }));
         assert_eq!(code, 0, "stderr: {stderr}");
         assert!(
@@ -1425,6 +1878,8 @@ mod tests {
                 yes: true,
                 controls: vec![control_id],
                 sections: Vec::new(),
+                elevate: false,
+                elevated_output: None,
             }));
             assert_eq!(code, 4, "stdout: {stdout}");
             assert!(stderr.contains("administrative privileges"));

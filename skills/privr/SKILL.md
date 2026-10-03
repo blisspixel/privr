@@ -31,7 +31,7 @@ When `privr` is loaded as an MCP server (`privr mcp`), the following tools are a
 
 ### Mutation tools (gated behind `--allow-apply`)
 
-- `privr_apply`: Applies and verifies supported changes for drifted controls. Requires explicit confirmation parameter (`yes: true`). Records all operations in a transaction journal.
+- `privr_apply`: Applies and verifies supported changes for drifted controls. Requires explicit confirmation parameter (`yes: true`). Supports `elevate: true` to request native in-place elevation. Records all operations in a transaction journal.
 - `privr_rollback`: Restores prior values recorded in a transaction journal. Requires `transaction_id` and explicit confirmation (`yes: true`).
 
 ## CLI workflow for agents
@@ -63,8 +63,8 @@ privr list --query thumbnail --format json
 # Review a dry-run plan
 privr plan --format json
 
-# Apply verified baseline changes
-privr apply --yes --format json
+# Apply verified daily-driver changes with in-place elevation
+privr apply --yes --elevate --format json
 
 # Roll back a recorded transaction
 privr rollback <tx-id> --yes --format json

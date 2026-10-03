@@ -91,6 +91,12 @@ pub enum Command {
         /// Apply only controls in a specific section. Repeatable.
         #[arg(long = "section")]
         sections: Vec<String>,
+        /// Request elevation (UAC on Windows, sudo on Unix) to apply machine-scope changes in-place.
+        #[arg(short = 'e', long)]
+        elevate: bool,
+        /// Internal path used by elevated child process to return output to parent.
+        #[arg(long, hide = true)]
+        elevated_output: Option<PathBuf>,
     },
     /// Roll back a transaction recorded by `privr apply`.
     #[command(visible_alias = "restore")]
@@ -100,6 +106,12 @@ pub enum Command {
         /// Confirm that settings may be restored.
         #[arg(long)]
         yes: bool,
+        /// Request elevation (UAC on Windows, sudo on Unix) to rollback machine-scope changes in-place.
+        #[arg(short = 'e', long)]
+        elevate: bool,
+        /// Internal path used by elevated child process to return output to parent.
+        #[arg(long, hide = true)]
+        elevated_output: Option<PathBuf>,
     },
     /// Recommend privacy posture improvements based on workload and friction budget.
     Recommend {

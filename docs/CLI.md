@@ -149,15 +149,17 @@ approval section by section. The operator may approve a section, decline it, or
 stop entirely.
 
 `apply` supports `--workload <persona>` and `--max-friction <tier>` to execute
-defensive, adaptive hardening without running ad-hoc scripts.
+defensive, adaptive hardening without running ad-hoc scripts. By default, running
+`privr apply` targets the `general` daily-driver persona and `tier1-cosmetic` friction
+ceiling, applying high-impact privacy protections with zero workflow disruption.
 
-**Adaptive elevation handling:**
+**Native and adaptive elevation handling:**
 - User-scope and machine-scope subplans are evaluated with elevation awareness.
-- When run in an unprivileged context, batch operations apply eligible user-scope
-  remediations, defensively defer machine-scope changes requiring administrative rights,
-  report `requires_elevation_drift` honestly, and exit with code 0.
+- When run interactively, `apply` displays the planned changes and prompts for confirmation. If changes require elevation, confirming triggers native elevation in-place (UAC prompt on Windows via `Shell.Application`, or `sudo` on Unix) without requiring terminal hopping.
+- Operators can pass `-e, --elevate` to explicitly authorize elevation handoff.
+- In non-interactive contexts (scripts, CI) without `--elevate`, unprivileged batch runs defensively defer machine-scope changes, apply user-scope remediations, report `requires_elevation_drift` honestly, and exit with code 0.
 - If a user explicitly specifies a machine-scope control via `--control <id>` while
-  unelevated, `apply` fails closed with clear elevation guidance and exits with code 4.
+  unelevated and without `--elevate`, `apply` fails closed with clear elevation guidance and exits with code 4.
 
 **Stopping partway is a success.** Approving two sections and declining the rest
 is a completed operation with exit code `0`, not a partial failure. Every
@@ -167,6 +169,7 @@ Consent is split rather than blanket:
 
 | Flag | Authorizes |
 |---|---|
+| `-e, --elevate` | Request native in-place elevation (UAC on Windows, sudo on Unix) to apply machine-scope changes without switching terminals. |
 | `--yes` | Standard-risk changes in noninteractive use. Nothing else. |
 | `--workload <persona>` | Tailor candidate remediations to a persona (`general`, `developer`, `creative`, `mobile`, `high-assurance`). |
 | `--max-friction <tier>` | Cap remediation candidate friction (`tier0-transparent`, `tier1-cosmetic`, `tier2-workflow-altering`, `tier3-incompatible-or-tradeoff`). |

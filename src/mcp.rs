@@ -12,6 +12,7 @@ use serde_json::{Value, json};
 use std::io::{BufRead, Write};
 
 use crate::cli::Profile;
+use crate::model::posture::{FrictionTier, WorkloadPersona};
 
 const PROTOCOL_VERSION: &str = "2024-11-05";
 const SERVER_NAME: &str = "privr";
@@ -319,6 +320,10 @@ fn handle_tools_list(allow_apply: bool) -> Value {
                     "section": {
                         "type": "string",
                         "description": "Optional section filter"
+                    },
+                    "elevate": {
+                        "type": "boolean",
+                        "description": "Request elevation (UAC on Windows, sudo on Unix) to apply machine-scope changes in-place"
                     }
                 },
                 "required": ["yes"]
@@ -614,6 +619,13 @@ fn handle_tools_call(
             let all_controls = crate::catalog::all();
             let filter = arguments.get("control").and_then(Value::as_str);
             let section_filter = arguments.get("section").and_then(Value::as_str);
+            let elevate = arguments
+                .get("elevate")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+
+            let has_profile_arg = arguments.get("profile").is_some();
+            let has_workload_arg = arguments.get("workload").is_some();
 
             let workload = match arguments.get("workload").and_then(Value::as_str) {
                 Some(w) => Some(parse_workload(w)?),
@@ -622,6 +634,15 @@ fn handle_tools_call(
             let max_friction = match arguments.get("max_friction").and_then(Value::as_str) {
                 Some(f) => Some(parse_max_friction(f)?),
                 None => None,
+            };
+
+            let (workload, max_friction) = if !has_profile_arg && !has_workload_arg {
+                (
+                    Some(WorkloadPersona::General),
+                    Some(FrictionTier::Tier1Cosmetic),
+                )
+            } else {
+                (workload, max_friction)
             };
 
             let profile_str = arguments
@@ -643,6 +664,108 @@ fn handle_tools_call(
                 .map(|r| r.control_id)
                 .collect()
             });
+
+            let requires_elevation = all_controls.iter().any(|c| {
+                if let Some(f) = filter
+                    && c.spec.id != f
+                    && !c.spec.id.starts_with(f)
+                {
+                    return false;
+                }
+                if let Some(s) = section_filter
+                    && !c.spec.section.eq_ignore_ascii_case(s)
+                    && !c
+                        .spec
+                        .section
+                        .to_ascii_lowercase()
+                        .starts_with(&s.to_ascii_lowercase())
+                {
+                    return false;
+                }
+                if let Some(recs) = &recommended_ids
+                    && !recs.contains(&c.spec.id)
+                {
+                    return false;
+                }
+                if !c.spec.requires_elevation || c.apply.is_none() {
+                    return false;
+                }
+                let resolution = c.observe(&context);
+                let mode = if filter.is_some()
+                    || recommended_ids.is_some()
+                    || c.spec.min_profile <= profile
+                {
+                    crate::engine::evaluate::Mode::Enforce
+                } else {
+                    crate::engine::evaluate::Mode::Ignore
+                };
+                let eval = crate::engine::evaluate::evaluate(
+                    &c.spec,
+                    mode,
+                    &resolution,
+                    &host,
+                    crate::model::outcome::Exception::None,
+                );
+                eval.outcome == crate::model::outcome::Outcome::Drift
+                    && eval.remediation == crate::model::outcome::Remediation::Automatic
+            });
+
+            if elevate && !is_elevated && requires_elevation {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default();
+                let temp_file = std::env::temp_dir().join(format!(
+                    "privr-mcp-elev-{}-{}.tmp",
+                    std::process::id(),
+                    now.as_millis()
+                ));
+
+                let mut child_args = vec!["apply", "--yes", "--format", "json"];
+                let workload_str;
+                if let Some(w) = workload {
+                    child_args.push("--workload");
+                    workload_str = w.as_str().to_owned();
+                    child_args.push(&workload_str);
+                }
+                let friction_str;
+                if let Some(f) = max_friction {
+                    child_args.push("--max-friction");
+                    friction_str = f.as_str().to_owned();
+                    child_args.push(&friction_str);
+                }
+                if has_profile_arg {
+                    child_args.push("--profile");
+                    child_args.push(profile_str);
+                }
+                if let Some(f) = filter {
+                    child_args.push("--control");
+                    child_args.push(f);
+                }
+                if let Some(s) = section_filter {
+                    child_args.push("--section");
+                    child_args.push(s);
+                }
+
+                let res = crate::platform::elevation::run_elevated(&child_args, Some(&temp_file));
+                let _ = std::fs::remove_file(&temp_file);
+
+                match res {
+                    crate::platform::elevation::ElevationResult::Success { exit_code, output } => {
+                        if exit_code == 0 {
+                            return tool_success(output);
+                        }
+                        return tool_error(format!(
+                            "Elevated apply exited with code {exit_code}: {output}"
+                        ));
+                    }
+                    crate::platform::elevation::ElevationResult::Cancelled => {
+                        return tool_error("Elevation request was cancelled by user.".to_owned());
+                    }
+                    crate::platform::elevation::ElevationResult::Failed(e) => {
+                        return tool_error(format!("Elevation failed: {e}"));
+                    }
+                }
+            }
 
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -1105,6 +1228,11 @@ mod tests {
             .collect();
         assert!(names.contains(&"privr_apply"));
         assert!(names.contains(&"privr_rollback"));
+        let apply_tool = list
+            .iter()
+            .find(|t| t["name"] == "privr_apply")
+            .expect("apply tool");
+        assert!(apply_tool["inputSchema"]["properties"]["elevate"].is_object());
     }
 
     #[test]

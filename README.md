@@ -106,17 +106,16 @@ release. The installer will place an unprivileged binary and nothing else;
 check -> explain -> recommend -> simulate -> plan -> apply -> verify -> rollback
 ```
 
-This is the target workflow. `check`, `explain`, `list`, `recommend`, and `simulate`
-behave as described on Windows; `plan`, `apply`, and `rollback` do not yet, as
-recorded in [ROADMAP.md](ROADMAP.md#current-state).
+This is the canonical workflow. On Windows, all commands in the lifecycle are implemented,
+tested, and verified against real hosts:
 
 ```text
 privr check
 privr explain windows.advertising.id
 privr recommend --workload developer
 privr simulate --profile baseline
-privr plan --workload developer
-privr apply --workload developer --yes
+privr plan
+privr apply
 privr rollback <transaction-id> --yes
 ```
 
@@ -125,8 +124,8 @@ privr rollback <transaction-id> --yes
 - `explain` shows evidence, applicability, management source, and tradeoffs.
 - `recommend` computes deterministic change recommendations ordered by friction tier (Tier 0 transparent to Tier 3 incompatible/tradeoff), workload persona, or friction budget.
 - `simulate` performs a dry-run counterfactual posture vector projection without mutating host state, reporting transition deltas, friction counts, and reboot or signout requirements.
-- `plan` is read-only and shows the exact eligible change set, supporting `--workload` and `--max-friction`.
-- `apply` executes safe, verified remediation with transaction journaling and adaptive elevation handling.
+- `plan` is read-only and shows the exact eligible change set. Running `privr plan` without arguments defaults to the daily-driver general persona and cosmetic friction ceiling.
+- `apply` executes safe, verified remediation with transaction journaling, interactive plan review, and native in-place elevation (`-e, --elevate`). Running `privr apply` without arguments applies recommended daily-driver controls with zero workflow disruption.
 - `rollback` restores exact prior values, and only when current state still matches what was recorded.
 
 The full command and exit-code contract is in [docs/CLI.md](docs/CLI.md).

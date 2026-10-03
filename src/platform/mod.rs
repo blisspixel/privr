@@ -14,6 +14,8 @@ pub mod macos;
 #[cfg(windows)]
 pub mod windows;
 
+pub mod elevation;
+
 use crate::model::host::HostFacts;
 
 /// Discover the facts this host presents.

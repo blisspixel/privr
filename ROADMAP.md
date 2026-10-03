@@ -32,14 +32,14 @@ milestone and its results should not be trusted.
 | Area | State |
 |---|---|
 | Windows `check`, `explain`, `list` | Implemented and tested with recorded evidence. 28 controls across 5 posture dimensions. Validated on Windows 11 Pro 25H2. |
-| Windows `plan`, `apply`, `rollback` | Implemented and tested. 25 controls carry live, verified apply and rollback routines with pre/postimage validation. Adaptive elevation defers machine-scope controls when unelevated; explicit machine controls fail closed with code 4. |
+| Windows `plan`, `apply`, `rollback` | Implemented and tested. 25 controls carry live, verified apply and rollback routines with pre/postimage validation. Native in-place elevation (-e, --elevate) invokes UAC/sudo; interactive plan review and approval prompts run in terminals; noninteractive mode defaults safely to daily-driver with --yes. |
 | Posture vectors and personas | Implemented and tested. 5 posture dimensions, 4 friction tiers, 5 workload personas across `check`, `recommend`, `simulate`, `plan`, and `apply`. |
 | Linux `check` | Experimental. Discovery and 13 controls (GNOME, Ubuntu, Debian, Fedora, KDE, FreeDesktop, systemd) with elevation metadata. Compiled and tested in CI; never checked against a real desktop. |
 | macOS `check` | Experimental. Discovery and 6 controls with elevation metadata. Compiled and tested in CI; never checked against a real Mac. |
 | Agent server (`mcp`) | Implemented and tested. Synchronous stdio server with read-only tools and gated mutation. Conforms to Model Context Protocol and Agent Plugins v1.0.0. Supports workload personas and friction budgets. |
 | `doctor` | Implemented and tested. Reports non-identifying OS facts, privilege level, platform adapters, storage integrity, reparse-point verification, and schema versions. |
 | Profile ladder | Implemented and verified. Baseline <= Strict <= Restrictive ladder partitions controls monotonically. |
-| Custom policy files, interactive approval, sections | Not built. `apply` and `rollback` require `--yes`. |
+| Custom policy files, sections | Not built. Subplan sections and external policy files scheduled for 0.3.0. |
 | Fixture files, staleness, signed releases | In progress. |
 
 ### Known issues
@@ -60,8 +60,7 @@ Mutation (blocks 0.2.0):
 - [x] The journal directory comes from environment variables and is not
   permission-restricted. (Fixed: owner-only 0700/0600 permissions enforced on Unix,
   per-user AppData ACLs on Windows, subsecond millisecond transaction IDs, and symlink protection).
-- [ ] `apply` has no plan review or section approval; `--yes` applies every
-  eligible change at once.
+- [x] `apply` has no plan review; `--yes` was required even in interactive terminals. (Fixed: interactive terminal execution previews planned changes, highlights elevation requirements, and requests confirmation before applying; native elevation runs child process in-place).
 - [x] `rollback` of an unknown transaction prints the old concept-build notice
   and exits `3`, where the contract calls for a clear usage error. (Fixed:
   rollback validates transaction IDs, emits honest stderr guidance, and exits 2).

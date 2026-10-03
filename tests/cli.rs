@@ -195,3 +195,36 @@ fn plan_cli_with_section_filter() {
         .success()
         .stdout(predicate::str::contains("\"schema\": 1"));
 }
+
+#[test]
+fn plan_defaults_to_sensible_daily_driver_workload() {
+    let mut command = Command::cargo_bin("privr").expect("binary");
+    command
+        .args(["plan", "--format", "json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"workload\": \"general\""));
+}
+
+#[test]
+fn recommend_suggests_privr_apply() {
+    let mut command = Command::cargo_bin("privr").expect("binary");
+    command
+        .arg("recommend")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "To apply recommended controls, run: privr apply",
+        ));
+}
+
+#[test]
+fn apply_help_shows_elevate_flag() {
+    let mut command = Command::cargo_bin("privr").expect("binary");
+    command
+        .args(["apply", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--elevate"))
+        .stdout(predicate::str::contains("-e"));
+}

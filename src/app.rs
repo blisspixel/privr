@@ -118,9 +118,14 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                     continue;
                 }
                 let resolution = c.observe(&context);
+                let mode = if c.spec.min_profile <= profile {
+                    crate::engine::evaluate::Mode::Enforce
+                } else {
+                    crate::engine::evaluate::Mode::Ignore
+                };
                 let eval = crate::engine::evaluate::evaluate(
                     &c.spec,
-                    crate::engine::evaluate::Mode::Enforce,
+                    mode,
                     &resolution,
                     &host,
                     crate::model::outcome::Exception::None,
@@ -283,9 +288,14 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                     continue;
                 }
                 let resolution = c.observe(&context);
+                let mode = if c.spec.min_profile <= profile {
+                    crate::engine::evaluate::Mode::Enforce
+                } else {
+                    crate::engine::evaluate::Mode::Ignore
+                };
                 let eval = crate::engine::evaluate::evaluate(
                     &c.spec,
-                    crate::engine::evaluate::Mode::Enforce,
+                    mode,
                     &resolution,
                     &host,
                     crate::model::outcome::Exception::None,

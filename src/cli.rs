@@ -121,30 +121,7 @@ pub enum OutputFormat {
     Json,
 }
 
-/// Built-in profiles, ordered. Each is a strict superset of the one before it.
-///
-/// No profile in this ladder contains a control that reduces security. Security
-/// tradeoffs are selected deliberately and acknowledged per control.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
-pub enum Profile {
-    /// Disable passive collection while retaining features and security protections.
-    #[default]
-    Baseline,
-    /// Add controls with real, disclosed functionality tradeoffs.
-    Strict,
-    /// Add controls with substantial convenience or functionality cost.
-    Restrictive,
-}
-
-impl Profile {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Baseline => "baseline",
-            Self::Strict => "strict",
-            Self::Restrictive => "restrictive",
-        }
-    }
-}
+pub use crate::model::profile::Profile;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 pub enum Platform {

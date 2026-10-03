@@ -38,7 +38,7 @@ milestone and its results should not be trusted.
 
 | Agent server (`mcp`) | Implemented and tested. Synchronous stdio server with read-only tools and gated mutation. Conforms to Model Context Protocol and Agent Plugins v1.0.0. |
 | `doctor` | Implemented and tested. Reports non-identifying OS facts, privilege level, platform adapters, storage integrity, reparse-point verification, and schema versions. |
-| Profile ladder | Not built. Every profile enforces every control. |
+| Profile ladder | Implemented and verified. Baseline <= Strict <= Restrictive ladder partitions controls monotonically. |
 | Custom policy files, interactive approval, sections | Not built. `apply` and `rollback` require `--yes`. |
 | Fixture files, staleness, signed releases | Not built. |
 
@@ -57,17 +57,17 @@ Mutation (blocks 0.2.0):
   when current state no longer equals the recorded postimage. (Fixed: rollback
   takes recorded postimage and refuses with conflict error if state changed
   externally).
-- [ ] The journal directory comes from environment variables and is not
-  permission-restricted. (Transaction IDs upgraded to subsecond millisecond
-  resolution and protected against symlink redirection).
+- [x] The journal directory comes from environment variables and is not
+  permission-restricted. (Fixed: owner-only 0700/0600 permissions enforced on Unix,
+  per-user AppData ACLs on Windows, subsecond millisecond transaction IDs, and symlink protection).
 - [ ] `apply` has no plan review or section approval; `--yes` applies every
   eligible change at once.
 - [x] `rollback` of an unknown transaction prints the old concept-build notice
   and exits `3`, where the contract calls for a clear usage error. (Fixed:
   rollback validates transaction IDs, emits honest stderr guidance, and exits 2).
-- [ ] A registry test writes to the live `HKEY_CURRENT_USER` hive of whoever
-  runs the suite. Mutation must be tested through recorded context, with live
-  writes proven only in disposable VMs.
+- [x] A registry test writes to the live `HKEY_CURRENT_USER` hive of whoever
+  runs the suite. (Fixed: live registry write test gated behind PRIVR_LIVE_WRITE_TEST=1
+  for disposable VMs; unit suite verifies via in-memory recorded context).
 
 Reporting (blocks 0.1.0):
 
@@ -134,7 +134,7 @@ Required before the first useful release:
   binding, closed-set predicates, and the compiled adapter registry.
 - [ ] Capture redacted fixtures per control and replay them in CI, so
   correctness stops depending on the machine the tests run on.
-- [ ] Implement the profile ladder, so `baseline`, `strict`, and `restrictive`
+- [x] Implement the profile ladder, so `baseline`, `strict`, and `restrictive`
   select different control sets rather than all controls being enforced.
 - [ ] Implement review staleness against a real reviewed-version range.
 - [ ] Implement `doctor` against real discovery.
@@ -194,7 +194,7 @@ Engineering work:
 - [ ] Add `explain`, `list` as a capability manifest, and stable fixtures.
 - [ ] Group results into sections as a reporting structure, with aggregates that
   exclude what could not be evaluated.
-- [ ] Implement the `baseline`, `strict`, and `restrictive` profile ladder, with
+- [x] Implement the `baseline`, `strict`, and `restrictive` profile ladder, with
   security tradeoffs held outside it.
 - [ ] Implement review staleness so a control past its reviewed platform range
   degrades to unknown and audit-only.

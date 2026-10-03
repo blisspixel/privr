@@ -97,6 +97,15 @@ pub fn save_transaction(tx: &TransactionJournal) -> Result<PathBuf, std::io::Err
     }
     let dir = transactions_dir();
     fs::create_dir_all(&dir)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(metadata) = fs::metadata(&dir) {
+            let mut perms = metadata.permissions();
+            perms.set_mode(0o700);
+            let _ = fs::set_permissions(&dir, perms);
+        }
+    }
     let final_path = dir.join(format!("{}.json", tx.transaction_id));
     if final_path.is_symlink() {
         return Err(std::io::Error::new(
@@ -117,6 +126,15 @@ pub fn save_transaction(tx: &TransactionJournal) -> Result<PathBuf, std::io::Err
     let content = serde_json::to_string_pretty(tx)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     fs::write(&tmp_path, content)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(metadata) = fs::metadata(&tmp_path) {
+            let mut perms = metadata.permissions();
+            perms.set_mode(0o600);
+            let _ = fs::set_permissions(&tmp_path, perms);
+        }
+    }
     if let Err(e) = fs::rename(&tmp_path, &final_path) {
         let _ = fs::remove_file(&tmp_path);
         return Err(e);

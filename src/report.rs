@@ -6,6 +6,7 @@ use serde::Serialize;
 
 use crate::catalog;
 use crate::engine::evaluate::{Mode, evaluate};
+use crate::model::Profile;
 use crate::model::host::HostFacts;
 use crate::model::outcome::{ControlResult, Exception, Outcome, Summary};
 use crate::ui::{Ui, style};
@@ -47,13 +48,19 @@ pub struct Report {
 impl Report {
     /// Evaluate every applicable control against this host.
     pub fn build(host: &HostFacts, profile: &str) -> Self {
+        let selected_profile = profile.parse::<Profile>().unwrap_or_default();
         let context = catalog::Context::live(host);
         let mut results: Vec<ControlResult> = catalog::all()
             .iter()
             .map(|control| {
+                let mode = if control.spec.min_profile <= selected_profile {
+                    Mode::Enforce
+                } else {
+                    Mode::Ignore
+                };
                 evaluate(
                     &control.spec,
-                    Mode::Enforce,
+                    mode,
                     &control.observe(&context),
                     host,
                     Exception::None,
@@ -127,7 +134,9 @@ impl Report {
 
         let mut sections: BTreeMap<&str, Vec<&ControlResult>> = BTreeMap::new();
         for result in &self.results {
-            if show_all || result.outcome != Outcome::Pass {
+            if show_all
+                || (result.outcome != Outcome::Pass && result.outcome != Outcome::NotSelected)
+            {
                 sections.entry(&result.section).or_default().push(result);
             }
         }
@@ -218,6 +227,9 @@ impl Report {
                 s.not_applicable,
                 "not applicable",
             ));
+        }
+        if s.not_selected > 0 {
+            parts.push(paint(Outcome::NotSelected, s.not_selected, "not selected"));
         }
         format!("{}\n", parts.join("    "))
     }
@@ -356,5 +368,30 @@ mod tests {
         assert!(text.contains("Advertising identifier"));
         assert!(flat(&text).contains("Profile baseline"));
         assert!(flat(&text).contains("Coverage"));
+    }
+
+    #[test]
+    fn profile_ladder_escalates_evaluated_controls_monotonically() {
+        let host = platform::discover();
+        let baseline = Report::build(&host, "baseline");
+        let strict = Report::build(&host, "strict");
+        let restrictive = Report::build(&host, "restrictive");
+
+        assert_eq!(baseline.profile, "baseline");
+        assert_eq!(strict.profile, "strict");
+        assert_eq!(restrictive.profile, "restrictive");
+
+        // Total carried controls is identical across profiles.
+        assert_eq!(baseline.carried, strict.carried);
+        assert_eq!(strict.carried, restrictive.carried);
+
+        // NotSelected strictly decreases as profile level escalates.
+        assert!(baseline.summary.not_selected >= strict.summary.not_selected);
+        assert!(strict.summary.not_selected >= restrictive.summary.not_selected);
+        assert_eq!(restrictive.summary.not_selected, 0);
+
+        // Evaluated controls (pass + drift + review) grow monotonically.
+        assert!(baseline.summary.evaluated() <= strict.summary.evaluated());
+        assert!(strict.summary.evaluated() <= restrictive.summary.evaluated());
     }
 }

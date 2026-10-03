@@ -5,5 +5,9 @@
 //! there is no separate fake that can drift from reality.
 
 pub mod evaluate;
+pub mod recommend;
+pub mod simulate;
 
 pub use evaluate::{ControlSpec, Mode, Resolution, SemanticState, Uncertainty, evaluate};
+pub use recommend::generate_recommendations;
+pub use simulate::{SimulationOutcome, simulate_profile};

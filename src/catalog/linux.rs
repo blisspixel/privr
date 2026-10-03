@@ -8,6 +8,7 @@ use crate::engine::evaluate::{ControlSpec, Resolution, SemanticState, Uncertaint
 use crate::model::applicability::{Applicability, Predicate, Variant};
 use crate::model::host::ManagementSource;
 use crate::model::outcome::{Maturity, Remediation, Reversibility};
+use crate::model::posture::{FrictionTier, PostureDimension};
 use crate::model::profile::Profile;
 
 fn enabled() -> SemanticState {
@@ -217,6 +218,8 @@ pub fn controls() -> Vec<Control> {
                 id: "debian.popularity-contest.participation".to_owned(),
                 title: "Package popularity survey".to_owned(),
                 section: "debian".to_owned(),
+                dimension: PostureDimension::DiagnosticCrash,
+                friction: FrictionTier::Tier0Transparent,
                 applicability: Applicability::new(vec![Variant::new(
                     "linux-debian",
                     vec![Predicate::DistributionIn(vec![
@@ -255,6 +258,8 @@ pub fn controls() -> Vec<Control> {
                 id: "fedora.abrt.auto-reporting".to_owned(),
                 title: "Automated crash reporting".to_owned(),
                 section: "fedora".to_owned(),
+                dimension: PostureDimension::DiagnosticCrash,
+                friction: FrictionTier::Tier0Transparent,
                 applicability: Applicability::new(vec![Variant::new(
                     "linux-fedora",
                     vec![Predicate::DistributionIn(vec![
@@ -294,6 +299,8 @@ pub fn controls() -> Vec<Control> {
                 id: "freedesktop.thumbnails.caching".to_owned(),
                 title: "FreeDesktop thumbnail caching".to_owned(),
                 section: "freedesktop".to_owned(),
+                dimension: PostureDimension::ForensicResidue,
+                friction: FrictionTier::Tier2WorkflowAltering,
                 applicability: Applicability::new(vec![Variant::new(
                     "linux-desktop",
                     vec![Predicate::LiveSession(true)],
@@ -329,6 +336,8 @@ pub fn controls() -> Vec<Control> {
                 id: "gnome.crash-reporting.technical-problems".to_owned(),
                 title: "Technical problem reporting".to_owned(),
                 section: "gnome".to_owned(),
+                dimension: PostureDimension::DiagnosticCrash,
+                friction: FrictionTier::Tier0Transparent,
                 applicability: Applicability::new(vec![Variant::new(
                     "linux-gnome",
                     vec![
@@ -344,6 +353,7 @@ pub fn controls() -> Vec<Control> {
                 remediation_reason: None,
                 min_profile: Profile::Baseline,
             },
+
             title: "Technical problem reporting",
             summary: "GNOME automatically transmits technical error reports when applications crash.",
             rationale: "Automated crash reports transmit application memory state and environment metadata to distribution aggregators.",
@@ -365,6 +375,8 @@ pub fn controls() -> Vec<Control> {
                 id: "gnome.history.application-usage".to_owned(),
                 title: "Application usage history".to_owned(),
                 section: "gnome".to_owned(),
+                dimension: PostureDimension::ForensicResidue,
+                friction: FrictionTier::Tier1Cosmetic,
                 applicability: Applicability::new(vec![Variant::new(
                     "linux-gnome",
                     vec![
@@ -399,6 +411,8 @@ pub fn controls() -> Vec<Control> {
                 id: "gnome.history.recent-files".to_owned(),
                 title: "Recent files history".to_owned(),
                 section: "gnome".to_owned(),
+                dimension: PostureDimension::ForensicResidue,
+                friction: FrictionTier::Tier1Cosmetic,
                 applicability: Applicability::new(vec![Variant::new(
                     "linux-gnome",
                     vec![
@@ -435,6 +449,8 @@ pub fn controls() -> Vec<Control> {
                 id: "gnome.telemetry.software-usage".to_owned(),
                 title: "Software usage statistics".to_owned(),
                 section: "gnome".to_owned(),
+                dimension: PostureDimension::DiagnosticCrash,
+                friction: FrictionTier::Tier0Transparent,
                 applicability: Applicability::new(vec![Variant::new(
                     "linux-gnome",
                     vec![
@@ -471,6 +487,8 @@ pub fn controls() -> Vec<Control> {
                 id: "kde.user-feedback.global".to_owned(),
                 title: "KDE Plasma user feedback".to_owned(),
                 section: "kde".to_owned(),
+                dimension: PostureDimension::DiagnosticCrash,
+                friction: FrictionTier::Tier0Transparent,
                 applicability: Applicability::new(vec![Variant::new(
                     "linux-kde",
                     vec![
@@ -486,6 +504,7 @@ pub fn controls() -> Vec<Control> {
                 remediation_reason: None,
                 min_profile: Profile::Baseline,
             },
+
             title: "KDE Plasma user feedback",
             summary: "KDE applications collect software usage and system telemetry.",
             rationale: "KDE UserFeedback periodically uploads telemetry from desktop applications.",
@@ -507,6 +526,8 @@ pub fn controls() -> Vec<Control> {
                 id: "systemd.coredump.storage".to_owned(),
                 title: "Systemd core dump persistence".to_owned(),
                 section: "systemd".to_owned(),
+                dimension: PostureDimension::DiagnosticCrash,
+                friction: FrictionTier::Tier0Transparent,
                 applicability: Applicability::new(vec![Variant::new("linux-systemd", vec![])]),
                 desired: disabled(),
                 reversibility: Reversibility::Exact,
@@ -539,6 +560,8 @@ pub fn controls() -> Vec<Control> {
                 id: "systemd.fstrim.timer".to_owned(),
                 title: "Periodic SSD TRIM timer".to_owned(),
                 section: "systemd".to_owned(),
+                dimension: PostureDimension::ForensicResidue,
+                friction: FrictionTier::Tier0Transparent,
                 applicability: Applicability::new(vec![Variant::new("linux-systemd", vec![])]),
                 desired: enabled(),
                 reversibility: Reversibility::Exact,
@@ -571,6 +594,8 @@ pub fn controls() -> Vec<Control> {
                 id: "systemd.journald.storage".to_owned(),
                 title: "Systemd journal memory storage".to_owned(),
                 section: "systemd".to_owned(),
+                dimension: PostureDimension::DiagnosticCrash,
+                friction: FrictionTier::Tier1Cosmetic,
                 applicability: Applicability::new(vec![Variant::new("linux-systemd", vec![])]),
                 desired: enabled(),
                 reversibility: Reversibility::Exact,
@@ -599,9 +624,10 @@ pub fn controls() -> Vec<Control> {
         Control {
             spec: ControlSpec {
                 id: "ubuntu.insights.consent".to_owned(),
-
                 title: "Ubuntu Insights telemetry".to_owned(),
                 section: "ubuntu".to_owned(),
+                dimension: PostureDimension::DiagnosticCrash,
+                friction: FrictionTier::Tier0Transparent,
                 applicability: Applicability::new(vec![Variant::new(
                     "linux-ubuntu",
                     vec![Predicate::DistributionIn(vec!["ubuntu".to_owned()])],
@@ -637,6 +663,8 @@ pub fn controls() -> Vec<Control> {
                 id: "ubuntu.report.consent".to_owned(),
                 title: "Ubuntu system metrics report".to_owned(),
                 section: "ubuntu".to_owned(),
+                dimension: PostureDimension::DiagnosticCrash,
+                friction: FrictionTier::Tier0Transparent,
                 applicability: Applicability::new(vec![Variant::new(
                     "linux-ubuntu",
                     vec![Predicate::DistributionIn(vec!["ubuntu".to_owned()])],
@@ -649,6 +677,7 @@ pub fn controls() -> Vec<Control> {
                 remediation_reason: None,
                 min_profile: Profile::Baseline,
             },
+
             title: "Ubuntu system metrics report",
             summary: "Ubuntu transmits hardware metrics, installer performance, and system configuration.",
             rationale: "Ubuntu Report collects system specs, partition layouts, and machine attributes upon installation.",

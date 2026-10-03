@@ -2,7 +2,9 @@ use std::io::Write;
 
 use serde::Serialize;
 
-use crate::cli::{Cli, Command, OutputFormat, Platform, Profile};
+use crate::cli::{
+    Cli, Command, FrictionTier, OutputFormat, Platform, PostureDimension, Profile, WorkloadPersona,
+};
 
 #[derive(Serialize)]
 struct PlanItem {
@@ -47,12 +49,14 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
         profile: Some(Profile::Baseline),
         policy: None,
         controls: Vec::new(),
+        sections: Vec::new(),
         all: false,
     }) {
         Command::Check {
             profile,
             policy,
-            controls: _,
+            controls,
+            sections,
             all,
         } => {
             // A custom policy file is not implemented, and silently evaluating
@@ -74,7 +78,7 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                 // clean. The guard clears the line however this scope exits.
                 let _progress = ui.spinner("checking this machine");
                 let host = crate::platform::discover();
-                crate::report::Report::build(&host, profile.as_str())
+                crate::report::Report::build_filtered(&host, profile.as_str(), &controls, &sections)
             };
 
             match format {
@@ -93,6 +97,7 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
             profile,
             policy,
             controls,
+            sections,
         } => {
             if policy.is_some() {
                 let _ = writeln!(
@@ -110,11 +115,19 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
             let mut unautomated_drift = 0;
 
             for c in &all_controls {
-                if !controls.is_empty()
-                    && !controls
+                let matches_control = controls.is_empty()
+                    || controls
                         .iter()
-                        .any(|sel| c.spec.id == *sel || c.spec.id.starts_with(sel))
-                {
+                        .any(|sel| c.spec.id == *sel || c.spec.id.starts_with(sel));
+                let matches_section = sections.is_empty()
+                    || sections.iter().any(|sec| {
+                        c.spec.section.eq_ignore_ascii_case(sec)
+                            || c.spec
+                                .section
+                                .to_ascii_lowercase()
+                                .starts_with(&sec.to_ascii_lowercase())
+                    });
+                if !matches_control || !matches_section {
                     continue;
                 }
                 let resolution = c.observe(&context);
@@ -218,6 +231,7 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
             dry_run,
             yes,
             controls,
+            sections,
         } => {
             if dry_run {
                 return run(
@@ -228,6 +242,7 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                             profile,
                             policy,
                             controls,
+                            sections,
                         }),
                     },
                     out,
@@ -280,11 +295,19 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
             let mut unautomated_drift = 0;
 
             for c in &all_controls {
-                if !controls.is_empty()
-                    && !controls
+                let matches_control = controls.is_empty()
+                    || controls
                         .iter()
-                        .any(|sel| c.spec.id == *sel || c.spec.id.starts_with(sel))
-                {
+                        .any(|sel| c.spec.id == *sel || c.spec.id.starts_with(sel));
+                let matches_section = sections.is_empty()
+                    || sections.iter().any(|sec| {
+                        c.spec.section.eq_ignore_ascii_case(sec)
+                            || c.spec
+                                .section
+                                .to_ascii_lowercase()
+                                .starts_with(&sec.to_ascii_lowercase())
+                    });
+                if !matches_control || !matches_section {
                     continue;
                 }
                 let resolution = c.observe(&context);
@@ -548,6 +571,261 @@ Run privr list to see every control in this build."
                 2
             }
         },
+        Command::Recommend {
+            workload,
+            max_friction,
+            dimension,
+        } => {
+            let host = crate::platform::discover();
+            let context = crate::catalog::Context::live(&host);
+            let all_controls = crate::catalog::all();
+            let recommendations = crate::engine::recommend::generate_recommendations(
+                &all_controls,
+                &context,
+                &host,
+                workload,
+                max_friction,
+                dimension,
+            );
+
+            #[derive(Serialize)]
+            struct RecommendReport {
+                schema: u8,
+                platform: String,
+                workload: WorkloadPersona,
+                max_friction: Option<FrictionTier>,
+                dimension_filter: Option<PostureDimension>,
+                recommendations_count: usize,
+                recommendations: Vec<crate::model::posture::Recommendation>,
+            }
+
+            let report = RecommendReport {
+                schema: 1,
+                platform: host.platform.as_str().to_owned(),
+                workload,
+                max_friction,
+                dimension_filter: dimension,
+                recommendations_count: recommendations.len(),
+                recommendations: recommendations.clone(),
+            };
+
+            match format {
+                OutputFormat::Text => {
+                    let field =
+                        |name: &str| ui.paint(crate::ui::style::MUTED, &format!("{name:<16}"));
+                    let _ = writeln!(out, "{}privr recommend", field("Command"));
+                    let _ = writeln!(out, "{}recommendation report", field("Status"));
+                    let _ = writeln!(out, "{}{}", field("Workload"), workload.as_str());
+                    let friction_label = max_friction.map(|f| f.as_str()).unwrap_or("unlimited");
+                    let _ = writeln!(out, "{}{}", field("Max Friction"), friction_label);
+                    let dim_label = dimension.map(|d| d.as_str()).unwrap_or("all");
+                    let _ = writeln!(out, "{}{}", field("Dimension"), dim_label);
+                    let _ = writeln!(
+                        out,
+                        "{}{}\n",
+                        field("Recommendations"),
+                        recommendations.len()
+                    );
+
+                    if recommendations.is_empty() {
+                        let _ = writeln!(
+                            out,
+                            "No recommendations matching workload and friction constraints (machine matches target posture)."
+                        );
+                    } else {
+                        for rec in &recommendations {
+                            let friction_badge = ui.paint(
+                                match rec.friction_tier {
+                                    FrictionTier::Tier0Transparent => {
+                                        crate::ui::style::outcome_style(
+                                            crate::model::outcome::Outcome::Pass,
+                                        )
+                                    }
+                                    FrictionTier::Tier1Cosmetic => crate::ui::style::MUTED,
+                                    FrictionTier::Tier2WorkflowAltering => crate::ui::style::CAVEAT,
+                                    FrictionTier::Tier3IncompatibleOrTradeoff => {
+                                        crate::ui::style::outcome_style(
+                                            crate::model::outcome::Outcome::Drift,
+                                        )
+                                    }
+                                },
+                                &format!("[{}]", rec.friction_tier.as_str()),
+                            );
+                            let _ = writeln!(
+                                out,
+                                "{}  {} ({})",
+                                friction_badge, rec.title, rec.control_id
+                            );
+                            let _ = writeln!(out, "    Dimension:  {}", rec.dimension.as_str());
+                            let _ = writeln!(out, "    Section:    {}", rec.section);
+                            let _ = writeln!(
+                                out,
+                                "    State:      current: {}, desired: {}",
+                                rec.current_state, rec.desired_state
+                            );
+                            let _ = writeln!(out, "    Rationale:  {}", rec.rationale);
+                            if let Some(tradeoff) = &rec.tradeoff {
+                                let _ = writeln!(out, "    Trade-off:  {}", tradeoff);
+                            }
+                            let _ = writeln!(out);
+                        }
+                        let _ = writeln!(
+                            out,
+                            "To apply recommended controls, run: privr apply --control <id> --yes"
+                        );
+                    }
+                }
+                OutputFormat::Json => {
+                    if serde_json::to_writer_pretty(&mut *out, &report).is_ok() {
+                        let _ = writeln!(out);
+                    }
+                }
+            }
+            0
+        }
+        Command::Simulate {
+            profile,
+            controls,
+            sections,
+        } => {
+            let host = crate::platform::discover();
+            let context = crate::catalog::Context::live(&host);
+            let all_controls = crate::catalog::all();
+            let simulation = crate::engine::simulate::simulate_profile(
+                &all_controls,
+                &context,
+                &host,
+                profile,
+                &controls,
+                &sections,
+            );
+
+            #[derive(Serialize)]
+            struct SimulateReport {
+                schema: u8,
+                platform: String,
+                profile: String,
+                simulated_changes: usize,
+                unautomated_drift: usize,
+                current_posture: crate::model::posture::PostureVector,
+                simulated_posture: crate::model::posture::PostureVector,
+                friction_breakdown: std::collections::BTreeMap<String, usize>,
+                pending_restart_required: bool,
+                pending_signout_required: bool,
+                simulated_control_ids: Vec<String>,
+            }
+
+            let report = SimulateReport {
+                schema: 1,
+                platform: host.platform.as_str().to_owned(),
+                profile: simulation.profile.clone(),
+                simulated_changes: simulation.simulated_changes,
+                unautomated_drift: simulation.unautomated_drift,
+                current_posture: simulation.current_posture.clone(),
+                simulated_posture: simulation.simulated_posture.clone(),
+                friction_breakdown: simulation.friction_breakdown.clone(),
+                pending_restart_required: simulation.pending_restart_required,
+                pending_signout_required: simulation.pending_signout_required,
+                simulated_control_ids: simulation.simulated_control_ids.clone(),
+            };
+
+            match format {
+                OutputFormat::Text => {
+                    let field =
+                        |name: &str| ui.paint(crate::ui::style::MUTED, &format!("{name:<20}"));
+                    let _ = writeln!(out, "{}privr simulate", field("Command"));
+                    let _ = writeln!(out, "{}simulation report (counterfactual)", field("Status"));
+                    let _ = writeln!(out, "{}{}", field("Target Profile"), simulation.profile);
+                    let _ = writeln!(
+                        out,
+                        "{}{}",
+                        field("Simulated Changes"),
+                        simulation.simulated_changes
+                    );
+                    if simulation.unautomated_drift > 0 {
+                        let _ = writeln!(
+                            out,
+                            "{}{}",
+                            field("Unautomated Drift"),
+                            simulation.unautomated_drift
+                        );
+                    }
+                    let _ = writeln!(out);
+
+                    let _ = writeln!(
+                        out,
+                        "{}",
+                        ui.paint(crate::ui::style::HEADING, "Posture Comparison")
+                    );
+                    let _ = writeln!(
+                        out,
+                        "  {:<26}  {:<16}  {:<16}",
+                        "Dimension", "Current (c/d/c)", "Projected (c/d/c)"
+                    );
+                    for (dim, cur) in &simulation.current_posture.dimensions {
+                        let sim = simulation
+                            .simulated_posture
+                            .dimensions
+                            .get(dim)
+                            .copied()
+                            .unwrap_or_default();
+                        let cur_str = format!("{}/{}/{}", cur.compliant, cur.drift, cur.concealed);
+                        let sim_str = format!("{}/{}/{}", sim.compliant, sim.drift, sim.concealed);
+                        let _ = writeln!(
+                            out,
+                            "  {:<26}  {:<16}  {:<16}",
+                            dim.as_str(),
+                            cur_str,
+                            sim_str
+                        );
+                    }
+
+                    if !simulation.friction_breakdown.is_empty() {
+                        let _ = writeln!(
+                            out,
+                            "\n{}",
+                            ui.paint(crate::ui::style::HEADING, "Friction Breakdown")
+                        );
+                        for (tier, count) in &simulation.friction_breakdown {
+                            let _ = writeln!(out, "  {:<32} {}", tier, count);
+                        }
+                    }
+
+                    if simulation.pending_restart_required || simulation.pending_signout_required {
+                        let _ = writeln!(
+                            out,
+                            "\n{}",
+                            ui.paint(crate::ui::style::HEADING, "Session Requirements")
+                        );
+                        if simulation.pending_restart_required {
+                            let _ = writeln!(out, "  System restart required: yes");
+                        }
+                        if simulation.pending_signout_required {
+                            let _ = writeln!(out, "  User sign-out required: yes");
+                        }
+                    }
+
+                    if simulation.simulated_changes > 0 {
+                        let _ = writeln!(
+                            out,
+                            "\nCounterfactual projection only (machine state unchanged). To apply: privr apply --profile {} --yes",
+                            simulation.profile
+                        );
+                    } else {
+                        let _ = writeln!(
+                            out,
+                            "\nNo candidate changes for simulation under current filters."
+                        );
+                    }
+                }
+                OutputFormat::Json => {
+                    if serde_json::to_writer_pretty(&mut *out, &report).is_ok() {
+                        let _ = writeln!(out);
+                    }
+                }
+            }
+            0
+        }
         Command::Doctor => {
             let host = crate::platform::discover();
             let report = crate::doctor::diagnose(&host);
@@ -618,6 +896,7 @@ mod tests {
             profile: None,
             policy: Some("laptop.toml".into()),
             controls: Vec::new(),
+            sections: Vec::new(),
             all: false,
         }));
         assert_eq!(code, 2);
@@ -633,6 +912,7 @@ mod tests {
             dry_run: false,
             yes: false,
             controls: Vec::new(),
+            sections: Vec::new(),
         }));
         assert_eq!(code, 2);
         assert!(stdout.is_empty());
@@ -645,6 +925,7 @@ mod tests {
             profile: Some(Profile::Baseline),
             policy: None,
             controls: vec!["windows.advertising.id".to_owned()],
+            sections: Vec::new(),
         }));
         assert_eq!(code, 0);
         assert!(stdout.contains("Profile"));
@@ -659,6 +940,7 @@ mod tests {
             dry_run: true,
             yes: false,
             controls: Vec::new(),
+            sections: Vec::new(),
         }));
         assert_eq!(code, 0);
         assert!(stdout.contains("Profile"));
@@ -704,6 +986,7 @@ mod tests {
             profile: Some(Profile::Baseline),
             policy: None,
             controls: Vec::new(),
+            sections: Vec::new(),
             all: true,
         }));
         let flat = flatten(&stdout);
@@ -720,6 +1003,7 @@ mod tests {
             dry_run: false,
             yes: true,
             controls: Vec::new(),
+            sections: Vec::new(),
         }));
         assert_eq!(code, 0, "stderr: {stderr}");
         assert!(
@@ -828,8 +1112,91 @@ mod tests {
             profile: Some(Profile::Baseline),
             policy: None,
             controls: Vec::new(),
+            sections: Vec::new(),
         }));
         assert_eq!(code, 0, "stderr: {stderr}");
         assert!(stdout.contains("Planned changes:"));
+    }
+
+    #[test]
+    fn recommend_command_renders_text_and_json() {
+        let (code, stdout, stderr) = run_for_test(Some(Command::Recommend {
+            workload: WorkloadPersona::Developer,
+            max_friction: Some(FrictionTier::Tier1Cosmetic),
+            dimension: None,
+        }));
+        assert_eq!(code, 0, "stderr: {stderr}");
+        assert!(stdout.contains("privr recommend"));
+        assert!(stdout.contains("Workload"));
+        assert!(stdout.contains("developer"));
+
+        // JSON format test
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        let json_code = run(
+            Cli {
+                color: crate::cli::ColorWhen::Never,
+                format: OutputFormat::Json,
+                command: Some(Command::Recommend {
+                    workload: WorkloadPersona::Creative,
+                    max_friction: None,
+                    dimension: Some(PostureDimension::ForensicResidue),
+                }),
+            },
+            &mut out,
+            &mut err,
+        );
+        assert_eq!(json_code, 0);
+        let val: serde_json::Value = serde_json::from_slice(&out).expect("json");
+        assert_eq!(val["schema"], 1);
+        assert_eq!(val["workload"], "creative");
+    }
+
+    #[test]
+    fn simulate_command_renders_text_and_json() {
+        let (code, stdout, stderr) = run_for_test(Some(Command::Simulate {
+            profile: Profile::Baseline,
+            controls: Vec::new(),
+            sections: Vec::new(),
+        }));
+        assert_eq!(code, 0, "stderr: {stderr}");
+        assert!(stdout.contains("privr simulate"));
+        assert!(stdout.contains("Posture Comparison"));
+
+        // JSON format test
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        let json_code = run(
+            Cli {
+                color: crate::cli::ColorWhen::Never,
+                format: OutputFormat::Json,
+                command: Some(Command::Simulate {
+                    profile: Profile::Strict,
+                    controls: Vec::new(),
+                    sections: Vec::new(),
+                }),
+            },
+            &mut out,
+            &mut err,
+        );
+        assert_eq!(json_code, 0);
+        let val: serde_json::Value = serde_json::from_slice(&out).expect("json");
+        assert_eq!(val["schema"], 1);
+        assert_eq!(val["profile"], "strict");
+    }
+
+    #[test]
+    fn check_with_sections_filter_limits_scope() {
+        let (code, stdout, _) = run_for_test(Some(Command::Check {
+            profile: Some(Profile::Baseline),
+            policy: None,
+            controls: Vec::new(),
+            sections: vec!["advertising".to_owned()],
+            all: true,
+        }));
+        assert!(matches!(code, 0 | 1 | 3));
+        if cfg!(windows) {
+            assert!(stdout.contains("windows.advertising.id"));
+        }
     }
 }

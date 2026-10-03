@@ -8,6 +8,7 @@ use crate::engine::evaluate::{ControlSpec, Resolution, SemanticState, Uncertaint
 use crate::model::applicability::{Applicability, Predicate, Variant};
 use crate::model::host::{ManagementSource, Platform};
 use crate::model::outcome::{Maturity, Remediation, Reversibility};
+use crate::model::posture::{FrictionTier, PostureDimension};
 use crate::model::profile::Profile;
 
 fn disabled() -> SemanticState {
@@ -47,6 +48,8 @@ pub fn controls() -> Vec<Control> {
                 id: "macos.advertising.personalized".to_owned(),
                 title: "Personalized advertising".to_owned(),
                 section: "advertising".to_owned(),
+                dimension: PostureDimension::BehavioralCommercial,
+                friction: FrictionTier::Tier0Transparent,
                 applicability: Applicability::new(vec![Variant::new(
                     "macos",
                     vec![Predicate::Platform(Platform::Macos)],
@@ -59,6 +62,7 @@ pub fn controls() -> Vec<Control> {
                 remediation_reason: None,
                 min_profile: Profile::Baseline,
             },
+
             title: "Personalized advertising",
             summary: "Apple personalizes ads in the App Store, Apple News, and Stocks.",
             rationale: "Personalized advertising targets ads using device activity, downloads, and interest segments.",
@@ -82,6 +86,8 @@ pub fn controls() -> Vec<Control> {
                 id: "macos.analytics.share-mac".to_owned(),
                 title: "Mac analytics and diagnostics".to_owned(),
                 section: "analytics".to_owned(),
+                dimension: PostureDimension::DiagnosticCrash,
+                friction: FrictionTier::Tier0Transparent,
                 applicability: Applicability::new(vec![Variant::new(
                     "macos",
                     vec![Predicate::Platform(Platform::Macos)],
@@ -117,6 +123,8 @@ pub fn controls() -> Vec<Control> {
                 id: "macos.analytics.share-with-developers".to_owned(),
                 title: "Third-party developer analytics".to_owned(),
                 section: "analytics".to_owned(),
+                dimension: PostureDimension::DiagnosticCrash,
+                friction: FrictionTier::Tier0Transparent,
                 applicability: Applicability::new(vec![Variant::new(
                     "macos",
                     vec![Predicate::Platform(Platform::Macos)],
@@ -150,6 +158,8 @@ pub fn controls() -> Vec<Control> {
                 id: "macos.siri.improvement".to_owned(),
                 title: "Improve Siri and Dictation".to_owned(),
                 section: "siri".to_owned(),
+                dimension: PostureDimension::AmbientSensor,
+                friction: FrictionTier::Tier0Transparent,
                 applicability: Applicability::new(vec![Variant::new(
                     "macos",
                     vec![Predicate::Platform(Platform::Macos)],
@@ -183,6 +193,8 @@ pub fn controls() -> Vec<Control> {
                 id: "macos.storage.quarantine-events".to_owned(),
                 title: "Download quarantine history".to_owned(),
                 section: "storage".to_owned(),
+                dimension: PostureDimension::ForensicResidue,
+                friction: FrictionTier::Tier1Cosmetic,
                 applicability: Applicability::new(vec![Variant::new(
                     "macos",
                     vec![Predicate::Platform(Platform::Macos)],
@@ -216,9 +228,10 @@ pub fn controls() -> Vec<Control> {
         Control {
             spec: ControlSpec {
                 id: "macos.storage.quicklook-cache".to_owned(),
-
                 title: "Quick Look thumbnail cache".to_owned(),
                 section: "storage".to_owned(),
+                dimension: PostureDimension::ForensicResidue,
+                friction: FrictionTier::Tier2WorkflowAltering,
                 applicability: Applicability::new(vec![Variant::new(
                     "macos",
                     vec![Predicate::Platform(Platform::Macos)],
@@ -231,6 +244,7 @@ pub fn controls() -> Vec<Control> {
                 remediation_reason: None,
                 min_profile: Profile::Strict,
             },
+
             title: "Quick Look thumbnail cache",
             summary: "macOS generates and retains unencrypted file thumbnails when files are previewed in Finder or Quick Look.",
             rationale: "Quick Look caches rendered previews of images, documents, and media in cleartext on the boot volume even when original files reside on encrypted volumes or external drives.",

@@ -17,6 +17,7 @@ use crate::model::outcome::{
     ControlResult, Effect, Exception, Ineffective, Maturity, Outcome, Remediation,
     RemediationReason, Reversibility, Support,
 };
+use crate::model::posture::{FrictionTier, PostureDimension};
 use crate::model::profile::Profile;
 
 /// A semantic state, such as `disabled` or `required_only`.
@@ -218,6 +219,8 @@ pub struct ControlSpec {
     pub id: String,
     pub title: String,
     pub section: String,
+    pub dimension: PostureDimension,
+    pub friction: FrictionTier,
     pub applicability: Applicability,
     pub desired: SemanticState,
     pub reversibility: Reversibility,
@@ -248,6 +251,8 @@ pub fn evaluate(
             id: spec.id.clone(),
             title: spec.title.clone(),
             section: spec.section.clone(),
+            dimension: spec.dimension,
+            friction: spec.friction,
             outcome,
             management_source: resolution.source,
             remediation,
@@ -399,6 +404,8 @@ mod tests {
             id: "windows.advertising.id".to_owned(),
             title: "Advertising identifier".to_owned(),
             section: "advertising".to_owned(),
+            dimension: PostureDimension::BehavioralCommercial,
+            friction: FrictionTier::Tier0Transparent,
             applicability: Applicability::new(vec![Variant::new(
                 "windows",
                 vec![Predicate::Platform(Platform::Windows)],

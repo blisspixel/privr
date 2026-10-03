@@ -26,6 +26,8 @@ When `privr` is loaded as an MCP server (`privr mcp`), the following tools are a
 - `privr_check`: Evaluates host privacy posture against a profile (`baseline`, `strict`, `restrictive`). Accepts `all` boolean to include passing controls, and `control` string to filter by ID or prefix.
 - `privr_explain`: Returns full privacy rationale, tradeoff, mitigation, and primary vendor documentation for a specific control identifier (e.g. `windows.storage.thumbnail-cache`).
 - `privr_plan`: Returns a dry-run report of proposed changes for drifted controls without modifying the host.
+- `privr_recommend`: Returns prioritized, deterministic remediation recommendations based on workload persona (`general`, `developer`, `creative`, `mobile`, `high-assurance`), friction budget, and posture dimension.
+- `privr_simulate`: Counterfactually simulates applying a profile or controls without modifying machine state, projecting posture vectors and friction breakdowns.
 
 ### Mutation tools (gated behind `--allow-apply`)
 
@@ -45,6 +47,12 @@ privr check --format json
 
 # Include passing controls
 privr check --all --format json
+
+# Workload-tailored deterministic recommendations
+privr recommend --workload developer --format json
+
+# Counterfactual simulation of policy application
+privr simulate --profile strict --format json
 
 # Explain a specific control
 privr explain windows.storage.thumbnail-cache

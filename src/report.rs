@@ -9,6 +9,7 @@ use crate::engine::evaluate::{Mode, evaluate};
 use crate::model::Profile;
 use crate::model::host::HostFacts;
 use crate::model::outcome::{ControlResult, Exception, Outcome, Summary};
+use crate::model::posture::PostureVector;
 use crate::ui::{Ui, style};
 
 /// Capitalise a lowercase platform identifier for display.
@@ -42,16 +43,43 @@ pub struct Report {
     /// what the report established.
     pub carried: usize,
     pub summary: Summary,
+    pub posture: PostureVector,
     pub results: Vec<ControlResult>,
 }
 
 impl Report {
     /// Evaluate every applicable control against this host.
     pub fn build(host: &HostFacts, profile: &str) -> Self {
+        Self::build_filtered(host, profile, &[], &[])
+    }
+
+    /// Evaluate filtered controls against this host.
+    pub fn build_filtered(
+        host: &HostFacts,
+        profile: &str,
+        control_filter: &[String],
+        section_filter: &[String],
+    ) -> Self {
         let selected_profile = profile.parse::<Profile>().unwrap_or_default();
         let context = catalog::Context::live(host);
-        let mut results: Vec<ControlResult> = catalog::all()
+        let all_controls = catalog::all();
+        let mut results: Vec<ControlResult> = all_controls
             .iter()
+            .filter(|c| {
+                let matches_control = control_filter.is_empty()
+                    || control_filter
+                        .iter()
+                        .any(|sel| c.spec.id == *sel || c.spec.id.starts_with(sel));
+                let matches_section = section_filter.is_empty()
+                    || section_filter.iter().any(|sec| {
+                        c.spec.section.eq_ignore_ascii_case(sec)
+                            || c.spec
+                                .section
+                                .to_ascii_lowercase()
+                                .starts_with(&sec.to_ascii_lowercase())
+                    });
+                matches_control && matches_section
+            })
             .map(|control| {
                 let mode = if control.spec.min_profile <= selected_profile {
                     Mode::Enforce
@@ -72,6 +100,10 @@ impl Report {
         results.sort_by(|a, b| (&a.section, &a.id).cmp(&(&b.section, &b.id)));
 
         let summary = Summary::of(&results);
+        let mut posture = PostureVector::new();
+        for r in &results {
+            posture.record(r.dimension, r.outcome);
+        }
 
         Self {
             schema: SCHEMA,
@@ -85,6 +117,7 @@ impl Report {
             edition: host.edition.known().cloned(),
             carried: results.len(),
             summary,
+            posture,
             results,
         }
     }
@@ -131,6 +164,22 @@ impl Report {
         out.push_str(&format!("{}{coverage}\n\n", field("Coverage")));
 
         out.push_str(&self.count_line(ui));
+
+        if !self.posture.dimensions.is_empty() {
+            out.push_str(&format!(
+                "\n{}\n",
+                ui.paint(style::HEADING, "Posture Dimensions")
+            ));
+            for (dim, metrics) in &self.posture.dimensions {
+                out.push_str(&format!(
+                    "  {:<26} pass: {:>2}   drift: {:>2}   concealed: {:>2}\n",
+                    dim.as_str(),
+                    metrics.compliant,
+                    metrics.drift,
+                    metrics.concealed
+                ));
+            }
+        }
 
         let mut sections: BTreeMap<&str, Vec<&ControlResult>> = BTreeMap::new();
         for result in &self.results {
@@ -252,6 +301,7 @@ mod tests {
             edition: None,
             carried: 0,
             summary: Summary::default(),
+            posture: PostureVector::new(),
             results: Vec::new(),
         }
     }

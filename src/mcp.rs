@@ -183,6 +183,10 @@ fn handle_tools_list(allow_apply: bool) -> Value {
                     "control": {
                         "type": "string",
                         "description": "Optional exact control ID or prefix filter"
+                    },
+                    "section": {
+                        "type": "string",
+                        "description": "Optional section filter"
                     }
                 }
             }
@@ -215,6 +219,57 @@ fn handle_tools_list(allow_apply: bool) -> Value {
                     "control": {
                         "type": "string",
                         "description": "Optional exact control ID or prefix filter"
+                    },
+                    "section": {
+                        "type": "string",
+                        "description": "Optional section filter"
+                    }
+                }
+            }
+        }),
+        json!({
+            "name": "privr_recommend",
+            "description": "Generate deterministic recommendations based on workload persona (general, developer, creative, mobile, high-assurance), optional maximum friction tier, and posture dimension.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "workload": {
+                        "type": "string",
+                        "description": "Workload persona: general, developer, creative, mobile, or high-assurance (default: general)",
+                        "enum": ["general", "developer", "creative", "mobile", "high-assurance"],
+                        "default": "general"
+                    },
+                    "max_friction": {
+                        "type": "string",
+                        "description": "Optional maximum tolerable friction tier: tier0-transparent, tier1-cosmetic, tier2-workflow-altering, or tier3-incompatible-or-tradeoff",
+                        "enum": ["tier0-transparent", "tier1-cosmetic", "tier2-workflow-altering", "tier3-incompatible-or-tradeoff"]
+                    },
+                    "dimension": {
+                        "type": "string",
+                        "description": "Optional posture dimension to restrict recommendations to: behavioral-commercial, forensic-residue, network-exposure, diagnostic-crash, or ambient-sensor",
+                        "enum": ["behavioral-commercial", "forensic-residue", "network-exposure", "diagnostic-crash", "ambient-sensor"]
+                    }
+                }
+            }
+        }),
+        json!({
+            "name": "privr_simulate",
+            "description": "Counterfactually simulate applying a profile or controls without modifying machine state. Returns projected posture vector, friction breakdown, and reboot/signout requirements.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "profile": {
+                        "type": "string",
+                        "description": "Policy profile to simulate (baseline, standard, strict; default is baseline)",
+                        "default": "baseline"
+                    },
+                    "control": {
+                        "type": "string",
+                        "description": "Optional exact control ID or prefix filter"
+                    },
+                    "section": {
+                        "type": "string",
+                        "description": "Optional section name filter"
                     }
                 }
             }
@@ -240,6 +295,10 @@ fn handle_tools_list(allow_apply: bool) -> Value {
                     "control": {
                         "type": "string",
                         "description": "Optional exact control ID or prefix filter"
+                    },
+                    "section": {
+                        "type": "string",
+                        "description": "Optional section filter"
                     }
                 },
                 "required": ["yes"]
@@ -329,6 +388,14 @@ fn handle_tools_call(
                     .results
                     .retain(|r| r.id == filter || r.id.starts_with(filter));
             }
+            if let Some(sec) = arguments.get("section").and_then(Value::as_str) {
+                report.results.retain(|r| {
+                    r.section.eq_ignore_ascii_case(sec)
+                        || r.section
+                            .to_ascii_lowercase()
+                            .starts_with(&sec.to_ascii_lowercase())
+                });
+            }
             if !arguments
                 .get("all")
                 .and_then(Value::as_bool)
@@ -393,6 +460,7 @@ fn handle_tools_call(
             let context = crate::catalog::Context::live(&host);
             let all_controls = crate::catalog::all();
             let filter = arguments.get("control").and_then(Value::as_str);
+            let section_filter = arguments.get("section").and_then(Value::as_str);
 
             let mut planned = Vec::new();
             let mut unautomated_drift = 0;
@@ -400,6 +468,16 @@ fn handle_tools_call(
                 if let Some(f) = filter
                     && c.spec.id != f
                     && !c.spec.id.starts_with(f)
+                {
+                    continue;
+                }
+                if let Some(s) = section_filter
+                    && !c.spec.section.eq_ignore_ascii_case(s)
+                    && !c
+                        .spec
+                        .section
+                        .to_ascii_lowercase()
+                        .starts_with(&s.to_ascii_lowercase())
                 {
                     continue;
                 }
@@ -472,6 +550,7 @@ fn handle_tools_call(
             let context = crate::catalog::Context::live(&host);
             let all_controls = crate::catalog::all();
             let filter = arguments.get("control").and_then(Value::as_str);
+            let section_filter = arguments.get("section").and_then(Value::as_str);
 
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -487,6 +566,7 @@ fn handle_tools_call(
                 operations: Vec::new(),
             };
 
+            // Verify journal storage is writable before mutating system state.
             if let Err(e) = crate::journal::save_transaction(&journal) {
                 return tool_error(format!("Failed to initialize transaction journal: {e}"));
             }
@@ -495,6 +575,16 @@ fn handle_tools_call(
                 if let Some(f) = filter
                     && c.spec.id != f
                     && !c.spec.id.starts_with(f)
+                {
+                    continue;
+                }
+                if let Some(s) = section_filter
+                    && !c.spec.section.eq_ignore_ascii_case(s)
+                    && !c
+                        .spec
+                        .section
+                        .to_ascii_lowercase()
+                        .starts_with(&s.to_ascii_lowercase())
                 {
                     continue;
                 }
@@ -619,6 +709,142 @@ fn handle_tools_call(
                 "schema": 1,
                 "transaction_id": tx_id,
                 "restored_changes": restored
+            });
+            tool_success(serde_json::to_string_pretty(&report).unwrap_or_default())
+        }
+        "privr_recommend" => {
+            let workload_str = arguments
+                .get("workload")
+                .and_then(Value::as_str)
+                .unwrap_or("general");
+            let workload = match workload_str.to_ascii_lowercase().as_str() {
+                "general" => crate::model::posture::WorkloadPersona::General,
+                "developer" => crate::model::posture::WorkloadPersona::Developer,
+                "creative" => crate::model::posture::WorkloadPersona::Creative,
+                "mobile" => crate::model::posture::WorkloadPersona::Mobile,
+                "high-assurance" | "high_assurance" => {
+                    crate::model::posture::WorkloadPersona::HighAssurance
+                }
+                other => {
+                    return tool_error(format!(
+                        "Invalid workload '{other}'; must be general, developer, creative, mobile, or high-assurance"
+                    ));
+                }
+            };
+
+            let max_friction = match arguments.get("max_friction").and_then(Value::as_str) {
+                Some(s) => match s.to_ascii_lowercase().as_str() {
+                    "tier0-transparent" | "tier0" | "transparent" => {
+                        Some(crate::model::posture::FrictionTier::Tier0Transparent)
+                    }
+                    "tier1-cosmetic" | "tier1" | "cosmetic" => {
+                        Some(crate::model::posture::FrictionTier::Tier1Cosmetic)
+                    }
+                    "tier2-workflow-altering" | "tier2" | "workflow-altering" => {
+                        Some(crate::model::posture::FrictionTier::Tier2WorkflowAltering)
+                    }
+                    "tier3-incompatible-or-tradeoff" | "tier3" | "incompatible" => {
+                        Some(crate::model::posture::FrictionTier::Tier3IncompatibleOrTradeoff)
+                    }
+                    other => {
+                        return tool_error(format!(
+                            "Invalid max_friction '{other}'; must be tier0-transparent, tier1-cosmetic, tier2-workflow-altering, or tier3-incompatible-or-tradeoff"
+                        ));
+                    }
+                },
+                None => None,
+            };
+
+            let dimension = match arguments.get("dimension").and_then(Value::as_str) {
+                Some(s) => match s.to_ascii_lowercase().as_str() {
+                    "behavioral-commercial" | "behavioral" => {
+                        Some(crate::model::posture::PostureDimension::BehavioralCommercial)
+                    }
+                    "forensic-residue" | "forensic" => {
+                        Some(crate::model::posture::PostureDimension::ForensicResidue)
+                    }
+                    "network-exposure" | "network" => {
+                        Some(crate::model::posture::PostureDimension::NetworkExposure)
+                    }
+                    "diagnostic-crash" | "diagnostic" => {
+                        Some(crate::model::posture::PostureDimension::DiagnosticCrash)
+                    }
+                    "ambient-sensor" | "ambient" => {
+                        Some(crate::model::posture::PostureDimension::AmbientSensor)
+                    }
+                    other => {
+                        return tool_error(format!(
+                            "Invalid dimension '{other}'; must be behavioral-commercial, forensic-residue, network-exposure, diagnostic-crash, or ambient-sensor"
+                        ));
+                    }
+                },
+                None => None,
+            };
+
+            let host = crate::platform::discover();
+            let context = crate::catalog::Context::live(&host);
+            let all_controls = crate::catalog::all();
+            let recommendations = crate::engine::recommend::generate_recommendations(
+                &all_controls,
+                &context,
+                &host,
+                workload,
+                max_friction,
+                dimension,
+            );
+
+            let report = json!({
+                "schema": 1,
+                "platform": host.platform.as_str(),
+                "workload": workload.as_str(),
+                "max_friction": max_friction.map(|f| f.as_str()),
+                "dimension": dimension.map(|d| d.as_str()),
+                "recommendations_count": recommendations.len(),
+                "recommendations": recommendations
+            });
+            tool_success(serde_json::to_string_pretty(&report).unwrap_or_default())
+        }
+        "privr_simulate" => {
+            let profile_str = arguments
+                .get("profile")
+                .and_then(Value::as_str)
+                .unwrap_or("baseline");
+            let profile = parse_profile(profile_str)?;
+            let control_filter = arguments
+                .get("control")
+                .and_then(Value::as_str)
+                .map(|s| vec![s.to_owned()])
+                .unwrap_or_default();
+            let section_filter = arguments
+                .get("section")
+                .and_then(Value::as_str)
+                .map(|s| vec![s.to_owned()])
+                .unwrap_or_default();
+
+            let host = crate::platform::discover();
+            let context = crate::catalog::Context::live(&host);
+            let all_controls = crate::catalog::all();
+            let simulation = crate::engine::simulate::simulate_profile(
+                &all_controls,
+                &context,
+                &host,
+                profile,
+                &control_filter,
+                &section_filter,
+            );
+
+            let report = json!({
+                "schema": 1,
+                "platform": host.platform.as_str(),
+                "profile": simulation.profile,
+                "simulated_changes": simulation.simulated_changes,
+                "unautomated_drift": simulation.unautomated_drift,
+                "current_posture": simulation.current_posture,
+                "simulated_posture": simulation.simulated_posture,
+                "friction_breakdown": simulation.friction_breakdown,
+                "pending_restart_required": simulation.pending_restart_required,
+                "pending_signout_required": simulation.pending_signout_required,
+                "simulated_control_ids": simulation.simulated_control_ids
             });
             tool_success(serde_json::to_string_pretty(&report).unwrap_or_default())
         }
@@ -951,5 +1177,90 @@ mod tests {
         let out_str = String::from_utf8(out).expect("utf8 stdout");
         assert!(out_str.contains("\"id\":1"));
         assert!(out_str.contains("Parse error"));
+    }
+
+    #[test]
+    fn privr_recommend_evaluates_workloads_and_friction_budgets() {
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 20,
+            "method": "tools/call",
+            "params": {
+                "name": "privr_recommend",
+                "arguments": {
+                    "workload": "developer",
+                    "max_friction": "tier1-cosmetic"
+                }
+            }
+        });
+        let mut err = Vec::new();
+        let resp = handle_message(&req, false, &mut err).expect("response");
+        assert_eq!(resp["id"], 20);
+        let text = resp["result"]["content"][0]["text"].as_str().expect("text");
+        assert!(text.contains("recommendations"));
+        assert!(text.contains("developer"));
+    }
+
+    #[test]
+    fn privr_simulate_evaluates_counterfactual_posture() {
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 21,
+            "method": "tools/call",
+            "params": {
+                "name": "privr_simulate",
+                "arguments": {
+                    "profile": "baseline"
+                }
+            }
+        });
+        let mut err = Vec::new();
+        let resp = handle_message(&req, false, &mut err).expect("response");
+        assert_eq!(resp["id"], 21);
+        let text = resp["result"]["content"][0]["text"].as_str().expect("text");
+        assert!(text.contains("simulated_changes"));
+        assert!(text.contains("current_posture"));
+        assert!(text.contains("simulated_posture"));
+    }
+
+    #[test]
+    fn privr_check_and_plan_support_section_filter() {
+        let check_req = json!({
+            "jsonrpc": "2.0",
+            "id": 22,
+            "method": "tools/call",
+            "params": {
+                "name": "privr_check",
+                "arguments": {
+                    "profile": "baseline",
+                    "section": "advertising",
+                    "all": true
+                }
+            }
+        });
+        let mut err = Vec::new();
+        let resp = handle_message(&check_req, false, &mut err).expect("response");
+        assert_eq!(resp["id"], 22);
+        let text = resp["result"]["content"][0]["text"].as_str().expect("text");
+        assert!(text.contains("results"));
+
+        let plan_req = json!({
+            "jsonrpc": "2.0",
+            "id": 23,
+            "method": "tools/call",
+            "params": {
+                "name": "privr_plan",
+                "arguments": {
+                    "profile": "baseline",
+                    "section": "advertising"
+                }
+            }
+        });
+        let plan_resp = handle_message(&plan_req, false, &mut err).expect("response");
+        assert_eq!(plan_resp["id"], 23);
+        let plan_text = plan_resp["result"]["content"][0]["text"]
+            .as_str()
+            .expect("text");
+        assert!(plan_text.contains("planned_changes"));
     }
 }

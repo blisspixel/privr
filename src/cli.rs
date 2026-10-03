@@ -20,6 +20,9 @@ pub struct Cli {
     pub command: Option<Command>,
 }
 
+pub use crate::model::posture::{FrictionTier, PostureDimension, WorkloadPersona};
+pub use crate::model::profile::Profile;
+
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// Check the current machine without changing it.
@@ -34,6 +37,9 @@ pub enum Command {
         /// Check only an exact control ID or documented ID prefix. Repeatable.
         #[arg(long = "control")]
         controls: Vec<String>,
+        /// Check only controls in a specific section. Repeatable.
+        #[arg(long = "section")]
+        sections: Vec<String>,
         /// Include passing controls in text output.
         #[arg(long)]
         all: bool,
@@ -49,6 +55,9 @@ pub enum Command {
         /// Plan only an exact control ID or documented ID prefix. Repeatable.
         #[arg(long = "control")]
         controls: Vec<String>,
+        /// Plan only controls in a specific section. Repeatable.
+        #[arg(long = "section")]
+        sections: Vec<String>,
     },
     /// Recompute, confirm, apply, and verify supported changes.
     Apply {
@@ -67,6 +76,9 @@ pub enum Command {
         /// Apply only an exact control ID or documented ID prefix. Repeatable.
         #[arg(long = "control")]
         controls: Vec<String>,
+        /// Apply only controls in a specific section. Repeatable.
+        #[arg(long = "section")]
+        sections: Vec<String>,
     },
     /// Roll back a transaction recorded by `privr apply`.
     #[command(visible_alias = "restore")]
@@ -76,6 +88,30 @@ pub enum Command {
         /// Confirm that settings may be restored.
         #[arg(long)]
         yes: bool,
+    },
+    /// Recommend privacy posture improvements based on workload and friction budget.
+    Recommend {
+        /// Workload persona (general, developer, creative, mobile, high-assurance).
+        #[arg(long, value_enum, default_value_t = WorkloadPersona::General)]
+        workload: WorkloadPersona,
+        /// Maximum tolerable friction tier.
+        #[arg(long, value_enum)]
+        max_friction: Option<FrictionTier>,
+        /// Filter recommendations to a specific posture dimension.
+        #[arg(long, value_enum)]
+        dimension: Option<PostureDimension>,
+    },
+    /// Counterfactually simulate applying a profile or controls without modifying machine state.
+    Simulate {
+        /// Target policy profile to simulate.
+        #[arg(long, value_enum, default_value_t = Profile::Baseline)]
+        profile: Profile,
+        /// Simulate only an exact control ID or documented ID prefix. Repeatable.
+        #[arg(long = "control")]
+        controls: Vec<String>,
+        /// Simulate only controls in a specific section. Repeatable.
+        #[arg(long = "section")]
+        sections: Vec<String>,
     },
     /// List the catalogue: every control this build can examine.
     List {
@@ -121,9 +157,8 @@ pub enum OutputFormat {
     Json,
 }
 
-pub use crate::model::profile::Profile;
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+
 pub enum Platform {
     Auto,
     Windows,

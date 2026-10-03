@@ -81,11 +81,12 @@ impl Report {
                 matches_control && matches_section
             })
             .map(|control| {
-                let mode = if control.spec.min_profile <= selected_profile {
-                    Mode::Enforce
-                } else {
-                    Mode::Ignore
-                };
+                let mode =
+                    if !control_filter.is_empty() || control.spec.min_profile <= selected_profile {
+                        Mode::Enforce
+                    } else {
+                        Mode::Ignore
+                    };
                 evaluate(
                     &control.spec,
                     mode,

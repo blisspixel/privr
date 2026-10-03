@@ -236,6 +236,8 @@ pub struct ControlSpec {
     pub remediation_reason: Option<RemediationReason>,
     /// Minimum profile level required to enforce this control.
     pub min_profile: Profile,
+    /// Whether applying or rolling back this control requires elevated administrative privileges.
+    pub requires_elevation: bool,
 }
 
 /// Evaluate one control.
@@ -417,6 +419,7 @@ mod tests {
             remediation: Remediation::Automatic,
             remediation_reason: None,
             min_profile: Profile::Baseline,
+            requires_elevation: false,
         }
     }
 

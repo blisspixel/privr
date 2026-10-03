@@ -216,6 +216,16 @@ fn handle_tools_list(allow_apply: bool) -> Value {
                         "description": "Policy profile to plan (baseline, standard, strict; default is baseline)",
                         "default": "baseline"
                     },
+                    "workload": {
+                        "type": "string",
+                        "description": "Optional workload persona to plan recommendations for: general, developer, creative, mobile, or high-assurance",
+                        "enum": ["general", "developer", "creative", "mobile", "high-assurance"]
+                    },
+                    "max_friction": {
+                        "type": "string",
+                        "description": "Optional maximum tolerable friction tier: tier0-transparent, tier1-cosmetic, tier2-workflow-altering, or tier3-incompatible-or-tradeoff",
+                        "enum": ["tier0-transparent", "tier1-cosmetic", "tier2-workflow-altering", "tier3-incompatible-or-tradeoff"]
+                    },
                     "control": {
                         "type": "string",
                         "description": "Optional exact control ID or prefix filter"
@@ -287,6 +297,16 @@ fn handle_tools_list(allow_apply: bool) -> Value {
                         "type": "string",
                         "description": "Policy profile to apply (default is baseline)",
                         "default": "baseline"
+                    },
+                    "workload": {
+                        "type": "string",
+                        "description": "Optional workload persona to apply recommendations for: general, developer, creative, mobile, or high-assurance",
+                        "enum": ["general", "developer", "creative", "mobile", "high-assurance"]
+                    },
+                    "max_friction": {
+                        "type": "string",
+                        "description": "Optional maximum tolerable friction tier: tier0-transparent, tier1-cosmetic, tier2-workflow-altering, or tier3-incompatible-or-tradeoff",
+                        "enum": ["tier0-transparent", "tier1-cosmetic", "tier2-workflow-altering", "tier3-incompatible-or-tradeoff"]
                     },
                     "yes": {
                         "type": "boolean",
@@ -451,19 +471,44 @@ fn handle_tools_call(
             }
         }
         "privr_plan" => {
-            let profile_str = arguments
-                .get("profile")
-                .and_then(Value::as_str)
-                .unwrap_or("baseline");
-            let profile = parse_profile(profile_str)?;
             let host = crate::platform::discover();
             let context = crate::catalog::Context::live(&host);
             let all_controls = crate::catalog::all();
             let filter = arguments.get("control").and_then(Value::as_str);
             let section_filter = arguments.get("section").and_then(Value::as_str);
 
+            let workload = match arguments.get("workload").and_then(Value::as_str) {
+                Some(w) => Some(parse_workload(w)?),
+                None => None,
+            };
+            let max_friction = match arguments.get("max_friction").and_then(Value::as_str) {
+                Some(f) => Some(parse_max_friction(f)?),
+                None => None,
+            };
+
+            let profile_str = arguments
+                .get("profile")
+                .and_then(Value::as_str)
+                .unwrap_or("baseline");
+            let profile = parse_profile(profile_str)?;
+
+            let recommended_ids: Option<std::collections::BTreeSet<String>> = workload.map(|w| {
+                crate::engine::recommend::generate_recommendations(
+                    &all_controls,
+                    &context,
+                    &host,
+                    w,
+                    max_friction,
+                    None,
+                )
+                .into_iter()
+                .map(|r| r.control_id)
+                .collect()
+            });
+
             let mut planned = Vec::new();
             let mut unautomated_drift = 0;
+            let mut requires_elevation_drift = 0;
             for c in &all_controls {
                 if let Some(f) = filter
                     && c.spec.id != f
@@ -481,8 +526,16 @@ fn handle_tools_call(
                 {
                     continue;
                 }
+                if let Some(recs) = &recommended_ids
+                    && !recs.contains(&c.spec.id)
+                {
+                    continue;
+                }
                 let resolution = c.observe(&context);
-                let mode = if c.spec.min_profile <= profile {
+                let mode = if filter.is_some()
+                    || recommended_ids.is_some()
+                    || c.spec.min_profile <= profile
+                {
                     crate::engine::evaluate::Mode::Enforce
                 } else {
                     crate::engine::evaluate::Mode::Ignore
@@ -498,6 +551,11 @@ fn handle_tools_call(
                     if eval.remediation == crate::model::outcome::Remediation::Automatic
                         && c.apply.is_some()
                     {
+                        if c.spec.requires_elevation
+                            && host.elevated == crate::model::host::Fact::Known(false)
+                        {
+                            requires_elevation_drift += 1;
+                        }
                         let current_str = resolution
                             .state
                             .map(|s| s.0)
@@ -507,7 +565,8 @@ fn handle_tools_call(
                             "title": c.title,
                             "section": c.spec.section,
                             "current": current_str,
-                            "desired": c.spec.desired.0
+                            "desired": c.spec.desired.0,
+                            "requires_elevation": c.spec.requires_elevation
                         }));
                     } else {
                         unautomated_drift += 1;
@@ -515,12 +574,20 @@ fn handle_tools_call(
                 }
             }
 
+            let profile_name = if let Some(w) = workload {
+                format!("workload:{}", w.as_str())
+            } else {
+                profile.as_str().to_owned()
+            };
+
             let report = json!({
                 "schema": 1,
-                "profile": profile.as_str(),
+                "profile": profile_name,
+                "workload": workload.map(|w| w.as_str()),
                 "platform": host.platform.as_str(),
                 "planned_changes": planned.len(),
                 "unautomated_drift": unautomated_drift,
+                "requires_elevation_drift": requires_elevation_drift,
                 "changes": planned
             });
             tool_success(serde_json::to_string_pretty(&report).unwrap_or_default())
@@ -541,28 +608,58 @@ fn handle_tools_call(
                         .to_owned(),
                 );
             }
+            let host = crate::platform::discover();
+            let is_elevated = host.elevated == crate::model::host::Fact::Known(true);
+            let context = crate::catalog::Context::live(&host);
+            let all_controls = crate::catalog::all();
+            let filter = arguments.get("control").and_then(Value::as_str);
+            let section_filter = arguments.get("section").and_then(Value::as_str);
+
+            let workload = match arguments.get("workload").and_then(Value::as_str) {
+                Some(w) => Some(parse_workload(w)?),
+                None => None,
+            };
+            let max_friction = match arguments.get("max_friction").and_then(Value::as_str) {
+                Some(f) => Some(parse_max_friction(f)?),
+                None => None,
+            };
+
             let profile_str = arguments
                 .get("profile")
                 .and_then(Value::as_str)
                 .unwrap_or("baseline");
             let profile = parse_profile(profile_str)?;
-            let host = crate::platform::discover();
-            let context = crate::catalog::Context::live(&host);
-            let all_controls = crate::catalog::all();
-            let filter = arguments.get("control").and_then(Value::as_str);
-            let section_filter = arguments.get("section").and_then(Value::as_str);
+
+            let recommended_ids: Option<std::collections::BTreeSet<String>> = workload.map(|w| {
+                crate::engine::recommend::generate_recommendations(
+                    &all_controls,
+                    &context,
+                    &host,
+                    w,
+                    max_friction,
+                    None,
+                )
+                .into_iter()
+                .map(|r| r.control_id)
+                .collect()
+            });
 
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default();
             let timestamp = format!("{}.{:03}", now.as_secs(), now.subsec_millis());
             let tx_id = format!("tx-{}-{}", now.as_secs(), now.subsec_millis());
+            let profile_name = if let Some(w) = workload {
+                format!("workload:{}", w.as_str())
+            } else {
+                profile.as_str().to_owned()
+            };
             let mut journal = crate::journal::TransactionJournal {
                 schema: crate::journal::JOURNAL_SCHEMA,
                 transaction_id: tx_id.clone(),
                 timestamp: timestamp.clone(),
                 platform: host.platform.as_str().to_owned(),
-                profile: profile.as_str().to_owned(),
+                profile: profile_name.clone(),
                 operations: Vec::new(),
             };
 
@@ -570,6 +667,9 @@ fn handle_tools_call(
             if let Err(e) = crate::journal::save_transaction(&journal) {
                 return tool_error(format!("Failed to initialize transaction journal: {e}"));
             }
+
+            let mut unautomated_drift = 0;
+            let mut requires_elevation_drift = 0;
 
             for c in &all_controls {
                 if let Some(f) = filter
@@ -588,8 +688,16 @@ fn handle_tools_call(
                 {
                     continue;
                 }
+                if let Some(recs) = &recommended_ids
+                    && !recs.contains(&c.spec.id)
+                {
+                    continue;
+                }
                 let resolution = c.observe(&context);
-                let mode = if c.spec.min_profile <= profile {
+                let mode = if filter.is_some()
+                    || recommended_ids.is_some()
+                    || c.spec.min_profile <= profile
+                {
                     crate::engine::evaluate::Mode::Enforce
                 } else {
                     crate::engine::evaluate::Mode::Ignore
@@ -605,6 +713,20 @@ fn handle_tools_call(
                     && eval.remediation == crate::model::outcome::Remediation::Automatic
                     && c.apply.is_some()
                 {
+                    if c.spec.requires_elevation && !is_elevated {
+                        if filter.is_some() {
+                            let initial_path =
+                                crate::journal::transactions_dir().join(format!("{tx_id}.json"));
+                            let _ = std::fs::remove_file(initial_path);
+                            return tool_error(format!(
+                                "Control '{}' requires administrative privileges (run privr as Administrator).",
+                                c.spec.id
+                            ));
+                        }
+                        requires_elevation_drift += 1;
+                        continue;
+                    }
+
                     match c.apply(&context) {
                         Some(Ok(op)) => {
                             journal.operations.push(crate::journal::OperationJournal {
@@ -631,6 +753,8 @@ fn handle_tools_call(
                         }
                         None => {}
                     }
+                } else if eval.outcome == crate::model::outcome::Outcome::Drift {
+                    unautomated_drift += 1;
                 }
             }
 
@@ -641,10 +765,13 @@ fn handle_tools_call(
 
             let report = json!({
                 "schema": 1,
-                "profile": profile.as_str(),
+                "profile": profile_name,
+                "workload": workload.map(|w| w.as_str()),
                 "platform": host.platform.as_str(),
-                "transaction_id": tx_id,
-                "applied_changes": journal.operations.len()
+                "transaction_id": if journal.operations.is_empty() { "" } else { &tx_id },
+                "applied_changes": journal.operations.len(),
+                "unautomated_drift": unautomated_drift,
+                "requires_elevation_drift": requires_elevation_drift
             });
             tool_success(serde_json::to_string_pretty(&report).unwrap_or_default())
         }
@@ -884,6 +1011,47 @@ fn parse_profile(p: &str) -> Result<Profile, (i64, String)> {
         other => Err((
             -32602,
             format!("Invalid profile '{other}'; must be baseline, strict, or restrictive"),
+        )),
+    }
+}
+
+fn parse_workload(s: &str) -> Result<crate::model::posture::WorkloadPersona, (i64, String)> {
+    match s.to_ascii_lowercase().as_str() {
+        "general" => Ok(crate::model::posture::WorkloadPersona::General),
+        "developer" => Ok(crate::model::posture::WorkloadPersona::Developer),
+        "creative" => Ok(crate::model::posture::WorkloadPersona::Creative),
+        "mobile" => Ok(crate::model::posture::WorkloadPersona::Mobile),
+        "high-assurance" | "high_assurance" => {
+            Ok(crate::model::posture::WorkloadPersona::HighAssurance)
+        }
+        other => Err((
+            -32602,
+            format!(
+                "Invalid workload '{other}'; must be general, developer, creative, mobile, or high-assurance"
+            ),
+        )),
+    }
+}
+
+fn parse_max_friction(s: &str) -> Result<crate::model::posture::FrictionTier, (i64, String)> {
+    match s.to_ascii_lowercase().as_str() {
+        "tier0-transparent" | "tier0" | "transparent" => {
+            Ok(crate::model::posture::FrictionTier::Tier0Transparent)
+        }
+        "tier1-cosmetic" | "tier1" | "cosmetic" => {
+            Ok(crate::model::posture::FrictionTier::Tier1Cosmetic)
+        }
+        "tier2-workflow-altering" | "tier2" | "workflow-altering" => {
+            Ok(crate::model::posture::FrictionTier::Tier2WorkflowAltering)
+        }
+        "tier3-incompatible-or-tradeoff" | "tier3" | "incompatible" => {
+            Ok(crate::model::posture::FrictionTier::Tier3IncompatibleOrTradeoff)
+        }
+        other => Err((
+            -32602,
+            format!(
+                "Invalid max_friction '{other}'; must be tier0-transparent, tier1-cosmetic, tier2-workflow-altering, or tier3-incompatible-or-tradeoff"
+            ),
         )),
     }
 }
@@ -1262,5 +1430,86 @@ mod tests {
             .as_str()
             .expect("text");
         assert!(plan_text.contains("planned_changes"));
+    }
+
+    #[test]
+    fn privr_plan_supports_workload_and_max_friction() {
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 30,
+            "method": "tools/call",
+            "params": {
+                "name": "privr_plan",
+                "arguments": {
+                    "workload": "developer",
+                    "max_friction": "tier1-cosmetic"
+                }
+            }
+        });
+        let mut err = Vec::new();
+        let resp = handle_message(&req, false, &mut err).expect("response");
+        assert_eq!(resp["id"], 30);
+        let text = resp["result"]["content"][0]["text"].as_str().expect("text");
+        let val: Value = serde_json::from_str(text).expect("json");
+        assert_eq!(val["workload"], "developer");
+        assert!(val["planned_changes"].as_u64().is_some());
+    }
+
+    #[test]
+    fn privr_apply_supports_workload_and_max_friction() {
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 31,
+            "method": "tools/call",
+            "params": {
+                "name": "privr_apply",
+                "arguments": {
+                    "workload": "developer",
+                    "max_friction": "tier0-transparent",
+                    "yes": true
+                }
+            }
+        });
+        let mut err = Vec::new();
+        let resp = handle_message(&req, true, &mut err).expect("response");
+        assert_eq!(resp["id"], 31);
+        let text = resp["result"]["content"][0]["text"].as_str().expect("text");
+        let val: Value = serde_json::from_str(text).expect("json");
+        assert_eq!(val["workload"], "developer");
+        assert!(val["applied_changes"].as_u64().is_some());
+    }
+
+    #[test]
+    fn privr_apply_unelevated_explicit_machine_control_fails_safely() {
+        let host = crate::platform::discover();
+        if host.elevated == crate::model::host::Fact::Known(false) {
+            let control_id = if cfg!(windows) {
+                "windows.security.llmnr"
+            } else if cfg!(target_os = "macos") {
+                "analytics.share-mac"
+            } else {
+                "debian.popularity-contest"
+            };
+            let req = json!({
+                "jsonrpc": "2.0",
+                "id": 32,
+                "method": "tools/call",
+                "params": {
+                    "name": "privr_apply",
+                    "arguments": {
+                        "control": control_id,
+                        "yes": true
+                    }
+                }
+            });
+            let mut err = Vec::new();
+            let resp = handle_message(&req, true, &mut err).expect("response");
+            assert_eq!(resp["id"], 32);
+            assert_eq!(resp["result"]["isError"], true);
+            let text = resp["result"]["content"][0]["text"].as_str().expect("text");
+            assert!(
+                text.contains("administrative privileges") || text.contains("requires elevation")
+            );
+        }
     }
 }

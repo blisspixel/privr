@@ -47,11 +47,17 @@ pub enum Command {
     /// Show the exact supported changes without applying them.
     Plan {
         /// Privacy policy profile to evaluate.
-        #[arg(long, value_enum)]
+        #[arg(long, value_enum, conflicts_with = "workload")]
         profile: Option<Profile>,
         /// Plan from a custom local policy instead of a built-in profile.
         #[arg(long, conflicts_with = "profile")]
         policy: Option<PathBuf>,
+        /// Workload persona to generate adaptive recommendations for (general, developer, creative, mobile, high-assurance).
+        #[arg(long, value_enum)]
+        workload: Option<WorkloadPersona>,
+        /// Maximum tolerable friction tier for workload recommendations.
+        #[arg(long, value_enum)]
+        max_friction: Option<FrictionTier>,
         /// Plan only an exact control ID or documented ID prefix. Repeatable.
         #[arg(long = "control")]
         controls: Vec<String>,
@@ -62,11 +68,17 @@ pub enum Command {
     /// Recompute, confirm, apply, and verify supported changes.
     Apply {
         /// Privacy policy profile to apply.
-        #[arg(long, value_enum)]
+        #[arg(long, value_enum, conflicts_with = "workload")]
         profile: Option<Profile>,
         /// Apply a custom local policy instead of a built-in profile.
         #[arg(long, conflicts_with = "profile")]
         policy: Option<PathBuf>,
+        /// Workload persona to apply adaptive recommendations for (general, developer, creative, mobile, high-assurance).
+        #[arg(long, value_enum)]
+        workload: Option<WorkloadPersona>,
+        /// Maximum tolerable friction tier for workload recommendations.
+        #[arg(long, value_enum)]
+        max_friction: Option<FrictionTier>,
         /// Compatibility alias for `privr plan`.
         #[arg(long)]
         dry_run: bool,

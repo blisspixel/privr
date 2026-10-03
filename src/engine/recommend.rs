@@ -140,6 +140,7 @@ mod tests {
                 remediation: crate::model::outcome::Remediation::Automatic,
                 remediation_reason: None,
                 min_profile: Profile::Baseline,
+                requires_elevation: false,
             },
             title: "Test Control",
             summary: "Test Summary",

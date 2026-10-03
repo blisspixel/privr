@@ -244,12 +244,14 @@ pub fn can_write_machine_scope() -> Option<bool> {
 
 /// Write a raw value to the registry.
 ///
-/// Only CurrentUser targets can be written without elevation.
+/// CurrentUser targets can be written without elevation; LocalMachine targets
+/// succeed when the process has administrative rights or fail with access denied.
 pub fn write_raw(target: &Target, value: &RawValue) -> Result<(), u32> {
-    if target.hive != Hive::CurrentUser {
-        return Err(ERROR_ACCESS_DENIED);
-    }
-    let mut options = CURRENT_USER.options();
+    let root = match target.hive {
+        Hive::CurrentUser => CURRENT_USER,
+        Hive::LocalMachine => LOCAL_MACHINE,
+    };
+    let mut options = root.options();
     options.read().write().create();
     match target.view {
         View::Native => {}
@@ -274,10 +276,11 @@ pub fn write_raw(target: &Target, value: &RawValue) -> Result<(), u32> {
 
 /// Remove a value from the registry.
 pub fn delete_value(target: &Target) -> Result<(), u32> {
-    if target.hive != Hive::CurrentUser {
-        return Err(ERROR_ACCESS_DENIED);
-    }
-    let mut options = CURRENT_USER.options();
+    let root = match target.hive {
+        Hive::CurrentUser => CURRENT_USER,
+        Hive::LocalMachine => LOCAL_MACHINE,
+    };
+    let mut options = root.options();
     options.read().write();
     match target.view {
         View::Native => {}

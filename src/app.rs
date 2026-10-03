@@ -13,15 +13,18 @@ struct PlanItem {
     section: String,
     current: String,
     desired: String,
+    requires_elevation: bool,
 }
 
 #[derive(Serialize)]
 struct PlanReport {
     schema: u8,
     profile: String,
+    workload: Option<WorkloadPersona>,
     platform: String,
     planned_changes: usize,
     unautomated_drift: usize,
+    requires_elevation_drift: usize,
     changes: Vec<PlanItem>,
 }
 
@@ -29,10 +32,12 @@ struct PlanReport {
 struct ApplyReport {
     schema: u8,
     profile: String,
+    workload: Option<WorkloadPersona>,
     platform: String,
     transaction_id: String,
     applied_changes: usize,
     unautomated_drift: usize,
+    requires_elevation_drift: usize,
 }
 
 #[derive(Serialize)]
@@ -96,6 +101,8 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
         Command::Plan {
             profile,
             policy,
+            workload,
+            max_friction,
             controls,
             sections,
         } => {
@@ -103,16 +110,32 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                 let _ = writeln!(
                     err,
                     "privr: custom policy files are not implemented yet; \
-                     omit --policy to use a built-in profile"
+                     omit --policy to use a built-in profile or workload persona"
                 );
                 return 2;
             }
-            let profile = profile.unwrap_or_default();
             let host = crate::platform::discover();
             let context = crate::catalog::Context::live(&host);
             let all_controls = crate::catalog::all();
+            let profile_val = profile.unwrap_or_default();
+
+            let recommended_ids: Option<std::collections::BTreeSet<String>> = workload.map(|w| {
+                crate::engine::recommend::generate_recommendations(
+                    &all_controls,
+                    &context,
+                    &host,
+                    w,
+                    max_friction,
+                    None,
+                )
+                .into_iter()
+                .map(|r| r.control_id)
+                .collect()
+            });
+
             let mut planned = Vec::new();
             let mut unautomated_drift = 0;
+            let mut requires_elevation_drift = 0;
 
             for c in &all_controls {
                 let matches_control = controls.is_empty()
@@ -130,8 +153,16 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                 if !matches_control || !matches_section {
                     continue;
                 }
+                if let Some(recs) = &recommended_ids
+                    && !recs.contains(&c.spec.id)
+                {
+                    continue;
+                }
                 let resolution = c.observe(&context);
-                let mode = if c.spec.min_profile <= profile {
+                let mode = if !controls.is_empty()
+                    || recommended_ids.is_some()
+                    || c.spec.min_profile <= profile_val
+                {
                     crate::engine::evaluate::Mode::Enforce
                 } else {
                     crate::engine::evaluate::Mode::Ignore
@@ -147,6 +178,11 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                     if eval.remediation == crate::model::outcome::Remediation::Automatic
                         && c.apply.is_some()
                     {
+                        if c.spec.requires_elevation
+                            && host.elevated == crate::model::host::Fact::Known(false)
+                        {
+                            requires_elevation_drift += 1;
+                        }
                         let current_str = resolution
                             .state
                             .map(|s| s.0)
@@ -157,6 +193,7 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                             section: c.spec.section.clone(),
                             current: current_str,
                             desired: c.spec.desired.0.clone(),
+                            requires_elevation: c.spec.requires_elevation,
                         });
                     } else {
                         unautomated_drift += 1;
@@ -164,18 +201,30 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                 }
             }
 
+            let profile_name = if let Some(w) = workload {
+                format!("workload:{}", w.as_str())
+            } else {
+                profile_val.as_str().to_owned()
+            };
+
             let plan_report = PlanReport {
                 schema: 1,
-                profile: profile.as_str().to_owned(),
+                profile: profile_name,
+                workload,
                 platform: host.platform.as_str().to_owned(),
                 planned_changes: planned.len(),
                 unautomated_drift,
+                requires_elevation_drift,
                 changes: planned,
             };
 
             match format {
                 OutputFormat::Text => {
-                    let _ = writeln!(out, "Profile  {}", plan_report.profile);
+                    if let Some(w) = workload {
+                        let _ = writeln!(out, "Workload {}", w.as_str());
+                    } else {
+                        let _ = writeln!(out, "Profile  {}", plan_report.profile);
+                    }
                     let _ = writeln!(out, "Platform {}", plan_report.platform);
                     if plan_report.planned_changes == 0 {
                         if plan_report.unautomated_drift > 0 {
@@ -194,7 +243,15 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                         );
                         for item in &plan_report.changes {
                             let _ = writeln!(out, "{}", item.section);
-                            let _ = writeln!(out, "  {}", item.id);
+                            let elev_tag = if item.requires_elevation {
+                                format!(
+                                    " {}",
+                                    ui.paint(crate::ui::style::CAVEAT, "[requires elevation]")
+                                )
+                            } else {
+                                String::new()
+                            };
+                            let _ = writeln!(out, "  {}{}", item.id, elev_tag);
                             let _ = writeln!(
                                 out,
                                 "    Current: {}",
@@ -214,6 +271,15 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                                 plan_report.unautomated_drift
                             );
                         }
+                        if host.elevated == crate::model::host::Fact::Known(false)
+                            && plan_report.requires_elevation_drift > 0
+                        {
+                            let _ = writeln!(
+                                out,
+                                "\nNote: {} change(s) require administrative privileges (run privr apply as Administrator to apply machine-scope changes).",
+                                plan_report.requires_elevation_drift
+                            );
+                        }
                         let _ = writeln!(out, "\nRun privr apply --yes to apply these changes.");
                     }
                 }
@@ -228,6 +294,8 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
         Command::Apply {
             profile,
             policy,
+            workload,
+            max_friction,
             dry_run,
             yes,
             controls,
@@ -241,6 +309,8 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                         command: Some(Command::Plan {
                             profile,
                             policy,
+                            workload,
+                            max_friction,
                             controls,
                             sections,
                         }),
@@ -260,26 +330,46 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                 let _ = writeln!(
                     err,
                     "privr: custom policy files are not implemented yet; \
-                     omit --policy to use a built-in profile"
+                     omit --policy to use a built-in profile or workload persona"
                 );
                 return 2;
             }
-            let profile = profile.unwrap_or_default();
             let host = crate::platform::discover();
+            let is_elevated = host.elevated == crate::model::host::Fact::Known(true);
             let context = crate::catalog::Context::live(&host);
             let all_controls = crate::catalog::all();
+            let profile_val = profile.unwrap_or_default();
+
+            let recommended_ids: Option<std::collections::BTreeSet<String>> = workload.map(|w| {
+                crate::engine::recommend::generate_recommendations(
+                    &all_controls,
+                    &context,
+                    &host,
+                    w,
+                    max_friction,
+                    None,
+                )
+                .into_iter()
+                .map(|r| r.control_id)
+                .collect()
+            });
 
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default();
             let timestamp = format!("{}.{:03}", now.as_secs(), now.subsec_millis());
             let tx_id = format!("tx-{}-{}", now.as_secs(), now.subsec_millis());
+            let profile_name = if let Some(w) = workload {
+                format!("workload:{}", w.as_str())
+            } else {
+                profile_val.as_str().to_owned()
+            };
             let mut journal = crate::journal::TransactionJournal {
                 schema: crate::journal::JOURNAL_SCHEMA,
                 transaction_id: tx_id.clone(),
                 timestamp: timestamp.clone(),
                 platform: host.platform.as_str().to_owned(),
-                profile: profile.as_str().to_owned(),
+                profile: profile_name.clone(),
                 operations: Vec::new(),
             };
 
@@ -293,6 +383,8 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
             }
 
             let mut unautomated_drift = 0;
+            let mut requires_elevation_drift = 0;
+            let mut explicit_elevation_failure = None;
 
             for c in &all_controls {
                 let matches_control = controls.is_empty()
@@ -310,8 +402,16 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                 if !matches_control || !matches_section {
                     continue;
                 }
+                if let Some(recs) = &recommended_ids
+                    && !recs.contains(&c.spec.id)
+                {
+                    continue;
+                }
                 let resolution = c.observe(&context);
-                let mode = if c.spec.min_profile <= profile {
+                let mode = if !controls.is_empty()
+                    || recommended_ids.is_some()
+                    || c.spec.min_profile <= profile_val
+                {
                     crate::engine::evaluate::Mode::Enforce
                 } else {
                     crate::engine::evaluate::Mode::Ignore
@@ -327,6 +427,21 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                     if eval.remediation == crate::model::outcome::Remediation::Automatic
                         && c.apply.is_some()
                     {
+                        if c.spec.requires_elevation && !is_elevated {
+                            // If the user explicitly requested this exact control via --control:
+                            if !controls.is_empty()
+                                && controls
+                                    .iter()
+                                    .any(|sel| c.spec.id == *sel || c.spec.id.starts_with(sel))
+                            {
+                                explicit_elevation_failure = Some(c.spec.id.clone());
+                                break;
+                            }
+                            // Defensively defer machine-scope changes when unelevated
+                            requires_elevation_drift += 1;
+                            continue;
+                        }
+
                         match c.apply(&context) {
                             Some(Ok(op)) => {
                                 journal.operations.push(crate::journal::OperationJournal {
@@ -370,12 +485,28 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                 }
             }
 
+            if let Some(failed_id) = explicit_elevation_failure {
+                let initial_path = crate::journal::transactions_dir().join(format!("{tx_id}.json"));
+                let _ = std::fs::remove_file(initial_path);
+                let _ = writeln!(
+                    err,
+                    "privr: failed to apply {failed_id}: applying this control requires administrative privileges (run privr apply as Administrator)"
+                );
+                return 4;
+            }
+
             if journal.operations.is_empty() {
                 let initial_path = crate::journal::transactions_dir().join(format!("{tx_id}.json"));
                 let _ = std::fs::remove_file(initial_path);
                 match format {
                     OutputFormat::Text => {
-                        if unautomated_drift > 0 {
+                        if requires_elevation_drift > 0 {
+                            let _ = writeln!(
+                                out,
+                                "No user-scope changes to apply ({} change(s) require administrative privileges; run privr apply as Administrator).",
+                                requires_elevation_drift
+                            );
+                        } else if unautomated_drift > 0 {
                             let _ = writeln!(
                                 out,
                                 "No automated changes to apply (drift exists with no automatic remediation; run privr check to review)."
@@ -390,11 +521,13 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                     OutputFormat::Json => {
                         let rep = ApplyReport {
                             schema: 1,
-                            profile: profile.as_str().to_owned(),
+                            profile: profile_name,
+                            workload,
                             platform: host.platform.as_str().to_owned(),
                             transaction_id: String::new(),
                             applied_changes: 0,
                             unautomated_drift,
+                            requires_elevation_drift,
                         };
                         let _ = serde_json::to_writer_pretty(&mut *out, &rep);
                         let _ = writeln!(out);
@@ -405,11 +538,13 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
 
             let apply_report = ApplyReport {
                 schema: 1,
-                profile: profile.as_str().to_owned(),
+                profile: profile_name,
+                workload,
                 platform: host.platform.as_str().to_owned(),
                 transaction_id: tx_id,
                 applied_changes: journal.operations.len(),
                 unautomated_drift,
+                requires_elevation_drift,
             };
 
             match format {
@@ -424,6 +559,13 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                         "All changes verified. To reverse, run: privr rollback {} --yes",
                         apply_report.transaction_id
                     );
+                    if requires_elevation_drift > 0 {
+                        let _ = writeln!(
+                            out,
+                            "\nNote: {} change(s) require administrative privileges (run privr apply as Administrator to apply machine-scope changes).",
+                            requires_elevation_drift
+                        );
+                    }
                 }
                 OutputFormat::Json => {
                     if serde_json::to_writer_pretty(&mut *out, &apply_report).is_ok() {
@@ -908,6 +1050,8 @@ mod tests {
     fn apply_requires_explicit_consent() {
         let (code, stdout, stderr) = run_for_test(Some(Command::Apply {
             profile: Some(Profile::Baseline),
+            workload: None,
+            max_friction: None,
             policy: None,
             dry_run: false,
             yes: false,
@@ -923,6 +1067,8 @@ mod tests {
     fn plan_is_safe_and_reports_planned_changes() {
         let (code, stdout, _) = run_for_test(Some(Command::Plan {
             profile: Some(Profile::Baseline),
+            workload: None,
+            max_friction: None,
             policy: None,
             controls: vec!["windows.advertising.id".to_owned()],
             sections: Vec::new(),
@@ -936,6 +1082,8 @@ mod tests {
     fn apply_dry_run_aliases_plan() {
         let (code, stdout, _) = run_for_test(Some(Command::Apply {
             profile: Some(Profile::Baseline),
+            workload: None,
+            max_friction: None,
             policy: None,
             dry_run: true,
             yes: false,
@@ -999,6 +1147,8 @@ mod tests {
     fn confirmed_apply_reports_clean_state_or_applied() {
         let (code, stdout, stderr) = run_for_test(Some(Command::Apply {
             profile: Some(Profile::Baseline),
+            workload: None,
+            max_friction: None,
             policy: None,
             dry_run: false,
             yes: true,
@@ -1010,6 +1160,7 @@ mod tests {
             stdout.contains("Machine matches policy")
                 || stdout.contains("Applied")
                 || stdout.contains("No automated changes to apply")
+                || stdout.contains("No user-scope changes to apply")
         );
     }
 
@@ -1110,6 +1261,8 @@ mod tests {
     fn plan_reports_planned_or_unautomated_drift() {
         let (code, stdout, stderr) = run_for_test(Some(Command::Plan {
             profile: Some(Profile::Baseline),
+            workload: None,
+            max_friction: None,
             policy: None,
             controls: Vec::new(),
             sections: Vec::new(),
@@ -1197,6 +1350,84 @@ mod tests {
         assert!(matches!(code, 0 | 1 | 3));
         if cfg!(windows) {
             assert!(stdout.contains("windows.advertising.id"));
+        }
+    }
+
+    #[test]
+    fn plan_with_workload_and_friction_filters_planned_changes() {
+        let (code, stdout, stderr) = run_for_test(Some(Command::Plan {
+            profile: None,
+            workload: Some(WorkloadPersona::Developer),
+            max_friction: Some(FrictionTier::Tier1Cosmetic),
+            policy: None,
+            controls: Vec::new(),
+            sections: Vec::new(),
+        }));
+        assert_eq!(code, 0, "stderr: {stderr}");
+        assert!(stdout.contains("Workload developer"));
+        assert!(stdout.contains("Platform"));
+    }
+
+    #[test]
+    fn apply_with_workload_dry_run_is_safe() {
+        let (code, stdout, stderr) = run_for_test(Some(Command::Apply {
+            profile: None,
+            workload: Some(WorkloadPersona::Developer),
+            max_friction: Some(FrictionTier::Tier1Cosmetic),
+            policy: None,
+            dry_run: true,
+            yes: false,
+            controls: Vec::new(),
+            sections: Vec::new(),
+        }));
+        assert_eq!(code, 0, "stderr: {stderr}");
+        assert!(stdout.contains("Workload developer"));
+    }
+
+    #[test]
+    fn apply_with_workload_and_yes_succeeds() {
+        let (code, stdout, stderr) = run_for_test(Some(Command::Apply {
+            profile: None,
+            workload: Some(WorkloadPersona::Developer),
+            max_friction: Some(FrictionTier::Tier0Transparent),
+            policy: None,
+            dry_run: false,
+            yes: true,
+            controls: Vec::new(),
+            sections: Vec::new(),
+        }));
+        assert_eq!(code, 0, "stderr: {stderr}");
+        assert!(
+            stdout.contains("Applied")
+                || stdout.contains("No user-scope changes to apply")
+                || stdout.contains("Machine matches policy")
+                || stdout.contains("No automated changes to apply")
+        );
+    }
+
+    #[test]
+    fn unelevated_explicit_machine_control_fails_closed_with_code_4() {
+        let host = crate::platform::discover();
+        if host.elevated == crate::model::host::Fact::Known(false) {
+            let control_id = if cfg!(windows) {
+                "windows.security.llmnr".to_owned()
+            } else if cfg!(target_os = "macos") {
+                "analytics.share-mac".to_owned()
+            } else {
+                "debian.popularity-contest".to_owned()
+            };
+            let (code, stdout, stderr) = run_for_test(Some(Command::Apply {
+                profile: None,
+                workload: None,
+                max_friction: None,
+                policy: None,
+                dry_run: false,
+                yes: true,
+                controls: vec![control_id],
+                sections: Vec::new(),
+            }));
+            assert_eq!(code, 4, "stdout: {stdout}");
+            assert!(stderr.contains("administrative privileges"));
         }
     }
 }

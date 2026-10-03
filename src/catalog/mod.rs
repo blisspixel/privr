@@ -116,6 +116,10 @@ impl Control {
     ) -> Option<Result<(), String>> {
         self.rollback.map(|f| f(context, preimage, postimage))
     }
+
+    pub fn requires_elevation(&self) -> bool {
+        self.spec.requires_elevation
+    }
 }
 
 /// Every control this build carries, in a stable documented order.

@@ -235,6 +235,7 @@ fn diagnostics_level() -> Control {
             remediation: Remediation::AuditOnly,
             remediation_reason: None,
             min_profile: Profile::Baseline,
+            requires_elevation: true,
         },
 
         title: "Diagnostic data level",
@@ -268,6 +269,7 @@ const ADVERTISING_TOGGLE: Toggle = Toggle {
     target: ADVERTISING_USER,
     private_value: 0,
     absent_means: "enabled",
+    desired_state: "disabled",
 };
 
 fn advertising_id() -> Control {
@@ -289,6 +291,7 @@ fn advertising_id() -> Control {
             remediation: Remediation::Automatic,
             remediation_reason: None,
             min_profile: Profile::Baseline,
+            requires_elevation: false,
         },
 
         title: "Advertising identifier",
@@ -323,41 +326,53 @@ fn advertising_id() -> Control {
 /// A setting that is a single value meaning on or off.
 struct Toggle {
     target: Target,
-    /// The stored value that means the collection is off.
+    /// The stored value that means the collection matches desired policy.
     private_value: u32,
     /// The state that applies when no value is stored.
     absent_means: &'static str,
+    /// Desired semantic state ("disabled" or "enabled").
+    desired_state: &'static str,
 }
 
 impl Toggle {
+    fn source(&self) -> ManagementSource {
+        match self.target.hive {
+            Hive::LocalMachine => ManagementSource::LocalPolicy,
+            Hive::CurrentUser => ManagementSource::User,
+        }
+    }
+
     fn probe(&self, ctx: &Context) -> Resolution {
-        match ctx.registry.read(&self.target, ManagementSource::User) {
+        let other_state = if self.desired_state == "disabled" {
+            "enabled"
+        } else {
+            "disabled"
+        };
+        match ctx.registry.read(&self.target, self.source()) {
             Evidence::Present { value, .. } => match value.as_u32() {
                 Some(stored) => Resolution::determined(
                     if stored == self.private_value {
-                        disabled()
+                        SemanticState::new(self.desired_state)
                     } else {
-                        enabled()
+                        SemanticState::new(other_state)
                     },
-                    ManagementSource::User,
+                    self.source(),
                 ),
                 // A value we cannot interpret is malformed evidence, never a
                 // silent fallback to the documented default.
-                None => Resolution::uncertain(Uncertainty::Malformed, ManagementSource::User),
+                None => Resolution::uncertain(Uncertainty::Malformed, self.source()),
             },
             Evidence::Absent { .. } => Resolution::determined(
                 SemanticState::new(self.absent_means),
                 ManagementSource::Default,
             ),
-            Evidence::Denied { .. } => {
-                Resolution::uncertain(Uncertainty::Denied, ManagementSource::User)
-            }
-            _ => Resolution::uncertain(Uncertainty::Undetermined, ManagementSource::User),
+            Evidence::Denied { .. } => Resolution::uncertain(Uncertainty::Denied, self.source()),
+            _ => Resolution::uncertain(Uncertainty::Undetermined, self.source()),
         }
     }
 
     fn apply(&self, ctx: &Context) -> Result<super::AppliedOp, String> {
-        let current = ctx.registry.read(&self.target, ManagementSource::User);
+        let current = ctx.registry.read(&self.target, self.source());
         let preimage = match current {
             Evidence::Present { value, .. } => {
                 if value.as_u32() == Some(self.private_value) {
@@ -366,7 +381,7 @@ impl Toggle {
                 Some(value)
             }
             Evidence::Absent { .. } => {
-                if self.absent_means == "disabled" {
+                if self.absent_means == self.desired_state {
                     return Err("Target is already in desired state (absent default)".to_owned());
                 }
                 None
@@ -376,10 +391,16 @@ impl Toggle {
         };
         let postimage = RawValue::u32(self.private_value);
         if let Err(code) = crate::platform::windows::registry::write_raw(&self.target, &postimage) {
+            if code == 5 {
+                return Err(
+                    "Permission denied: applying this control requires administrative privileges"
+                        .to_owned(),
+                );
+            }
             return Err(format!("Registry write failed with error code {code}"));
         }
         let verification = self.probe(ctx);
-        if verification.state != Some(disabled()) {
+        if verification.state != Some(SemanticState::new(self.desired_state)) {
             return Err("Verification failed after writing setting".to_owned());
         }
         Ok(super::AppliedOp {
@@ -395,7 +416,7 @@ impl Toggle {
         preimage: &Option<RawValue>,
         postimage: &RawValue,
     ) -> Result<(), String> {
-        let current = ctx.registry.read(&self.target, ManagementSource::User);
+        let current = ctx.registry.read(&self.target, self.source());
         let current_matches = match current {
             Evidence::Present { value, .. } => value == *postimage,
             _ => false,
@@ -407,16 +428,22 @@ impl Toggle {
             Some(raw) => {
                 if let Err(code) = crate::platform::windows::registry::write_raw(&self.target, raw)
                 {
+                    if code == 5 {
+                        return Err("Permission denied: rolling back this control requires administrative privileges".to_owned());
+                    }
                     return Err(format!("Rollback write failed with code {code}"));
                 }
             }
             None => {
                 if let Err(code) = crate::platform::windows::registry::delete_value(&self.target) {
+                    if code == 5 {
+                        return Err("Permission denied: rolling back this control requires administrative privileges".to_owned());
+                    }
                     return Err(format!("Rollback deletion failed with code {code}"));
                 }
             }
         }
-        let restored = ctx.registry.read(&self.target, ManagementSource::User);
+        let restored = ctx.registry.read(&self.target, self.source());
         let verified = match (preimage, &restored) {
             (Some(expected), Evidence::Present { value, .. }) => value == expected,
             (None, Evidence::Absent { .. }) => true,
@@ -550,6 +577,7 @@ const FEEDBACK_FREQUENCY: Toggle = Toggle {
     ),
     private_value: 0,
     absent_means: "enabled",
+    desired_state: "disabled",
 };
 
 const WIFI_DATA_ACCESS: StringToggle = StringToggle {
@@ -592,22 +620,15 @@ const LLMNR_MULTICAST: Target = Target::new(
     View::Native,
 );
 
+const LLMNR: Toggle = Toggle {
+    target: LLMNR_MULTICAST,
+    private_value: 0,
+    absent_means: "enabled",
+    desired_state: "disabled",
+};
+
 fn probe_llmnr(ctx: &Context) -> Resolution {
-    let policy = ctx
-        .registry
-        .read(&LLMNR_MULTICAST, ManagementSource::LocalPolicy);
-    match policy {
-        Evidence::Present { value, .. } => match value.as_u32() {
-            Some(0) => Resolution::determined(disabled(), ManagementSource::LocalPolicy),
-            Some(_) => Resolution::determined(enabled(), ManagementSource::LocalPolicy),
-            None => Resolution::uncertain(Uncertainty::Malformed, ManagementSource::LocalPolicy),
-        },
-        Evidence::Absent { .. } => Resolution::determined(enabled(), ManagementSource::Default),
-        Evidence::Denied { .. } => {
-            Resolution::uncertain(Uncertainty::Denied, ManagementSource::LocalPolicy)
-        }
-        _ => Resolution::uncertain(Uncertainty::Undetermined, ManagementSource::LocalPolicy),
-    }
+    LLMNR.probe(ctx)
 }
 
 fn security_llmnr() -> Control {
@@ -626,9 +647,10 @@ fn security_llmnr() -> Control {
             reversibility: Reversibility::Exact,
             maturity: Maturity::Automated,
             verified_through: None,
-            remediation: Remediation::AuditOnly,
+            remediation: Remediation::Automatic,
             remediation_reason: None,
             min_profile: Profile::Restrictive,
+            requires_elevation: true,
         },
 
         title: "Link-Local Multicast Name Resolution",
@@ -644,8 +666,8 @@ fn security_llmnr() -> Control {
             reviewed: "2026-09-21",
         }],
         probe: probe_llmnr,
-        apply: None,
-        rollback: None,
+        apply: Some(|ctx| LLMNR.apply(ctx)),
+        rollback: Some(|ctx, pre, post| LLMNR.rollback(ctx, pre, post)),
     }
 }
 
@@ -658,6 +680,7 @@ const TAILORED_EXPERIENCES: Toggle = Toggle {
     ),
     private_value: 0,
     absent_means: "enabled",
+    desired_state: "disabled",
 };
 
 const CLOUD_CLIPBOARD: Toggle = Toggle {
@@ -669,6 +692,7 @@ const CLOUD_CLIPBOARD: Toggle = Toggle {
     ),
     private_value: 0,
     absent_means: "disabled",
+    desired_state: "disabled",
 };
 
 const CLOUD_CLIPBOARD_SYNC: Toggle = Toggle {
@@ -680,6 +704,7 @@ const CLOUD_CLIPBOARD_SYNC: Toggle = Toggle {
     ),
     private_value: 0,
     absent_means: "enabled",
+    desired_state: "disabled",
 };
 
 const WEB_SEARCH: Toggle = Toggle {
@@ -691,6 +716,7 @@ const WEB_SEARCH: Toggle = Toggle {
     ),
     private_value: 0,
     absent_means: "enabled",
+    desired_state: "disabled",
 };
 
 const SUGGESTED_APPS: Toggle = Toggle {
@@ -702,6 +728,7 @@ const SUGGESTED_APPS: Toggle = Toggle {
     ),
     private_value: 0,
     absent_means: "enabled",
+    desired_state: "disabled",
 };
 
 const START_SUGGESTIONS: Toggle = Toggle {
@@ -713,6 +740,7 @@ const START_SUGGESTIONS: Toggle = Toggle {
     ),
     private_value: 0,
     absent_means: "enabled",
+    desired_state: "disabled",
 };
 
 const SYSTEM_SUGGESTIONS: Toggle = Toggle {
@@ -724,6 +752,7 @@ const SYSTEM_SUGGESTIONS: Toggle = Toggle {
     ),
     private_value: 0,
     absent_means: "enabled",
+    desired_state: "disabled",
 };
 
 const DEVICE_SEARCH_HISTORY: Toggle = Toggle {
@@ -735,6 +764,7 @@ const DEVICE_SEARCH_HISTORY: Toggle = Toggle {
     ),
     private_value: 0,
     absent_means: "enabled",
+    desired_state: "disabled",
 };
 
 const THUMBNAIL_CACHE: Toggle = Toggle {
@@ -746,6 +776,7 @@ const THUMBNAIL_CACHE: Toggle = Toggle {
     ),
     private_value: 1,
     absent_means: "enabled",
+    desired_state: "disabled",
 };
 
 const EDGE_METRICS: Toggle = Toggle {
@@ -757,6 +788,7 @@ const EDGE_METRICS: Toggle = Toggle {
     ),
     private_value: 0,
     absent_means: "enabled",
+    desired_state: "disabled",
 };
 
 /// Typing and inking personalisation, which is two values rather than one.
@@ -942,6 +974,19 @@ fn dimension_and_friction_for_control(id: &str, section: &str) -> (PostureDimens
     }
 }
 
+fn requires_elevation_for_control(id: &str, section: &str) -> bool {
+    if id == "windows.ai.recall-snapshot" {
+        return true;
+    }
+    match section {
+        "delivery-optimization" => true,
+        "security" => true,
+        "diagnostics" => !matches!(id, "windows.diagnostics.feedback"),
+        "storage" => true,
+        _ => false,
+    }
+}
+
 /// Build a control with a specified desired state.
 #[allow(clippy::too_many_arguments)]
 fn toggle_control_with_desired(
@@ -982,6 +1027,7 @@ fn toggle_control_with_desired(
             },
             remediation_reason: None,
             min_profile: profile_for_control(id, section),
+            requires_elevation: requires_elevation_for_control(id, section),
         },
         title,
         summary,
@@ -1013,6 +1059,7 @@ const COPILOT_SHELL: Toggle = Toggle {
     ),
     private_value: 1,
     absent_means: "enabled",
+    desired_state: "disabled",
 };
 
 const RECALL_POLICY: Target = Target::new(
@@ -1022,22 +1069,15 @@ const RECALL_POLICY: Target = Target::new(
     View::Native,
 );
 
+const RECALL_SNAPSHOTS: Toggle = Toggle {
+    target: RECALL_POLICY,
+    private_value: 1,
+    absent_means: "enabled",
+    desired_state: "disabled",
+};
+
 fn probe_recall_snapshots(ctx: &Context) -> Resolution {
-    match ctx
-        .registry
-        .read(&RECALL_POLICY, ManagementSource::LocalPolicy)
-    {
-        Evidence::Present { value, .. } => match value.as_u32() {
-            Some(1) => Resolution::determined(disabled(), ManagementSource::LocalPolicy),
-            Some(_) => Resolution::determined(enabled(), ManagementSource::LocalPolicy),
-            None => Resolution::uncertain(Uncertainty::Malformed, ManagementSource::LocalPolicy),
-        },
-        Evidence::Absent { .. } => Resolution::determined(enabled(), ManagementSource::Default),
-        Evidence::Denied { .. } => {
-            Resolution::uncertain(Uncertainty::Denied, ManagementSource::LocalPolicy)
-        }
-        _ => Resolution::uncertain(Uncertainty::Undetermined, ManagementSource::LocalPolicy),
-    }
+    RECALL_SNAPSHOTS.probe(ctx)
 }
 
 const DELIVERY_OPTIMIZATION_POLICY: Target = Target::new(
@@ -1046,6 +1086,13 @@ const DELIVERY_OPTIMIZATION_POLICY: Target = Target::new(
     "DODownloadMode",
     View::Native,
 );
+
+const DELIVERY_OPTIMIZATION: Toggle = Toggle {
+    target: DELIVERY_OPTIMIZATION_POLICY,
+    private_value: 0,
+    absent_means: "enabled",
+    desired_state: "disabled",
+};
 
 fn probe_delivery_optimization(ctx: &Context) -> Resolution {
     match ctx
@@ -1072,22 +1119,15 @@ const WPAD_POLICY: Target = Target::new(
     View::Native,
 );
 
+const WPAD: Toggle = Toggle {
+    target: WPAD_POLICY,
+    private_value: 1,
+    absent_means: "enabled",
+    desired_state: "disabled",
+};
+
 fn probe_wpad(ctx: &Context) -> Resolution {
-    match ctx
-        .registry
-        .read(&WPAD_POLICY, ManagementSource::LocalPolicy)
-    {
-        Evidence::Present { value, .. } => match value.as_u32() {
-            Some(1) => Resolution::determined(disabled(), ManagementSource::LocalPolicy),
-            Some(_) => Resolution::determined(enabled(), ManagementSource::LocalPolicy),
-            None => Resolution::uncertain(Uncertainty::Malformed, ManagementSource::LocalPolicy),
-        },
-        Evidence::Absent { .. } => Resolution::determined(enabled(), ManagementSource::Default),
-        Evidence::Denied { .. } => {
-            Resolution::uncertain(Uncertainty::Denied, ManagementSource::LocalPolicy)
-        }
-        _ => Resolution::uncertain(Uncertainty::Undetermined, ManagementSource::LocalPolicy),
-    }
+    WPAD.probe(ctx)
 }
 
 const CRASH_DUMP_POLICY: Target = Target::new(
@@ -1122,22 +1162,15 @@ const INVENTORY_COLLECTOR_POLICY: Target = Target::new(
     View::Native,
 );
 
+const INVENTORY_COLLECTOR: Toggle = Toggle {
+    target: INVENTORY_COLLECTOR_POLICY,
+    private_value: 1,
+    absent_means: "enabled",
+    desired_state: "disabled",
+};
+
 fn probe_inventory_collector(ctx: &Context) -> Resolution {
-    match ctx
-        .registry
-        .read(&INVENTORY_COLLECTOR_POLICY, ManagementSource::LocalPolicy)
-    {
-        Evidence::Present { value, .. } => match value.as_u32() {
-            Some(1) => Resolution::determined(disabled(), ManagementSource::LocalPolicy),
-            Some(_) => Resolution::determined(enabled(), ManagementSource::LocalPolicy),
-            None => Resolution::uncertain(Uncertainty::Malformed, ManagementSource::LocalPolicy),
-        },
-        Evidence::Absent { .. } => Resolution::determined(enabled(), ManagementSource::Default),
-        Evidence::Denied { .. } => {
-            Resolution::uncertain(Uncertainty::Denied, ManagementSource::LocalPolicy)
-        }
-        _ => Resolution::uncertain(Uncertainty::Undetermined, ManagementSource::LocalPolicy),
-    }
+    INVENTORY_COLLECTOR.probe(ctx)
 }
 
 const NCSI_ACTIVE_PROBE: Target = Target::new(
@@ -1153,6 +1186,13 @@ const NCSI_POLICY_OVERRIDE: Target = Target::new(
     "NoActiveProbe",
     View::Native,
 );
+
+const NCSI_PROBING: Toggle = Toggle {
+    target: NCSI_POLICY_OVERRIDE,
+    private_value: 1,
+    absent_means: "enabled",
+    desired_state: "disabled",
+};
 
 fn probe_ncsi_probing(ctx: &Context) -> Resolution {
     if let Evidence::Present { value, .. } = ctx
@@ -1216,22 +1256,15 @@ const ERROR_REPORTING_POLICY: Target = Target::new(
     View::Native,
 );
 
+const ERROR_REPORTING: Toggle = Toggle {
+    target: ERROR_REPORTING_POLICY,
+    private_value: 1,
+    absent_means: "enabled",
+    desired_state: "disabled",
+};
+
 fn probe_error_reporting(ctx: &Context) -> Resolution {
-    match ctx
-        .registry
-        .read(&ERROR_REPORTING_POLICY, ManagementSource::LocalPolicy)
-    {
-        Evidence::Present { value, .. } => match value.as_u32() {
-            Some(1) => Resolution::determined(disabled(), ManagementSource::LocalPolicy),
-            Some(_) => Resolution::determined(enabled(), ManagementSource::LocalPolicy),
-            None => Resolution::uncertain(Uncertainty::Malformed, ManagementSource::LocalPolicy),
-        },
-        Evidence::Absent { .. } => Resolution::determined(enabled(), ManagementSource::Default),
-        Evidence::Denied { .. } => {
-            Resolution::uncertain(Uncertainty::Denied, ManagementSource::LocalPolicy)
-        }
-        _ => Resolution::uncertain(Uncertainty::Undetermined, ManagementSource::LocalPolicy),
-    }
+    ERROR_REPORTING.probe(ctx)
 }
 
 const PAGEFILE_CLEAR_POLICY: Target = Target::new(
@@ -1241,22 +1274,15 @@ const PAGEFILE_CLEAR_POLICY: Target = Target::new(
     View::Native,
 );
 
+const PAGEFILE_CLEAR: Toggle = Toggle {
+    target: PAGEFILE_CLEAR_POLICY,
+    private_value: 1,
+    absent_means: "disabled",
+    desired_state: "enabled",
+};
+
 fn probe_pagefile_clear(ctx: &Context) -> Resolution {
-    match ctx
-        .registry
-        .read(&PAGEFILE_CLEAR_POLICY, ManagementSource::LocalPolicy)
-    {
-        Evidence::Present { value, .. } => match value.as_u32() {
-            Some(1) => Resolution::determined(enabled(), ManagementSource::LocalPolicy),
-            Some(_) => Resolution::determined(disabled(), ManagementSource::LocalPolicy),
-            None => Resolution::uncertain(Uncertainty::Malformed, ManagementSource::LocalPolicy),
-        },
-        Evidence::Absent { .. } => Resolution::determined(disabled(), ManagementSource::Default),
-        Evidence::Denied { .. } => {
-            Resolution::uncertain(Uncertainty::Denied, ManagementSource::LocalPolicy)
-        }
-        _ => Resolution::uncertain(Uncertainty::Undetermined, ManagementSource::LocalPolicy),
-    }
+    PAGEFILE_CLEAR.probe(ctx)
 }
 
 const TRIM_NOTIFY_POLICY: Target = Target::new(
@@ -1266,22 +1292,15 @@ const TRIM_NOTIFY_POLICY: Target = Target::new(
     View::Native,
 );
 
+const TRIM_NOTIFY: Toggle = Toggle {
+    target: TRIM_NOTIFY_POLICY,
+    private_value: 0,
+    absent_means: "enabled",
+    desired_state: "enabled",
+};
+
 fn probe_trim_notify(ctx: &Context) -> Resolution {
-    match ctx
-        .registry
-        .read(&TRIM_NOTIFY_POLICY, ManagementSource::LocalPolicy)
-    {
-        Evidence::Present { value, .. } => match value.as_u32() {
-            Some(0) => Resolution::determined(enabled(), ManagementSource::LocalPolicy),
-            Some(_) => Resolution::determined(disabled(), ManagementSource::LocalPolicy),
-            None => Resolution::uncertain(Uncertainty::Malformed, ManagementSource::LocalPolicy),
-        },
-        Evidence::Absent { .. } => Resolution::determined(enabled(), ManagementSource::Default),
-        Evidence::Denied { .. } => {
-            Resolution::uncertain(Uncertainty::Denied, ManagementSource::LocalPolicy)
-        }
-        _ => Resolution::uncertain(Uncertainty::Undetermined, ManagementSource::LocalPolicy),
-    }
+    TRIM_NOTIFY.probe(ctx)
 }
 
 /// Every Windows control, in stable sorted order by identifier.
@@ -1319,8 +1338,8 @@ pub fn controls() -> Vec<Control> {
                 reviewed: "2026-09-22",
             }],
             probe_recall_snapshots,
-            None,
-            None,
+            Some(|ctx| RECALL_SNAPSHOTS.apply(ctx)),
+            Some(|ctx, pre, post| RECALL_SNAPSHOTS.rollback(ctx, pre, post)),
         ),
         toggle_control(
             "windows.capability.account-info",
@@ -1419,8 +1438,8 @@ pub fn controls() -> Vec<Control> {
                 reviewed: "2026-10-01",
             }],
             probe_error_reporting,
-            None,
-            None,
+            Some(|ctx| ERROR_REPORTING.apply(ctx)),
+            Some(|ctx, pre, post| ERROR_REPORTING.rollback(ctx, pre, post)),
         ),
         toggle_control(
             "windows.diagnostics.feedback",
@@ -1458,8 +1477,8 @@ pub fn controls() -> Vec<Control> {
                 reviewed: "2026-09-22",
             }],
             probe_inventory_collector,
-            None,
-            None,
+            Some(|ctx| INVENTORY_COLLECTOR.apply(ctx)),
+            Some(|ctx, pre, post| INVENTORY_COLLECTOR.rollback(ctx, pre, post)),
         ),
         toggle_control(
             "windows.clipboard.cloud-sync",
@@ -1660,8 +1679,8 @@ pub fn controls() -> Vec<Control> {
                 reviewed: "2026-09-22",
             }],
             probe_delivery_optimization,
-            None,
-            None,
+            Some(|ctx| DELIVERY_OPTIMIZATION.apply(ctx)),
+            Some(|ctx, pre, post| DELIVERY_OPTIMIZATION.rollback(ctx, pre, post)),
         ),
         security_llmnr(),
         toggle_control(
@@ -1682,8 +1701,8 @@ pub fn controls() -> Vec<Control> {
                 reviewed: "2026-09-22",
             }],
             probe_ncsi_probing,
-            None,
-            None,
+            Some(|ctx| NCSI_PROBING.apply(ctx)),
+            Some(|ctx, pre, post| NCSI_PROBING.rollback(ctx, pre, post)),
         ),
         toggle_control(
             "windows.security.wpad",
@@ -1703,8 +1722,8 @@ pub fn controls() -> Vec<Control> {
                 reviewed: "2026-09-22",
             }],
             probe_wpad,
-            None,
-            None,
+            Some(|ctx| WPAD.apply(ctx)),
+            Some(|ctx, pre, post| WPAD.rollback(ctx, pre, post)),
         ),
         toggle_control(
             "windows.browser.edge.telemetry",
@@ -1720,8 +1739,8 @@ pub fn controls() -> Vec<Control> {
                 reviewed: "2026-10-01",
             }],
             |ctx| EDGE_METRICS.probe(ctx),
-            None,
-            None,
+            Some(|ctx| EDGE_METRICS.apply(ctx)),
+            Some(|ctx, pre, post| EDGE_METRICS.rollback(ctx, pre, post)),
         ),
         toggle_control_with_desired(
             "windows.storage.pagefile-clear",
@@ -1740,8 +1759,8 @@ pub fn controls() -> Vec<Control> {
                 reviewed: "2026-10-01",
             }],
             probe_pagefile_clear,
-            None,
-            None,
+            Some(|ctx| PAGEFILE_CLEAR.apply(ctx)),
+            Some(|ctx, pre, post| PAGEFILE_CLEAR.rollback(ctx, pre, post)),
         ),
         toggle_control(
             "windows.storage.thumbnail-cache",
@@ -1761,8 +1780,8 @@ pub fn controls() -> Vec<Control> {
                 reviewed: "2026-10-01",
             }],
             |ctx| THUMBNAIL_CACHE.probe(ctx),
-            None,
-            None,
+            Some(|ctx| THUMBNAIL_CACHE.apply(ctx)),
+            Some(|ctx, pre, post| THUMBNAIL_CACHE.rollback(ctx, pre, post)),
         ),
         toggle_control_with_desired(
             "windows.storage.trim-notify",
@@ -1781,8 +1800,8 @@ pub fn controls() -> Vec<Control> {
                 reviewed: "2026-10-01",
             }],
             probe_trim_notify,
-            None,
-            None,
+            Some(|ctx| TRIM_NOTIFY.apply(ctx)),
+            Some(|ctx, pre, post| TRIM_NOTIFY.rollback(ctx, pre, post)),
         ),
     ];
 
@@ -2162,6 +2181,7 @@ mod tests {
             ),
             private_value: 0,
             absent_means: "enabled",
+            desired_state: "disabled",
         };
 
         let host = platform::discover();

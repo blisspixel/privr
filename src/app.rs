@@ -32,6 +32,7 @@ struct PlanReport {
     profile: String,
     platform: String,
     planned_changes: usize,
+    unautomated_drift: usize,
     changes: Vec<PlanItem>,
 }
 
@@ -42,6 +43,7 @@ struct ApplyReport {
     platform: String,
     transaction_id: String,
     applied_changes: usize,
+    unautomated_drift: usize,
 }
 
 #[derive(Serialize)]
@@ -118,6 +120,7 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
             let context = crate::catalog::Context::live(&host);
             let all_controls = crate::catalog::all();
             let mut planned = Vec::new();
+            let mut unautomated_drift = 0;
 
             for c in &all_controls {
                 if !controls.is_empty()
@@ -135,21 +138,24 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                     &host,
                     crate::model::outcome::Exception::None,
                 );
-                if eval.outcome == crate::model::outcome::Outcome::Drift
-                    && eval.remediation == crate::model::outcome::Remediation::Automatic
-                    && c.apply.is_some()
-                {
-                    let current_str = resolution
-                        .state
-                        .map(|s| s.0)
-                        .unwrap_or_else(|| "drift".to_owned());
-                    planned.push(PlanItem {
-                        id: c.spec.id.clone(),
-                        title: c.title.to_owned(),
-                        section: c.spec.section.clone(),
-                        current: current_str,
-                        desired: c.spec.desired.0.clone(),
-                    });
+                if eval.outcome == crate::model::outcome::Outcome::Drift {
+                    if eval.remediation == crate::model::outcome::Remediation::Automatic
+                        && c.apply.is_some()
+                    {
+                        let current_str = resolution
+                            .state
+                            .map(|s| s.0)
+                            .unwrap_or_else(|| "drift".to_owned());
+                        planned.push(PlanItem {
+                            id: c.spec.id.clone(),
+                            title: c.title.to_owned(),
+                            section: c.spec.section.clone(),
+                            current: current_str,
+                            desired: c.spec.desired.0.clone(),
+                        });
+                    } else {
+                        unautomated_drift += 1;
+                    }
                 }
             }
 
@@ -158,6 +164,7 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                 profile: profile.as_str().to_owned(),
                 platform: host.platform.as_str().to_owned(),
                 planned_changes: planned.len(),
+                unautomated_drift,
                 changes: planned,
             };
 
@@ -166,7 +173,14 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                     let _ = writeln!(out, "Profile  {}", plan_report.profile);
                     let _ = writeln!(out, "Platform {}", plan_report.platform);
                     if plan_report.planned_changes == 0 {
-                        let _ = writeln!(out, "Planned changes: 0 (machine matches policy)");
+                        if plan_report.unautomated_drift > 0 {
+                            let _ = writeln!(
+                                out,
+                                "Planned changes: 0 (drift exists with no automatic remediation; run privr check to review)"
+                            );
+                        } else {
+                            let _ = writeln!(out, "Planned changes: 0 (machine matches policy)");
+                        }
                     } else {
                         let _ = writeln!(
                             out,
@@ -187,6 +201,13 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                                 )
                             );
                             let _ = writeln!(out, "    Desired: {}", item.desired);
+                        }
+                        if plan_report.unautomated_drift > 0 {
+                            let _ = writeln!(
+                                out,
+                                "\nNote: {} drifted control(s) have no automatic remediation and require manual review (run privr check to inspect).",
+                                plan_report.unautomated_drift
+                            );
                         }
                         let _ = writeln!(out, "\nRun privr apply --yes to apply these changes.");
                     }
@@ -258,6 +279,8 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                 operations: Vec::new(),
             };
 
+            let mut unautomated_drift = 0;
+
             for c in &all_controls {
                 if !controls.is_empty()
                     && !controls
@@ -274,42 +297,46 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                     &host,
                     crate::model::outcome::Exception::None,
                 );
-                if eval.outcome == crate::model::outcome::Outcome::Drift
-                    && eval.remediation == crate::model::outcome::Remediation::Automatic
-                    && c.apply.is_some()
-                {
-                    match c.apply(&context) {
-                        Some(Ok(op)) => {
-                            journal.operations.push(crate::journal::OperationJournal {
-                                control_id: c.spec.id.clone(),
-                                target_key: op.target_key,
-                                preimage: op.preimage,
-                                postimage: op.postimage,
-                                verified: true,
-                            });
-                            if let Err(e) = crate::journal::save_transaction(&journal) {
-                                let _ = writeln!(
-                                    err,
-                                    "privr: warning: failed to write transaction journal: {e}"
-                                );
+                if eval.outcome == crate::model::outcome::Outcome::Drift {
+                    if eval.remediation == crate::model::outcome::Remediation::Automatic
+                        && c.apply.is_some()
+                    {
+                        match c.apply(&context) {
+                            Some(Ok(op)) => {
+                                journal.operations.push(crate::journal::OperationJournal {
+                                    control_id: c.spec.id.clone(),
+                                    target_key: op.target_key,
+                                    preimage: op.preimage,
+                                    postimage: op.postimage,
+                                    verified: true,
+                                });
+                                if let Err(e) = crate::journal::save_transaction(&journal) {
+                                    let _ = writeln!(
+                                        err,
+                                        "privr: warning: failed to write transaction journal: {e}"
+                                    );
+                                }
                             }
-                        }
-                        Some(Err(e)) => {
-                            if !journal.operations.is_empty() {
-                                let _ = writeln!(
-                                    err,
-                                    "privr: failed to apply {}: {e}. Applied {} prior change(s) (transaction {}). To rollback: privr rollback {} --yes",
-                                    c.spec.id,
-                                    journal.operations.len(),
-                                    tx_id,
-                                    tx_id,
-                                );
-                            } else {
-                                let _ = writeln!(err, "privr: failed to apply {}: {e}", c.spec.id);
+                            Some(Err(e)) => {
+                                if !journal.operations.is_empty() {
+                                    let _ = writeln!(
+                                        err,
+                                        "privr: failed to apply {}: {e}. Applied {} prior change(s) (transaction {}). To rollback: privr rollback {} --yes",
+                                        c.spec.id,
+                                        journal.operations.len(),
+                                        tx_id,
+                                        tx_id,
+                                    );
+                                } else {
+                                    let _ =
+                                        writeln!(err, "privr: failed to apply {}: {e}", c.spec.id);
+                                }
+                                return 4;
                             }
-                            return 4;
+                            None => {}
                         }
-                        None => {}
+                    } else {
+                        unautomated_drift += 1;
                     }
                 }
             }
@@ -317,8 +344,17 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
             if journal.operations.is_empty() {
                 match format {
                     OutputFormat::Text => {
-                        let _ =
-                            writeln!(out, "No drifted controls to apply. Machine matches policy.");
+                        if unautomated_drift > 0 {
+                            let _ = writeln!(
+                                out,
+                                "No automated changes to apply (drift exists with no automatic remediation; run privr check to review)."
+                            );
+                        } else {
+                            let _ = writeln!(
+                                out,
+                                "No drifted controls to apply. Machine matches policy."
+                            );
+                        }
                     }
                     OutputFormat::Json => {
                         let rep = ApplyReport {
@@ -327,6 +363,7 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                             platform: host.platform.as_str().to_owned(),
                             transaction_id: String::new(),
                             applied_changes: 0,
+                            unautomated_drift,
                         };
                         let _ = serde_json::to_writer_pretty(&mut *out, &rep);
                         let _ = writeln!(out);
@@ -341,6 +378,7 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                 platform: host.platform.as_str().to_owned(),
                 transaction_id: tx_id,
                 applied_changes: journal.operations.len(),
+                unautomated_drift,
             };
 
             match format {
@@ -507,20 +545,19 @@ Run privr list to see every control in this build."
             }
         },
         Command::Doctor => {
-            write_response(
-                out,
-                format,
-                ConceptResponse {
-                    schema: 1,
-                    complete: false,
-                    status: "concept",
-                    command: "doctor",
-                    platform: current_platform(),
-                    profile: None,
-                    message: "Rust CLI is running; platform adapters are not implemented yet",
-                },
-            );
-            3
+            let host = crate::platform::discover();
+            let report = crate::doctor::diagnose(&host);
+            match format {
+                OutputFormat::Text => {
+                    let _ = write!(out, "{}", report.to_text(&ui));
+                }
+                OutputFormat::Json => {
+                    if serde_json::to_writer_pretty(&mut *out, &report).is_ok() {
+                        let _ = writeln!(out);
+                    }
+                }
+            }
+            if report.healthy { 0 } else { 3 }
         }
         Command::Mcp { allow_apply } => {
             let stdin = std::io::stdin();
@@ -661,12 +698,12 @@ mod tests {
             &mut stdout,
             &mut stderr,
         );
-        assert_eq!(code, 3);
+        assert_eq!(code, 0);
         assert!(stderr.is_empty());
         let stdout = String::from_utf8(stdout).expect("stdout is UTF-8");
         let value: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
-        assert_eq!(value["command"], "doctor");
-        assert_eq!(value["complete"], false);
+        assert_eq!(value["schema"], 1);
+        assert_eq!(value["healthy"], true);
     }
 
     #[test]
@@ -705,7 +742,11 @@ mod tests {
             controls: Vec::new(),
         }));
         assert_eq!(code, 0, "stderr: {stderr}");
-        assert!(stdout.contains("Machine matches policy") || stdout.contains("Applied"));
+        assert!(
+            stdout.contains("Machine matches policy")
+                || stdout.contains("Applied")
+                || stdout.contains("No automated changes to apply")
+        );
     }
 
     #[test]
@@ -788,5 +829,16 @@ mod tests {
         assert_eq!(Platform::Macos.as_str(), "macos");
         assert_eq!(Platform::Linux.as_str(), "linux");
         assert_eq!(Platform::All.as_str(), "all");
+    }
+
+    #[test]
+    fn plan_reports_planned_or_unautomated_drift() {
+        let (code, stdout, stderr) = run_for_test(Some(Command::Plan {
+            profile: Some(Profile::Baseline),
+            policy: None,
+            controls: Vec::new(),
+        }));
+        assert_eq!(code, 0, "stderr: {stderr}");
+        assert!(stdout.contains("Planned changes:"));
     }
 }

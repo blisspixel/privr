@@ -69,3 +69,44 @@ fn rollback_uses_a_transaction_id() {
         .code(3)
         .stdout(predicate::str::contains("transaction tx-123"));
 }
+
+#[test]
+fn doctor_reports_health_and_exposes_no_identifiers() {
+    let mut command = Command::cargo_bin("privr").expect("binary");
+    command
+        .args(["doctor", "--format", "json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"schema\": 1"))
+        .stdout(predicate::str::contains("\"healthy\": true"))
+        .stdout(predicate::str::contains("\"storage\""))
+        .stdout(predicate::str::contains("S-1-5").not())
+        .stdout(predicate::str::contains("Users\\").not());
+}
+
+#[test]
+fn doctor_text_output_is_informative_and_clean() {
+    let mut command = Command::cargo_bin("privr").expect("binary");
+    command
+        .arg("doctor")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("privr doctor"))
+        .stdout(predicate::str::contains("Platform"))
+        .stdout(predicate::str::contains("Platform Adapters"))
+        .stdout(predicate::str::contains("Storage and State"))
+        .stdout(predicate::str::contains("Catalogue and Schemas"))
+        .stdout(predicate::str::contains("System is healthy"));
+}
+
+#[test]
+fn plan_reports_planned_changes_or_honest_drift_summary() {
+    let mut command = Command::cargo_bin("privr").expect("binary");
+    command
+        .args(["plan", "--format", "json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"schema\": 1"))
+        .stdout(predicate::str::contains("\"planned_changes\""))
+        .stdout(predicate::str::contains("\"unautomated_drift\""));
+}

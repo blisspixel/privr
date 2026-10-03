@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="660" viewBox="0 0 860 660" role="img" aria-label="Terminal output of privr doctor on Windows 11 showing system capability facts, compiled registry adapters, storage integrity verification, and catalogue health.">
+  <rect x="0" y="0" width="860" height="660" rx="8" fill="#0c0c0c"/>
+  <rect x="0" y="0" width="860" height="36" rx="8" fill="#1f1f1f"/>
+  <rect x="0" y="26" width="860" height="10" fill="#1f1f1f"/>
+  <rect x="12" y="6" width="160" height="24" rx="4" fill="#2d2d2d"/>
+  <text x="24" y="22" font-family="'Cascadia Code', 'Consolas', 'Segoe UI Mono', monospace" font-size="12" fill="#cccccc">PowerShell</text>
+  <g fill="#cccccc" transform="translate(800, 14)">
+    <line x1="0" y1="4" x2="10" y2="4" stroke="#cccccc" stroke-width="1"/>
+    <rect x="18" y="0" width="9" height="9" fill="none" stroke="#cccccc" stroke-width="1"/>
+    <line x1="36" y1="0" x2="45" y2="9" stroke="#cccccc" stroke-width="1"/>
+    <line x1="45" y1="0" x2="36" y2="9" stroke="#cccccc" stroke-width="1"/>
+  </g>
+  <g font-family="'Cascadia Code', 'Consolas', 'Segoe UI Mono', monospace" font-size="13">
+    <text x="24" y="68"><tspan fill="#3a96dd">PS C:\Users\operator&gt;</tspan><tspan fill="#ffffff" xml:space="preserve"> privr doctor</tspan></text>
+    <text x="24" y="96" fill="#ffffff" font-weight="bold">privr doctor [windows]</text>
+
+    <text x="24" y="126" fill="#ffffff" font-weight="bold">Platform</text>
+    <text x="24" y="146" xml:space="preserve"><tspan fill="#767676">  Operating System    </tspan><tspan fill="#cccccc"> windows 25H2 (10.0.26200.9550)</tspan></text>
+    <text x="24" y="164" xml:space="preserve"><tspan fill="#767676">  Edition             </tspan><tspan fill="#cccccc"> Professional</tspan></text>
+    <text x="24" y="182" xml:space="preserve"><tspan fill="#767676">  Architecture        </tspan><tspan fill="#cccccc"> x86_64</tspan></text>
+    <text x="24" y="200" xml:space="preserve"><tspan fill="#767676">  Privilege           </tspan><tspan fill="#cccccc"> standard (unprivileged)</tspan></text>
+    <text x="24" y="218" xml:space="preserve"><tspan fill="#767676">  Elevation Path      </tspan><tspan fill="#cccccc"> User Account Control (UAC) / allowlisted elevation helper</tspan></text>
+    <text x="24" y="236" xml:space="preserve"><tspan fill="#767676">  Management          </tspan><tspan fill="#cccccc"> external management unverified; scan-only policy protection active</tspan></text>
+
+    <text x="24" y="268" fill="#ffffff" font-weight="bold">Platform Adapters</text>
+    <text x="24" y="288" xml:space="preserve"><tspan fill="#ffffff">  registry_native     </tspan><tspan fill="#cccccc"> available</tspan></text>
+    <text x="24" y="306" xml:space="preserve"><tspan fill="#ffffff">  registry_wow6432    </tspan><tspan fill="#cccccc"> available</tspan></text>
+    <text x="24" y="324" xml:space="preserve"><tspan fill="#ffffff">  host_discovery      </tspan><tspan fill="#cccccc"> available</tspan></text>
+
+    <text x="24" y="356" fill="#ffffff" font-weight="bold">Storage and State</text>
+    <text x="24" y="376" xml:space="preserve"><tspan fill="#767676">  Transaction Root    </tspan><tspan fill="#cccccc"> %LocalAppData%\privr\state\transactions</tspan></text>
+    <text x="24" y="394" xml:space="preserve"><tspan fill="#767676">  Directory Access    </tspan><tspan fill="#13a10e"> accessible (writable)</tspan></text>
+    <text x="24" y="412" xml:space="preserve"><tspan fill="#767676">  Reparse Point Check </tspan><tspan fill="#13a10e"> passed (no junction or symlink detected)</tspan></text>
+
+    <text x="24" y="444" fill="#ffffff" font-weight="bold">Catalogue and Schemas</text>
+    <text x="24" y="464" xml:space="preserve"><tspan fill="#767676">  Active Controls     </tspan><tspan fill="#cccccc"> 28 controls</tspan></text>
+    <text x="24" y="482" xml:space="preserve"><tspan fill="#767676">  Source Staleness    </tspan><tspan fill="#cccccc"> 0 stale sources (reviewed 2026-10-01)</tspan></text>
+    <text x="24" y="500" xml:space="preserve"><tspan fill="#767676">  Schema Versions     </tspan><tspan fill="#cccccc"> catalogue v1, policy v1, report v1, journal v1</tspan></text>
+
+    <text x="24" y="534" fill="#13a10e" font-weight="bold">System is healthy. All capability checks passed.</text>
+  </g>
+</svg>

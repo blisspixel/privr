@@ -37,7 +37,7 @@ milestone and its results should not be trusted.
 | macOS `check` | Experimental. Discovery and 6 controls. Compiled and tested in CI; never checked against a real Mac. |
 
 | Agent server (`mcp`) | Implemented and tested. Synchronous stdio server with read-only tools and gated mutation. Conforms to Model Context Protocol and Agent Plugins v1.0.0. |
-| `doctor` | Placeholder. Reports that platform adapters are not implemented. |
+| `doctor` | Implemented and tested. Reports non-identifying OS facts, privilege level, platform adapters, storage integrity, reparse-point verification, and schema versions. |
 | Profile ladder | Not built. Every profile enforces every control. |
 | Custom policy files, interactive approval, sections | Not built. `apply` and `rollback` require `--yes`. |
 | Fixture files, staleness, signed releases | Not built. |
@@ -68,9 +68,9 @@ Mutation (blocks 0.2.0):
 
 Reporting (blocks 0.1.0):
 
-- [ ] `plan` prints "machine matches policy" when drift exists that has no
-  automatic remediation. On the validation machine `check` reports 5 drifted
-  machine-scope controls while `plan` reports none.
+- [x] `plan` prints "machine matches policy" when drift exists that has no
+  automatic remediation. (Fixed: `plan` distinguishes unautomated drift from
+  full policy compliance and reports honestly).
 - [ ] Controls ship without per-control fixture files, so the fixture
   requirements in [CONTROL_STANDARD.md](docs/CONTROL_STANDARD.md) are unmet for
   all of them.

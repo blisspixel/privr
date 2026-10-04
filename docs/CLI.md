@@ -23,7 +23,7 @@ second call.
 privr
 privr check [--profile <name> | --policy <path>] [--control <id-or-prefix>]
             [--section <name>] [--all]
-privr explain <control-id>
+privr explain [<control-id-or-topic>]
 privr list [--platform <name>] [--profile <name>] [--section <name>]
 privr plan [--profile <name> | --policy <path>] [--control <id-or-prefix>]
            [--section <name>]
@@ -106,8 +106,14 @@ This output is illustrative, not a current implementation claim.
 
 ## `explain`
 
-An explanation includes:
+Running `privr explain` without arguments (or with topic keywords `score`, `posture`, `critical`, `overview`) renders an educational walkthrough explaining:
+- exact posture scoring math (`Compliant Controls / Evaluated Controls`);
+- the five orthogonal posture dimensions;
+- the four operational friction tiers;
+- the five most critical Windows privacy and security controls (`llmnr`, `wpad`, `error-reporting`, `inventory-collector`, `delivery-optimization`);
+- recommended next commands (`privr diff`, `privr fix`).
 
+Passing an exact control identifier (e.g. `privr explain windows.security.llmnr`) inspects deep technical evidence:
 - current and desired semantic values;
 - data involved and likely destination;
 - privacy benefit, and security or functionality tradeoffs;

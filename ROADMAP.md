@@ -21,7 +21,7 @@ The decisions that constrain every milestone are recorded in
 
 ## Current state
 
-Reviewed 2026-10-02 against `main`. This section is the single statement of
+Reviewed 2026-10-03 against `main`. This section is the single statement of
 what exists; other documents link here rather than repeating counts.
 
 Terms: **implemented** means the code exists; **tested** means automated tests
@@ -31,8 +31,8 @@ milestone and its results should not be trusted.
 
 | Area | State |
 |---|---|
-| Windows `check`, `explain`, `list` | Implemented and tested with recorded evidence. 28 controls across 5 posture dimensions. Validated on Windows 11 Pro 25H2. |
-| Windows `plan`, `apply`, `rollback` | Implemented and tested. 25 controls carry live, verified apply and rollback routines with pre/postimage validation. Native in-place elevation (-e, --elevate) invokes UAC/sudo; interactive plan review and approval prompts run in terminals; noninteractive mode defaults safely to daily-driver with --yes. |
+| Windows `check`, `explain`, `list` | Implemented and tested with recorded evidence. 28 controls across 5 posture dimensions. Validated on Windows 11 Pro 25H2. `privr explain` includes scoring walkthrough and critical controls. |
+| Windows `plan`, `apply`, `rollback` | Implemented and tested. 25 controls carry live, verified apply and rollback routines with pre/postimage validation. Native in-place elevation (-e, --elevate) invokes UAC/sudo with typed CLI argument serialization; interactive plan review and approval prompts run in terminals; noninteractive mode defaults safely to daily-driver with --yes. |
 | Posture vectors and personas | Implemented and tested. 5 posture dimensions, 4 friction tiers, 5 workload personas across `check`, `recommend`, `simulate`, `plan`, and `apply`. |
 | Linux `check` | Experimental. Discovery and 13 controls (GNOME, Ubuntu, Debian, Fedora, KDE, FreeDesktop, systemd) with elevation metadata. Compiled and tested in CI; never checked against a real desktop. |
 | macOS `check` | Experimental. Discovery and 6 controls with elevation metadata. Compiled and tested in CI; never checked against a real Mac. |

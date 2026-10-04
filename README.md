@@ -17,7 +17,7 @@ designed to be driven by an agent harness as readily as by a person.
 
 ## Status
 
-- **Windows `check`, `explain`, `list`, `doctor`, `recommend`, `simulate`, `plan`, `apply`, `history`, and `rollback` work**, with 28 controls across five posture dimensions, verified rollback journaling, interactive and non-interactive workflows, convenient CLI aliases (`status`, `scan`, `diff`, `fix`, `harden`, `undo`, `log`), and adaptive elevation handling.
+- **Windows `check`, `explain`, `list`, `doctor`, `recommend`, `simulate`, `plan`, `apply`, `history`, and `rollback` work**, with 28 controls across five posture dimensions, verified rollback journaling, interactive terminal action prompts (`[y] apply safe fixes, [d] preview diff, [e] explain score, [q] quit`), scoring model and critical controls walkthroughs, convenient CLI aliases (`status`, `scan`, `diff`, `fix`, `harden`, `undo`, `log`), and native UAC elevation handling.
 - **Defensive and adaptive application**: `plan` and `apply` accept `--workload` (`general`, `developer`, `creative`, `mobile`, `high-assurance`) and `--max-friction`. When run unprivileged, batch operations apply eligible user-scope controls and report deferred machine-scope controls without failure.
 - **Linux (13 controls) and macOS (6 controls) `check` are experimental** with typed elevation metadata, tested in CI across multiple platforms.
 - **Agent integration (`privr mcp`) is implemented**, providing a stdio Model Context Protocol (MCP) server exposing `privr_check`, `privr_plan`, `privr_apply`, `privr_recommend`, `privr_simulate`, `privr_explain`, and `privr_doctor` with Agent Plugins v1.0.0 packaging.
@@ -122,7 +122,7 @@ privr undo (or privr rollback)
 
 - `doctor` reports capability facts, elevation paths, platform adapters, storage integrity, and schema versions.
 - `check` (aliases: `status`, `scan`, `audit`) reads effective state and compares it against a policy across five posture dimensions (behavioral-commercial, forensic-residue, network-exposure, diagnostic-crash, ambient-sensor).
-- `explain` shows evidence, applicability, management source, and tradeoffs.
+- `explain` without arguments (or with `score`, `critical`, `posture`) walks through the posture calculation, five dimensions, four friction tiers, and critical controls; passing an exact ID shows technical evidence, applicability, management source, and tradeoffs.
 - `recommend` computes deterministic change recommendations ordered by friction tier (Tier 0 transparent to Tier 3 incompatible/tradeoff), workload persona, or friction budget.
 - `simulate` performs a dry-run counterfactual posture vector projection without mutating host state, reporting transition deltas, friction counts, and reboot or signout requirements.
 - `plan` (alias: `diff`) is read-only and shows the exact eligible change set. Running `privr plan` without arguments defaults to the daily-driver general persona and cosmetic friction ceiling.

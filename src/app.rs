@@ -1924,6 +1924,23 @@ mod tests {
     }
 
     #[test]
+    fn explain_known_identifier_succeeds() {
+        let control_id = if cfg!(windows) {
+            "windows.advertising.id"
+        } else if cfg!(target_os = "macos") {
+            "macos.analytics.share-mac"
+        } else {
+            "debian.popularity-contest.participation"
+        };
+        let (code, stdout, stderr) = run_for_test(Some(Command::Explain {
+            id: Some(control_id.to_owned()),
+        }));
+        assert_eq!(code, 0, "stderr: {stderr}");
+        assert!(stdout.contains("Why it matters"));
+        assert!(stdout.contains("Evidence"));
+    }
+
+    #[test]
     fn check_renders_a_report_header() {
         let (_, stdout, _) = run_for_test(Some(Command::Check {
             profile: Some(Profile::Baseline),

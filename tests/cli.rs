@@ -261,3 +261,21 @@ fn explain_topic_keywords_show_scoring_model() {
             ));
     }
 }
+
+#[test]
+fn explain_known_control_shows_evidence_and_rationale() {
+    let control_id = if cfg!(windows) {
+        "windows.advertising.id"
+    } else if cfg!(target_os = "macos") {
+        "macos.analytics.share-mac"
+    } else {
+        "debian.popularity-contest.participation"
+    };
+    let mut command = Command::cargo_bin("privr").expect("binary");
+    command
+        .args(["explain", control_id])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Why it matters"))
+        .stdout(predicate::str::contains("Evidence"));
+}

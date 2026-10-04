@@ -366,39 +366,54 @@ pub fn render_overview(ui: &Ui) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    // Only the platform-gated tests below observe a real host.
-    #[cfg(windows)]
     use crate::platform;
 
     #[cfg(windows)]
     const KNOWN: &str = "windows.advertising.id";
+    #[cfg(target_os = "linux")]
+    const KNOWN: &str = "debian.popularity-contest.participation";
+    #[cfg(target_os = "macos")]
+    const KNOWN: &str = "macos.analytics.share-mac";
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
+    const KNOWN: &str = "unknown";
 
     #[test]
     fn an_unknown_identifier_is_not_found() {
-        assert!(find("windows.does.not.exist").is_err());
+        assert!(find("platform.does.not.exist").is_err());
     }
 
-    #[cfg(windows)]
     #[test]
     fn a_known_identifier_resolves() {
         assert!(find(KNOWN).is_ok());
     }
 
-    #[cfg(windows)]
     #[test]
     fn a_near_miss_suggests_the_real_identifier() {
         // A bare failure wastes the caller's next step, whether that caller is
         // a person or an agent.
-        let hits = suggestions("windows.advertising");
+        let prefix = if cfg!(windows) {
+            "windows.advertising"
+        } else if cfg!(target_os = "macos") {
+            "macos.analytics"
+        } else {
+            "debian.popularity"
+        };
+        let hits = suggestions(prefix);
         assert!(hits.iter().any(|id| id == KNOWN), "no suggestion: {hits:?}");
     }
 
     #[test]
     fn suggestions_are_bounded() {
-        assert!(suggestions("windows").len() <= 5);
+        let prefix = if cfg!(windows) {
+            "windows"
+        } else if cfg!(target_os = "macos") {
+            "macos"
+        } else {
+            "debian"
+        };
+        assert!(suggestions(prefix).len() <= 5);
     }
 
-    #[cfg(windows)]
     #[test]
     fn an_explanation_carries_its_evidence() {
         let host = platform::discover();
@@ -414,7 +429,6 @@ mod tests {
         assert!(text.contains("Set by"), "no management source");
     }
 
-    #[cfg(windows)]
     #[test]
     fn an_explanation_pairs_a_cost_with_a_remedy() {
         let host = platform::discover();
@@ -434,13 +448,24 @@ mod tests {
         }
     }
 
-    #[cfg(windows)]
     #[test]
     fn an_explanation_is_plain_text_when_color_is_off() {
         let host = platform::discover();
         let control = find(KNOWN).ok().expect("control exists");
         let text = render(&control, &host, &Ui::plain());
         assert!(!text.contains('\u{1b}'));
+    }
+
+    #[test]
+    fn an_explanation_renders_with_color_when_enabled() {
+        let host = platform::discover();
+        let control = find(KNOWN).ok().expect("control exists");
+        let text = render(
+            &control,
+            &host,
+            &Ui::resolve(crate::ui::ColorPreference::Always, true),
+        );
+        assert!(!text.is_empty());
     }
 
     #[test]

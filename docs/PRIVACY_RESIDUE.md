@@ -261,14 +261,68 @@ Local privacy residue presents four distinct threat vectors:
   retention limits.
 
 #### Shell command histories
-- **Artifacts:**
-  - Windows: `%APPDATA%\Microsoft\Windows\PowerShell\PSReadLine\ConsoleHost_history.txt`
-  - macOS / Linux: `~/.zsh_history`, `~/.bash_history`
-- **Privacy risk:** Accidental entry of passwords, tokens in curl authorization
-  headers, and database connection strings.
-- **Documented vendor mechanism:**
-  - PowerShell: `[Microsoft.PowerShell.PSConsoleReadLine]::ClearHistory()`
-  - Bash / Zsh: `history -c`, `history -w`
+
+Status: proposed prevention control, not implemented. Erasing existing shell
+history remains out of scope.
+
+PowerShell's session history and PSReadLine's history are separate. PSReadLine
+normally saves commands to a host-specific file and filters some sensitive
+input; this is not a guarantee that secrets are excluded. Command arguments
+can expose credentials and private paths. The default Windows location is
+`%APPDATA%\Microsoft\Windows\PowerShell\PSReadLine\$($Host.Name)_history.txt`,
+but hosts and configured paths differ. Bash and Zsh have separate mechanisms
+and are not covered by this proposal.
+Source: [Microsoft about_PSReadLine](https://learn.microsoft.com/powershell/module/psreadline/about/about_psreadline).
+
+The proposed choice is **session-only history**: retain command recall during
+the current shell, but do not use a persistent PSReadLine history file. For
+manual configuration, run in the interactive PowerShell window being configured:
+
+```powershell
+Set-PSReadLineOption -HistorySaveStyle SaveNothing
+Get-PSReadLineOption | Select-Object HistorySaveStyle
+```
+
+This costs cross-session recall. It does not delete old history or remove
+entries already loaded into memory. Setting it before the first interactive
+prompt in a fresh shell avoids importing saved history in supported PSReadLine
+versions; this needs version-specific fixtures before support is claimed.
+Source: [PSReadLine initialization](https://github.com/PowerShell/PSReadLine/blob/master/PSReadLine/ReadLine.cs).
+
+To persist the choice, add the setting once to the appropriate existing
+PowerShell profile, preserving its contents, then verify in a fresh interactive
+shell. Windows PowerShell and PowerShell use different profile locations;
+hosts can have their own profiles. Later profiles can override earlier ones,
+and `-NoProfile` or execution policy can prevent loading. An already-open shell
+does not receive a profile edit. Do not overwrite a profile or change execution
+policy as privacy remediation.
+Source: [Microsoft about_Profiles](https://learn.microsoft.com/powershell/module/microsoft.powershell.core/about/about_profiles).
+
+Disabling predictive suggestions is an independent preference, available only
+when the loaded PSReadLine version supports it:
+
+```powershell
+Set-PSReadLineOption -PredictionSource None
+```
+
+Tab completion and finding commands on PATH are separate capabilities. Disabling
+predictions does not disable history persistence. Conversely, if saving is
+re-enabled later in the same session, previously entered commands can be
+written to disk. Source: [Microsoft Set-PSReadLineOption](https://learn.microsoft.com/powershell/module/psreadline/set-psreadlineoption).
+
+`Clear-History` concerns PowerShell session history, not the persistent
+PSReadLine file; PSReadLine's `ClearHistory()` clears its in-memory history,
+not that file. Neither is a persistent erasure mechanism for `privr`.
+Source: [Microsoft Clear-History](https://learn.microsoft.com/powershell/module/microsoft.powershell.core/clear-history)
+and [PSReadLine ClearHistory](https://github.com/PowerShell/PSReadLine/blob/master/PSReadLine/History.cs).
+
+History saving is local retention, not vendor sharing. This choice does not
+disable transcription, script block logging, terminal scrollback, or logging
+performed by invoked programs. A standalone `privr` process cannot observe or
+change its parent shell's in-memory options. Until a reviewed session evidence
+mechanism exists, guidance must remain review or unknown, never pass based on
+profile text. Reports must contain settings only, never command contents or
+personalized history and profile paths.
 
 ---
 
@@ -320,4 +374,3 @@ privr purge [--preview] [<target>] [--accept-risk <target>]
 | `linux.systemd.journal` | Linux | High | `journalctl --vacuum-time=0` / volatile storage |
 | `linux.gnome.recent-files` | Linux | Moderate | `gtk_recent_manager_purge_items()` |
 | `developer.ai.stale-sessions` | All | High | Session pruning older than retention limit |
-

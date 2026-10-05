@@ -59,12 +59,13 @@ way to keep the capability, and a plan that changes nothing.
 
 The image is a mockup of unimplemented behaviour, unlike the output above it.
 
-Local retention matters too. Planned PowerShell support will offer history
-only for the current shell, preserving command recall while preventing new
-PSReadLine history from being saved across sessions. This loses cross-session
-recall, so it requires an explicit choice. Predictive suggestions are a separate
-option. Existing history is left intact, and transcription and security logs
-remain outside this setting. See the [roadmap](ROADMAP.md#powershell-session-only-history-planned).
+Local retention matters too. Planned PowerShell support will recommend
+session-only command history at baseline, keeping recall in the current shell
+without saving new PSReadLine history across sessions. The plan will disclose
+the loss of cross-session recall. Bounded retention and cleanup of existing
+history need further research; security logs remain outside this setting.
+Predictive suggestions are a separate option. See the
+[roadmap](ROADMAP.md#powershell-session-only-history-planned).
 
 ## Why this exists
 

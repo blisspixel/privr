@@ -262,8 +262,9 @@ Local privacy residue presents four distinct threat vectors:
 
 #### Shell command histories
 
-Status: proposed prevention control, not implemented. Erasing existing shell
-history remains out of scope.
+Status: proposed baseline prevention recommendation, not implemented. Bounded
+retention and existing-history cleanup need research; erasure remains excluded
+pending the roadmap's scope review.
 
 PowerShell's session history and PSReadLine's history are separate. PSReadLine
 normally saves commands to a host-specific file and filters some sensitive
@@ -274,6 +275,13 @@ but hosts and configured paths differ. Bash and Zsh have separate mechanisms
 and are not covered by this proposal.
 Source: [Microsoft about_PSReadLine](https://learn.microsoft.com/powershell/module/psreadline/about/about_psreadline).
 
+In upstream PSReadLine, incremental saving appends to the file, while
+`MaximumHistoryCount` bounds recall rather than pruning the persisted file.
+There is no age-based expiry in that write path. Reducing the recall limit is
+therefore not evidence of reduced retention on disk. A future recent-history
+option must prove its persisted bound before it is recommended as cleanup.
+Source: [PSReadLine history read and write implementation](https://github.com/PowerShell/PSReadLine/blob/master/PSReadLine/History.cs).
+
 The proposed choice is **session-only history**: retain command recall during
 the current shell, but do not use a persistent PSReadLine history file. For
 manual configuration, run in the interactive PowerShell window being configured:
@@ -283,7 +291,8 @@ Set-PSReadLineOption -HistorySaveStyle SaveNothing
 Get-PSReadLineOption | Select-Object HistorySaveStyle
 ```
 
-This costs cross-session recall. It does not delete old history or remove
+This is the proposed baseline recommendation, with the loss of cross-session
+recall disclosed before applying it. It does not delete old history or remove
 entries already loaded into memory. Setting it before the first interactive
 prompt in a fresh shell avoids importing saved history in supported PSReadLine
 versions; this needs version-specific fixtures before support is claimed.

@@ -270,11 +270,12 @@ over-the-shoulder elevation safety.
 
 ### PowerShell session-only history (planned)
 
-Offer an explicit user-scope choice to keep command recall in the current
-shell while stopping persistent PSReadLine history. This reduces local command
-retention and costs cross-session recall. Treat it as workflow-altering friction,
-outside automatic daily-driver fixes; show it for review at baseline. Existing
-history is not erased by this change.
+Recommend session-only history at baseline: keep command recall in the current
+shell while stopping persistent PSReadLine history. Local command retention is
+a privacy concern even without vendor transmission. Disclose the loss of
+cross-session recall in the reviewed plan and let users retain persistence
+deliberately. Treat the change as workflow-altering friction, never as zero
+workflow disruption. Existing history is not erased by this setting.
 
 - [ ] Research `windows.shell.history-persistence` with semantic states
   `session-only` and `persistent`, under the control standard. Establish the
@@ -290,6 +291,15 @@ history is not erased by this change.
   profiles, Windows PowerShell versus PowerShell, and already-open shells.
 - [ ] Keep `PredictionSource = None` an independent optional choice, gated by
   PSReadLine support. Tab completion and PATH command discovery remain usable.
+- [ ] Research a bounded-retention alternative for users who want recent
+  cross-session recall. Verify the bound on persisted data, not just the recall
+  buffer; `MaximumHistoryCount` alone must not be presented as on-disk cleanup.
+- [ ] Review the current shell-history erasure exclusion and decision 13 before
+  adding cleanup of existing PSReadLine history. Ordinary command recall is
+  distinct from security and audit logs. Any supported cleanup must identify
+  the documented vendor mechanism, disclose irreversibility, and account for
+  open shells rewriting saved entries. Until that review is resolved, cleanup
+  remains unimplemented and excluded from ordinary `apply`.
 - [ ] Never execute arbitrary profile code to audit it, change execution policy,
   weaken transcription or security logging, or read command history contents
   into evidence. Record only allowlisted settings and non-identifying version
@@ -428,3 +438,6 @@ false pass, and no control reports success from an uncommitted write.
    language, for controls that need a value rather than a boolean?
 6. Which future high-risk policy packs are useful enough to justify their review
    and support burden?
+7. Can documented shell-history mechanisms support bounded local retention and
+   deliberate cleanup without weakening security logging or collecting command
+   contents? The present erasure exclusion needs review before this can ship.

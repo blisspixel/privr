@@ -17,9 +17,9 @@ designed to be driven by an agent harness as readily as by a person.
 
 ## Status
 
-- **Windows `check`, `explain`, `list`, `doctor`, `recommend`, `simulate`, `plan`, `apply`, `history`, and `rollback` work**, with 28 controls across five posture dimensions, verified rollback journaling, interactive terminal action prompts (`[y] apply safe fixes, [d] preview diff, [e] explain score, [q] quit`), scoring model and critical controls walkthroughs, convenient CLI aliases (`status`, `scan`, `diff`, `fix`, `harden`, `undo`, `log`), and native UAC elevation handling.
+- **Windows `check`, `explain`, `list`, `doctor`, `recommend`, `simulate`, `plan`, `apply`, `history`, and `rollback` are implemented**, with posture dimensions, rollback journaling, interactive terminal action prompts (`[y] apply safe fixes, [d] preview diff, [e] explain score, [q] quit`), scoring model and critical controls walkthroughs, convenient CLI aliases (`status`, `scan`, `diff`, `fix`, `harden`, `undo`, `log`), and native UAC elevation handling. Release blockers remain in the roadmap.
 - **Defensive and adaptive application**: `plan` and `apply` accept `--workload` (`general`, `developer`, `creative`, `mobile`, `high-assurance`) and `--max-friction`. When run unprivileged, batch operations apply eligible user-scope controls and report deferred machine-scope controls without failure.
-- **Linux (13 controls) and macOS (6 controls) `check` are experimental** with typed elevation metadata, tested in CI across multiple platforms.
+- **Linux and macOS `check` are experimental** with typed elevation metadata, tested in CI across multiple platforms.
 - **Agent integration (`privr mcp`) is implemented**, providing a stdio Model Context Protocol (MCP) server exposing `privr_check`, `privr_plan`, `privr_apply`, `privr_recommend`, `privr_simulate`, `privr_explain`, and `privr_doctor` with Agent Plugins v1.0.0 packaging.
 
 The full state, including known defects, is in
@@ -44,8 +44,10 @@ diagnostics
 Something had set `AllowTelemetry = 0` on a Windows Professional machine. Every
 tool that checks that value reports telemetry as disabled. It is not.
 
-What is designed but not built: profiles that select different controls,
-sectioned approval, fixture files, and signed releases.
+What is designed but not built: custom policy files, sectioned approval,
+per-control fixture files, and signed releases. PowerShell session-only history
+is planned, with [its scope and tradeoffs](docs/PRIVACY_RESIDUE.md#shell-command-histories)
+documented; it is not checked or changed by `privr` today.
 
 ## Where it is going
 
@@ -56,6 +58,14 @@ way to keep the capability, and a plan that changes nothing.
 ![privr plan, showing changes grouped into sections, a tradeoff paired with a mitigation, and confirmation that nothing has been changed](docs/assets/plan-linux.svg)
 
 The image is a mockup of unimplemented behaviour, unlike the output above it.
+
+Local retention matters too. Planned PowerShell support will recommend
+session-only command history at baseline, keeping recall in the current shell
+without saving new PSReadLine history across sessions. The plan will disclose
+the loss of cross-session recall. Bounded retention and cleanup of existing
+history need further research; security logs remain outside this setting.
+Predictive suggestions are a separate option. See the
+[roadmap](ROADMAP.md#powershell-session-only-history-planned).
 
 ## Why this exists
 

@@ -40,6 +40,7 @@ milestone and its results should not be trusted.
 | `doctor` | Implemented and tested. Reports non-identifying OS facts, privilege level, platform adapters, storage integrity, reparse-point verification, and schema versions. |
 | Profile ladder | Implemented and verified. Baseline <= Strict <= Restrictive ladder partitions controls monotonically. |
 | Custom policy files, sections | Not built. Subplan sections and external policy files scheduled for 0.3.0. |
+| PowerShell session-only history | Planned research and guided configuration. No PSReadLine history or prediction control is implemented. See [the proposal](#powershell-session-only-history-planned). |
 | Fixture files, staleness, signed releases | In progress. |
 
 ### Known issues
@@ -137,9 +138,9 @@ Required before the first useful release:
   select different control sets rather than all controls being enforced.
 - [ ] Implement review staleness against a real reviewed-version range.
 - [ ] Implement `doctor` against real discovery.
-- [ ] Reach fifteen documented controls. The count exists (23 on Windows);
+- [ ] Reach fifteen documented controls. The catalogue exceeds that count;
   what remains is the documentation and fixtures each needs under the control
-  standard.
+  standard. See [Current state](#current-state) for counts.
 - [ ] Reserve the crate name, or decide on a different one.
 
 ## Naming
@@ -190,6 +191,9 @@ Engineering work:
   for precedence, so a control is not inert on Home and Pro.
 - [ ] Prefer user-scope controls, so an unelevated check is already worth
   running on a personal machine.
+- [ ] Research PowerShell session-only history with runtime evidence and
+  guided review where effective state cannot be observed. See
+  [the proposal](#powershell-session-only-history-planned).
 - [ ] Add `explain`, `list` as a capability manifest, and stable fixtures.
 - [ ] Group results into sections as a reporting structure, with aggregates that
   exclude what could not be evaluated.
@@ -209,9 +213,8 @@ and an agent can drive it without being able to change anything.
 
 ## 0.2.0: Windows plan, apply, and rollback
 
-An experimental apply and rollback path already exists for 14 user-scope
-controls. It meets none of the transaction requirements below yet; see
-[Current state](#current-state).
+Apply and rollback are implemented, but release requirements remain unmet;
+see [Current state](#current-state) for coverage and resolved defects.
 
 Product requirements:
 
@@ -230,6 +233,9 @@ Product requirements:
 - [ ] Add `history purge` so an operator can destroy their own record.
 - [ ] Enable mutating agent tools only behind an explicit flag, with a
   confirmation token that cannot be obtained through a tool call.
+- [ ] After the transaction prerequisites are met, offer reviewed PowerShell
+  history configuration, initially guided. Automatic profile edits require
+  exact rollback and independent effective-state verification first.
 
 Privilege and transaction requirements:
 
@@ -262,9 +268,53 @@ Exit criterion: disposable machine tests prove apply, idempotence, reboot,
 conflict-aware rollback, section-granular rollback, crash recovery, and
 over-the-shoulder elevation safety.
 
+### PowerShell session-only history (planned)
+
+Recommend session-only history at baseline: keep command recall in the current
+shell while stopping persistent PSReadLine history. Local command retention is
+a privacy concern even without vendor transmission. Disclose the loss of
+cross-session recall in the reviewed plan and let users retain persistence
+deliberately. Treat the change as workflow-altering friction, never as zero
+workflow disruption. Existing history is not erased by this setting.
+
+- [ ] Research `windows.shell.history-persistence` with semantic states
+  `session-only` and `persistent`, under the control standard. Establish the
+  supported Windows PowerShell, PowerShell, PSReadLine, and host versions with
+  primary sources and fixtures before catalogue inclusion.
+- [ ] Observe `Get-PSReadLineOption` in the relevant interactive session. A
+  separate child shell cannot attest to its parent; profile text, an absent
+  history file, or an unloaded module must never prove a pass. Without session
+  evidence, report review or unknown.
+- [ ] Guide `HistorySaveStyle = SaveNothing` and verify it before interactive
+  input in a fresh shell. Distinguish current-session behavior from startup
+  configuration, profile load order, `-NoProfile`, blocked profiles, host-specific
+  profiles, Windows PowerShell versus PowerShell, and already-open shells.
+- [ ] Keep `PredictionSource = None` an independent optional choice, gated by
+  PSReadLine support. Tab completion and PATH command discovery remain usable.
+- [ ] Research a bounded-retention alternative for users who want recent
+  cross-session recall. Verify the bound on persisted data, not just the recall
+  buffer; `MaximumHistoryCount` alone must not be presented as on-disk cleanup.
+- [ ] Review the current shell-history erasure exclusion and decision 13 before
+  adding cleanup of existing PSReadLine history. Ordinary command recall is
+  distinct from security and audit logs. Any supported cleanup must identify
+  the documented vendor mechanism, disclose irreversibility, and account for
+  open shells rewriting saved entries. Until that review is resolved, cleanup
+  remains unimplemented and excluded from ordinary `apply`.
+- [ ] Never execute arbitrary profile code to audit it, change execution policy,
+  weaken transcription or security logging, or read command history contents
+  into evidence. Record only allowlisted settings and non-identifying version
+  and host facts.
+- [ ] Require exact preimages, conflict-aware rollback, and fresh-session
+  verification before automatic configuration. Fixtures must guard against
+  startup overrides, unsupported options, denied reads, and ineffective edits.
+  Rollback restores configuration only; it cannot recover unsaved commands.
+
+Primary sources, behavior details, and manual configuration are in
+[Privacy residue: shell command histories](docs/PRIVACY_RESIDUE.md#shell-command-histories).
+
 ## 0.3.0: macOS read-only release
 
-Experimental discovery and 4 controls exist. They do not yet meet the
+Experimental discovery and controls exist. They do not yet meet the
 requirements below; see [Current state](#current-state).
 
 - [ ] Support the current and two prior supported macOS releases.
@@ -288,7 +338,7 @@ profile exists.
 
 ## 0.4.0: named Linux environments
 
-Experimental discovery and 9 controls exist. They do not yet meet the
+Experimental discovery and controls exist. They do not yet meet the
 requirements below; see [Current state](#current-state).
 
 Initial targets:
@@ -361,6 +411,8 @@ false pass, and no control reports success from an uncommitted write.
 - Generic disk cleanup. Size is computable; whether the operator still wants the
   data is not.
 - Erasing security, audit, forensic, crash, shell-history, or cloud data.
+  Preventing future shell-history persistence is separate planned work, not
+  erasure of existing history or suppression of security logging.
 - Disabling updates, encryption, or core malware protection in any profile in
   the default ladder.
 - Direct permissions-database writes, undocumented platform state, or raw dconf
@@ -386,3 +438,6 @@ false pass, and no control reports success from an uncommitted write.
    language, for controls that need a value rather than a boolean?
 6. Which future high-risk policy packs are useful enough to justify their review
    and support burden?
+7. Can documented shell-history mechanisms support bounded local retention and
+   deliberate cleanup without weakening security logging or collecting command
+   contents? The present erasure exclusion needs review before this can ship.

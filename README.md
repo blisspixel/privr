@@ -41,13 +41,21 @@ diagnostics
             required diagnostic data.
 ```
 
-Something had set `AllowTelemetry = 0` on a Windows Professional machine. Every
-tool that checks that value reports telemetry as disabled. It is not.
+Something had set `AllowTelemetry = 0` on a Windows Professional machine. A
+checker that interprets only that configured value could report telemetry as
+disabled. It is not. The `pass` above means the effective required-only level
+matches the selected policy; it does not mean diagnostic transmission is off.
 
 What is designed but not built: custom policy files, sectioned approval,
 per-control fixture files, and signed releases. PowerShell session-only history
 is planned, with [its scope and tradeoffs](docs/PRIVACY_RESIDUE.md#shell-command-histories)
 documented; it is not checked or changed by `privr` today.
+Cache and disposable-temp cleanup is [planned](docs/CACHE_PRIVACY_PLAN.md),
+thorough by default, with `--polite` retaining disruptive caches. Both modes
+protect OS operation, recovery, and active work; login state, history, and
+persistent site data require separate selection and approval. Unconfirmed calls
+preview the plan. Removal does not promise secure media erasure. `purge` is not
+implemented.
 
 ## Where it is going
 
@@ -77,8 +85,9 @@ is "equivalent to setting the value of 1"
 ([Policy CSP - System](https://learn.microsoft.com/windows/client-management/mdm/policy-csp-system)).
 
 So on the most common editions of Windows the write succeeds, the value reads
-back as `0`, every tool that checks it reports success, and the effective
-behavior is unchanged. The machine audits as hardened and is not.
+back as `0`, a checker can mistake that configured value for effective refusal,
+and the diagnostic level remains required-only. The write alone does not prove
+the claimed privacy effect.
 
 That is not an unusual case. Several widely applied policy values are silently
 inert outside Enterprise and Education, and comparable traps exist on the other
@@ -116,8 +125,10 @@ release. The installer will place an unprivileged binary and nothing else;
 check -> explain -> recommend -> simulate -> plan -> apply -> verify -> rollback
 ```
 
-This is the canonical workflow. On Windows, all commands in the lifecycle are implemented,
-tested, and verified against real hosts:
+This is the canonical workflow. On Windows, all commands in the lifecycle are
+implemented. Mutation remains experimental until the roadmap's release
+requirements are met; see [Current state](ROADMAP.md#current-state) for testing
+and validation limits:
 
 ```text
 privr check (or privr scan, privr status)
@@ -203,6 +214,7 @@ See [docs/SAFETY.md](docs/SAFETY.md) and
 - [Threat model](docs/THREAT_MODEL.md)
 - [Privacy behavior](docs/PRIVACY.md)
 - [Privacy residue and erasure](docs/PRIVACY_RESIDUE.md)
+- [Privacy cache capability plan](docs/CACHE_PRIVACY_PLAN.md)
 - [Testing strategy](docs/TESTING.md)
 - [Supply-chain security](docs/SUPPLY_CHAIN.md)
 - [Research notes](docs/RESEARCH.md)

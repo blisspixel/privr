@@ -22,8 +22,10 @@ configuration demonstrates why:
 - A line that returns `pass` where it should return `unknown` is fully covered
   and wrong. Coverage cannot see the failure this project exists to prevent.
 
-Coverage is therefore measured as merged region coverage across all three
-operating systems, gated per crate with a ratchet rather than a fixed threshold.
+The current CI gate is 80 percent line coverage on Linux, with native tests and
+lints on all three platforms. Decision 23 plans its replacement with merged
+region coverage across all three operating systems and a per-crate ratchet.
+That replacement is not implemented yet.
 
 The metrics that actually track confidence are:
 
@@ -43,8 +45,8 @@ Implemented, and not merely designed:
 - replay coverage for the paths a live machine cannot be made to produce on
   demand, namely denied reads, malformed values, and specific edition
   combinations;
-- a suite that does not depend on the machine it runs on, with one exception:
-  a registry write test touches the live user hive, listed as a known issue in
+- a registry write test that is disabled in ordinary test runs and requires
+  `PRIVR_LIVE_WRITE_TEST=1` in a disposable VM; the resolved defect is recorded in
   [ROADMAP.md](../ROADMAP.md#current-state);
 - lints and the minimum-supported-Rust check on all three platforms, which has
   already caught failures in both directions.
@@ -56,6 +58,17 @@ injection, and the enforced network isolation layers beyond the dependency
 policy.
 
 ## Structure
+
+### Planned residue tests
+
+Purge is not implemented. Its admission criteria, preservation tests, failure
+cases, privacy canaries, and performance measurements are specified in the
+[privacy cache capability plan](CACHE_PRIVACY_PLAN.md#required-failure-evidence).
+Use recorded Context observations for ordinary tests and synthetic data in
+disposable VMs for vendor clearing operations. No test may clean a developer's
+real caches, temporary files, browser profiles, or history.
+
+### Evaluator and probe tests
 
 The evaluation engine is a pure function from catalogue, policy, host facts, and
 observations to a report.

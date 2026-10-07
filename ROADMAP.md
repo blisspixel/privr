@@ -21,7 +21,7 @@ The decisions that constrain every milestone are recorded in
 
 ## Current state
 
-Reviewed 2026-10-06 against source and tests. This section is the single statement of
+Reviewed 2026-10-07 against source and tests. This section is the single statement of
 what exists; other documents link here rather than repeating counts.
 
 Terms: **implemented** means the code exists; **tested** means automated tests
@@ -42,7 +42,7 @@ milestone and its results should not be trusted.
 | Custom policy files, sections | Not built. The minimum custom-policy schema and section approval are 0.2.0 prerequisites; policy inheritance and exceptions are planned for 0.5.0. |
 | PowerShell session-only history | Planned research and guided configuration. No PSReadLine history or prediction control is implemented. See [the proposal](#powershell-session-only-history-planned). |
 | Privacy-cache inspection and clearing | Proposed research and guided workflows, with aggressive purge selection by default and a polite option. `purge` is not implemented. See [candidate priorities, sources, and safety gates](docs/CACHE_PRIVACY_PLAN.md); automated clearing remains in 0.5.0. |
-| Fixture files | Initial file replay for 2 Windows controls (advertising ID and diagnostic data), covering 51 synthetic observation states. The compiled probes and evaluator run against exact typed bytes through recorded Context. Native captures, remaining controls, and mutation fixtures are still owed. |
+| Fixture files | Initial file replay for 2 Windows controls (advertising ID and diagnostic data), covering 55 synthetic observation states. The compiled probes and evaluator run against exact typed bytes through recorded Context. Native captures, remaining controls, and mutation fixtures are still owed. |
 | Staleness, signed releases | In progress. |
 
 ### Known issues
@@ -81,6 +81,10 @@ Mutation (blocks 0.2.0):
   from missing history.)
 
 Reporting (blocks 0.1.0):
+
+- [x] A disabled advertising policy is treated as forcing sharing. (Fixed:
+  preserve user choice, report absent user values as defaults, and replay both
+  unreadable and omitted user evidence.)
 
 - [x] `plan` prints "machine matches policy" when drift exists that has no
   automatic remediation. (Fixed: `plan` distinguishes unautomated drift from

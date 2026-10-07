@@ -78,8 +78,34 @@ const ADVERTISING: &[(&str, &str)] = &[
         ),
     ),
     (
-        "policy-enabled-conflict",
-        include_str!("../../../tests/fixtures/windows.advertising.id/policy-enabled-conflict.json"),
+        "policy-user-choice-disabled",
+        include_str!(
+            "../../../tests/fixtures/windows.advertising.id/policy-user-choice-disabled.json"
+        ),
+    ),
+    (
+        "policy-user-choice-enabled",
+        include_str!(
+            "../../../tests/fixtures/windows.advertising.id/policy-user-choice-enabled.json"
+        ),
+    ),
+    (
+        "policy-user-choice-absent",
+        include_str!(
+            "../../../tests/fixtures/windows.advertising.id/policy-user-choice-absent.json"
+        ),
+    ),
+    (
+        "policy-user-choice-denied",
+        include_str!(
+            "../../../tests/fixtures/windows.advertising.id/policy-user-choice-denied.json"
+        ),
+    ),
+    (
+        "policy-user-choice-omitted",
+        include_str!(
+            "../../../tests/fixtures/windows.advertising.id/policy-user-choice-omitted.json"
+        ),
     ),
     (
         "policy-with-omitted-user",

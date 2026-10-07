@@ -44,11 +44,7 @@ const ADVERTISING_USER: Target = Target::new(
 
 /// The policy form of the same setting.
 ///
-/// Note the inverted polarity against the user setting above: here one means
-/// the identifier is off, whereas in the user setting zero means off. Two value
-/// names for one semantic state, with opposite senses, is exactly the trap that
-/// makes a naive "zero is private" assumption wrong. Each source is decoded by
-/// its own function rather than a shared convention.
+/// One restricts the identifier. Zero delegates the decision to the user.
 const ADVERTISING_POLICY: Target = Target::new(
     Hive::LocalMachine,
     r"SOFTWARE\Policies\Microsoft\Windows\AdvertisingInfo",
@@ -65,35 +61,38 @@ fn decode_user_setting(value: &RawValue) -> Option<SemanticState> {
     }
 }
 
-fn decode_policy(value: &RawValue) -> Option<SemanticState> {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AdvertisingPolicy {
+    Disabled,
+    UserChoice,
+}
+
+fn decode_policy(value: &RawValue) -> Option<AdvertisingPolicy> {
     match value.as_u32()? {
-        1 => Some(disabled()),
-        0 => Some(enabled()),
+        1 => Some(AdvertisingPolicy::Disabled),
+        0 => Some(AdvertisingPolicy::UserChoice),
         _ => None,
     }
 }
 
 /// Resolve the advertising identifier state.
 ///
-/// The policy form is consulted first because it overrides the user setting
-/// where it is present, then the user setting, which is the source that
-/// actually governs on an unmanaged machine.
+/// Only the enforcing policy value overrides the user setting.
 fn probe_advertising_id(ctx: &Context) -> Resolution {
     let policy = ctx
         .registry
         .read(&ADVERTISING_POLICY, ManagementSource::GroupPolicy);
 
-    // A present policy value governs. Absent policy is not a finding: it simply
-    // means the user setting decides.
     // A policy we were not allowed to read might be governing this value, so we
     // cannot fall through to the user setting and claim to know the answer.
     match policy {
-        Evidence::Present { source, value } => {
-            return match decode_policy(&value) {
-                Some(state) => Resolution::determined(state, source),
-                None => Resolution::uncertain(Uncertainty::Malformed, source),
-            };
-        }
+        Evidence::Present { source, value } => match decode_policy(&value) {
+            Some(AdvertisingPolicy::Disabled) => {
+                return Resolution::determined(disabled(), source);
+            }
+            Some(AdvertisingPolicy::UserChoice) => {}
+            None => return Resolution::uncertain(Uncertainty::Malformed, source),
+        },
         Evidence::Absent { .. } => {}
         Evidence::Denied { source, .. } => {
             return Resolution::uncertain(Uncertainty::Denied, source);
@@ -110,15 +109,15 @@ fn probe_advertising_id(ctx: &Context) -> Resolution {
     }
 
     let user = ctx.registry.read(&ADVERTISING_USER, ManagementSource::User);
-    let observation = Observation::new(vec![user]);
-    Resolution::from_observation(
-        &observation,
-        &[ManagementSource::User],
-        decode_user_setting,
-        // Windows enables the advertising identifier by default, so an absent
-        // value means on, not off.
-        &enabled(),
-    )
+    match user {
+        Evidence::Absent { .. } => Resolution::determined(enabled(), ManagementSource::Default),
+        evidence => Resolution::from_observation(
+            &Observation::new(vec![evidence]),
+            &[ManagementSource::User],
+            decode_user_setting,
+            &enabled(),
+        ),
+    }
 }
 
 // Diagnostic data.
@@ -334,8 +333,8 @@ fn advertising_id() -> Control {
         ),
         sources: &[Source {
             url: "https://learn.microsoft.com/windows/client-management/mdm/policy-csp-privacy",
-            claim: "Documents the advertising identifier setting and its policy form.",
-            reviewed: "2026-09-07",
+            claim: "Policy enforcement and user choice for the advertising identifier.",
+            reviewed: "2026-10-07",
         }],
         probe: probe_advertising_id,
         apply: Some(|ctx| ADVERTISING_TOGGLE.apply(ctx)),
@@ -2289,15 +2288,18 @@ mod tests {
     }
 
     #[test]
-    fn the_two_sources_use_opposite_polarity() {
-        // The trap this control exists to demonstrate. The same semantic state
-        // is one value in the policy and the other in the user setting, so a
-        // shared decoder would invert one of them.
+    fn user_values_and_policy_restrictions_are_distinct() {
         assert_eq!(decode_user_setting(&RawValue::u32(0)), Some(disabled()));
-        assert_eq!(decode_policy(&RawValue::u32(0)), Some(enabled()));
+        assert_eq!(
+            decode_policy(&RawValue::u32(0)),
+            Some(AdvertisingPolicy::UserChoice)
+        );
 
         assert_eq!(decode_user_setting(&RawValue::u32(1)), Some(enabled()));
-        assert_eq!(decode_policy(&RawValue::u32(1)), Some(disabled()));
+        assert_eq!(
+            decode_policy(&RawValue::u32(1)),
+            Some(AdvertisingPolicy::Disabled)
+        );
     }
 
     #[test]

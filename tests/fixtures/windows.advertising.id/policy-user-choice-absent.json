@@ -1,11 +1,11 @@
 {
   "schema": 1,
-  "case": "absent-default",
+  "case": "policy-user-choice-absent",
   "control": "windows.advertising.id",
   "provenance": {
     "origin": "synthetic",
     "authored_on": "2026-10-07",
-    "description": "Readable absent values use the documented enabled default."
+    "description": "Policy zero leaves the default in control."
   },
   "host": {
     "platform": "windows",
@@ -66,8 +66,19 @@
       "target": "policy",
       "view": "native",
       "evidence": {
-        "evidence": "absent",
-        "source": "group_policy"
+        "evidence": "present",
+        "source": "group_policy",
+        "value": {
+          "kind": {
+            "kind": "u32"
+          },
+          "bytes": [
+            0,
+            0,
+            0,
+            0
+          ]
+        }
       }
     },
     {

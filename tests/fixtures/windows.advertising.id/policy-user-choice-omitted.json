@@ -1,11 +1,11 @@
 {
   "schema": 1,
-  "case": "absent-default",
+  "case": "policy-user-choice-omitted",
   "control": "windows.advertising.id",
   "provenance": {
     "origin": "synthetic",
     "authored_on": "2026-10-07",
-    "description": "Readable absent values use the documented enabled default."
+    "description": "Omitted user choice remains unknown."
   },
   "host": {
     "platform": "windows",
@@ -66,27 +66,30 @@
       "target": "policy",
       "view": "native",
       "evidence": {
-        "evidence": "absent",
-        "source": "group_policy"
-      }
-    },
-    {
-      "target": "setting",
-      "view": "native",
-      "evidence": {
-        "evidence": "absent",
-        "source": "user"
+        "evidence": "present",
+        "source": "group_policy",
+        "value": {
+          "kind": {
+            "kind": "u32"
+          },
+          "bytes": [
+            0,
+            0,
+            0,
+            0
+          ]
+        }
       }
     }
   ],
   "expected": {
-    "state": "enabled",
-    "source": "default",
-    "uncertainty": null,
+    "state": null,
+    "source": "user",
+    "uncertainty": "undetermined",
     "ineffective": null,
-    "outcome": "drift",
+    "outcome": "unknown",
     "support": "verified",
-    "remediation": "automatic",
+    "remediation": "audit_only",
     "remediation_reason": null,
     "note_contains": null
   }

@@ -1,11 +1,11 @@
 {
   "schema": 1,
-  "case": "policy-enabled-conflict",
+  "case": "policy-user-choice-denied",
   "control": "windows.advertising.id",
   "provenance": {
     "origin": "synthetic",
-    "authored_on": "2026-10-06",
-    "description": "Policy zero enables the identifier despite user zero."
+    "authored_on": "2026-10-07",
+    "description": "Unreadable user choice remains unknown."
   },
   "host": {
     "platform": "windows",
@@ -85,31 +85,21 @@
       "target": "setting",
       "view": "native",
       "evidence": {
-        "evidence": "present",
+        "evidence": "denied",
         "source": "user",
-        "value": {
-          "kind": {
-            "kind": "u32"
-          },
-          "bytes": [
-            0,
-            0,
-            0,
-            0
-          ]
-        }
+        "reason": "permission"
       }
     }
   ],
   "expected": {
-    "state": "enabled",
-    "source": "group_policy",
-    "uncertainty": null,
+    "state": null,
+    "source": "user",
+    "uncertainty": "denied",
     "ineffective": null,
-    "outcome": "drift",
+    "outcome": "unknown",
     "support": "verified",
-    "remediation": "none",
-    "remediation_reason": "managed_externally",
+    "remediation": "audit_only",
+    "remediation_reason": null,
     "note_contains": null
   }
 }

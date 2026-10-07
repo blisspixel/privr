@@ -1239,10 +1239,17 @@ fn run_with_journal_dir(
 
             let journal = match crate::journal::load_transaction_in(journal_dir, &transaction_id) {
                 Ok(j) => j,
-                Err(_) => {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                     let _ = writeln!(
                         err,
                         "privr: no transaction record found with ID '{transaction_id}'"
+                    );
+                    return 2;
+                }
+                Err(_) => {
+                    let _ = writeln!(
+                        err,
+                        "privr: transaction record '{transaction_id}' is unreadable or unsupported"
                     );
                     return 2;
                 }
@@ -2349,5 +2356,51 @@ mod tests {
             true,
             std::slice::from_ref(&machine.spec.id)
         ));
+    }
+
+    #[test]
+    fn rollback_refuses_unsupported_or_mismatched_journals_before_using_operations() {
+        let directory = crate::journal::TestDirectory::new();
+        for (schema, stored_id) in [
+            (crate::journal::JOURNAL_SCHEMA + 1, "tx-requested"),
+            (crate::journal::JOURNAL_SCHEMA, "tx-different"),
+        ] {
+            let transaction = crate::journal::TransactionJournal {
+                schema,
+                transaction_id: stored_id.to_owned(),
+                timestamp: "2026-10-06T12:00:00Z".to_owned(),
+                platform: "windows".to_owned(),
+                profile: "baseline".to_owned(),
+                operations: Vec::new(),
+            };
+            let path = directory.0.join("tx-requested.json");
+            let bytes = serde_json::to_vec(&transaction).expect("synthetic journal");
+            std::fs::write(&path, &bytes).expect("isolated journal");
+            let mut out = Vec::new();
+            let mut err = Vec::new();
+            let code = run_with_journal_dir(
+                Cli {
+                    color: crate::cli::ColorWhen::Never,
+                    format: OutputFormat::Text,
+                    command: Some(Command::Rollback {
+                        transaction_id: Some("tx-requested".to_owned()),
+                        yes: true,
+                        elevate: false,
+                        elevated_output: None,
+                    }),
+                },
+                &mut out,
+                &mut err,
+                &directory.0,
+            );
+            assert_eq!(code, 2);
+            assert!(out.is_empty());
+            assert!(
+                String::from_utf8(err)
+                    .expect("stderr")
+                    .contains("unreadable or unsupported")
+            );
+            assert_eq!(std::fs::read(&path).expect("preserved journal"), bytes);
+        }
     }
 }

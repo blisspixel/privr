@@ -75,6 +75,10 @@ Mutation (blocks 0.2.0):
   confirmed apply tests preview only, a test helper rejects live apply, journal
   tests and application dispatch use isolated directories, and the missing-ID
   CLI rollback test redirects only its child process's journal location.)
+- [x] Journal loading accepts unsupported schema versions and mismatched
+  filename/record identifiers. (Fixed: reject both before rollback uses the
+  record, preserve its bytes, and distinguish unreadable or unsupported records
+  from missing history.)
 
 Reporting (blocks 0.1.0):
 

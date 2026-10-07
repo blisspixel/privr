@@ -177,8 +177,21 @@ pub(crate) fn load_transaction_in(
         ));
     }
     let content = fs::read_to_string(&path)?;
-    serde_json::from_str(&content)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+    let journal: TransactionJournal = serde_json::from_str(&content)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    if journal.schema != JOURNAL_SCHEMA {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "Unsupported transaction journal schema",
+        ));
+    }
+    if journal.transaction_id != id {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "Transaction journal identifier does not match its filename",
+        ));
+    }
+    Ok(journal)
 }
 
 /// List all saved transactions in chronological order.
@@ -356,5 +369,90 @@ mod tests {
 
         let _ = fs::remove_file(p1);
         let _ = fs::remove_file(p2);
+    }
+
+    fn empty_transaction(id: &str) -> TransactionJournal {
+        TransactionJournal {
+            schema: JOURNAL_SCHEMA,
+            transaction_id: id.to_owned(),
+            timestamp: "2026-10-06T12:00:00Z".to_owned(),
+            platform: "windows".to_owned(),
+            profile: "baseline".to_owned(),
+            operations: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn invalid_identifiers_never_create_journal_files() {
+        let directory = TestDirectory::new();
+        let transaction = empty_transaction("../escape");
+        let error = save_transaction_in(&directory.0, &transaction).expect_err("invalid ID");
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+        assert_eq!(fs::read_dir(&directory.0).expect("directory").count(), 0);
+    }
+
+    #[test]
+    fn unsupported_schema_and_mismatched_identity_are_refused_without_changing_bytes() {
+        let directory = TestDirectory::new();
+        let mut unsupported = empty_transaction("tx-schema");
+        unsupported.schema = JOURNAL_SCHEMA + 1;
+        for (filename_id, transaction) in [
+            ("tx-schema", unsupported),
+            ("tx-requested", empty_transaction("tx-different")),
+        ] {
+            let path = directory.0.join(format!("{filename_id}.json"));
+            let bytes = serde_json::to_vec(&transaction).expect("synthetic journal");
+            fs::write(&path, &bytes).expect("fixture file");
+            let error = load_transaction_in(&directory.0, filename_id).expect_err("unsafe journal");
+            assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+            assert_eq!(fs::read(&path).expect("unchanged file"), bytes);
+        }
+        assert!(list_transactions_in(&directory.0).is_empty());
+    }
+
+    #[test]
+    fn corrupt_journals_do_not_hide_valid_history_or_get_rewritten() {
+        let directory = TestDirectory::new();
+        let transaction = empty_transaction("tx-valid");
+        save_transaction_in(&directory.0, &transaction).expect("valid journal");
+        let corrupt = directory.0.join("tx-corrupt.json");
+        fs::write(&corrupt, b"{broken-json").expect("corrupt fixture");
+        fs::write(directory.0.join("ignored.txt"), b"synthetic").expect("non-journal");
+        fs::write(directory.0.join("invalid.name.json"), b"{}").expect("invalid name");
+        let error = load_transaction_in(&directory.0, "tx-corrupt").expect_err("corrupt journal");
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        assert_eq!(list_transactions_in(&directory.0), vec![transaction]);
+        assert_eq!(
+            fs::read(corrupt).expect("unchanged corrupt fixture"),
+            b"{broken-json"
+        );
+    }
+
+    #[test]
+    fn updating_a_journal_replaces_the_record_and_leaves_no_temporary_files() {
+        let directory = TestDirectory::new();
+        let mut transaction = empty_transaction("tx-update");
+        let path = save_transaction_in(&directory.0, &transaction).expect("initial journal");
+        transaction.operations.push(OperationJournal {
+            control_id: "windows.advertising.id".to_owned(),
+            target_key: "synthetic-target".to_owned(),
+            preimage: Some(RawValue::u32(1)),
+            postimage: RawValue::u32(0),
+            verified: true,
+        });
+        assert_eq!(
+            save_transaction_in(&directory.0, &transaction).expect("updated journal"),
+            path
+        );
+        assert_eq!(
+            load_transaction_in(&directory.0, "tx-update").expect("latest bytes"),
+            transaction
+        );
+        assert_eq!(
+            fs::read_dir(&directory.0)
+                .expect("journal directory")
+                .count(),
+            1
+        );
     }
 }

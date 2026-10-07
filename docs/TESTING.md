@@ -55,6 +55,8 @@ Implemented, and not merely designed:
 - application and journal tests use private temporary journal directories;
   confirmed apply cases exercise previews, and the application test helper
   rejects live apply. Missing-history rollback cannot select real transactions;
+- isolated journal failure tests cover corruption, unsupported schema versions,
+  mismatched record identifiers, invalid filenames, and atomic record replacement;
 - a registry write test that is disabled in ordinary test runs and requires
   `PRIVR_LIVE_WRITE_TEST=1` in a disposable VM; the resolved defect is recorded in
   [ROADMAP.md](../ROADMAP.md#current-state);

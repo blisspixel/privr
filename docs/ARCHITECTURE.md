@@ -51,9 +51,8 @@ the helper.
 Panics unwind. Aborting skips destructors, which would prevent an interrupted
 apply from flushing its transaction journal.
 
-The workspace should deny unsafe Rust by default. Narrow operating-system FFI
-modules may use reviewed `unsafe` blocks only with written safety contracts and
-focused tests.
+Unsafe Rust is forbidden crate-wide. Platform adapters use safe platform crates;
+this design does not authorize exceptions or direct unsafe FFI.
 
 ## Core flow
 

@@ -22,8 +22,10 @@ configuration demonstrates why:
 - A line that returns `pass` where it should return `unknown` is fully covered
   and wrong. Coverage cannot see the failure this project exists to prevent.
 
-Coverage is therefore measured as merged region coverage across all three
-operating systems, gated per crate with a ratchet rather than a fixed threshold.
+The current CI gate is 80 percent line coverage on Linux, with native tests and
+lints on all three platforms. Decision 23 plans its replacement with merged
+region coverage across all three operating systems and a per-crate ratchet.
+That replacement is not implemented yet.
 
 The metrics that actually track confidence are:
 
@@ -43,19 +45,42 @@ Implemented, and not merely designed:
 - replay coverage for the paths a live machine cannot be made to produce on
   demand, namely denied reads, malformed values, and specific edition
   combinations;
-- a suite that does not depend on the machine it runs on, with one exception:
-  a registry write test touches the live user hive, listed as a known issue in
+- file-based synthetic observation suites for Windows advertising ID and
+  diagnostic data, replayed through the compiled probes and evaluator by the
+  ordinary Windows CI test job; the current extent is in
+  [ROADMAP.md](../ROADMAP.md#current-state);
+- Windows catalogue unit tests use recorded Context observations, including
+  explicit edition-gating assertions, rather than requiring the runner's actual
+  configuration to be readable or conclusive;
+- application and journal tests use private temporary journal directories;
+  confirmed apply cases exercise previews, and the application test helper
+  rejects live apply. Missing-history rollback cannot select real transactions;
+- isolated journal failure tests cover corruption, unsupported schema versions,
+  mismatched record identifiers, invalid filenames, and atomic record replacement;
+- a registry write test that is disabled in ordinary test runs and requires
+  `PRIVR_LIVE_WRITE_TEST=1` in a disposable VM; the resolved defect is recorded in
   [ROADMAP.md](../ROADMAP.md#current-state);
 - lints and the minimum-supported-Rust check on all three platforms, which has
   already caught failures in both directions.
 
-Not yet implemented, and described below as the target: fixtures as files with
-provenance and redaction rules, capture from a real machine, snapshot testing,
+Not yet implemented, and described below as the target: complete per-control
+fixtures and native capture/redaction tooling, snapshot testing,
 property and fuzz testing, virtual machine integration, adversarial and fault
 injection, and the enforced network isolation layers beyond the dependency
 policy.
 
 ## Structure
+
+### Planned residue tests
+
+Purge is not implemented. Its admission criteria, preservation tests, failure
+cases, privacy canaries, and performance measurements are specified in the
+[privacy cache capability plan](CACHE_PRIVACY_PLAN.md#required-failure-evidence).
+Use recorded Context observations for ordinary tests and synthetic data in
+disposable VMs for vendor clearing operations. No test may clean a developer's
+real caches, temporary files, browser profiles, or history.
+
+### Evaluator and probe tests
 
 The evaluation engine is a pure function from catalogue, policy, host facts, and
 observations to a report.
@@ -108,10 +133,24 @@ The core evaluator and planner should run without touching the host. Test:
 
 ### Fixture format
 
-Recordings currently live in test code as values rather than as files. The file
-format below is the target, and the shape of what is recorded already matches
-it: the same `Evidence` type the live reader produces, keyed by a target that
-includes the registry view.
+Most recordings still live in test code. Initial observation files live under
+`tests/fixtures/<control-id>/`, with one JSON file per state. They contain a
+schema version, a case name, a control ID, synthetic provenance and authorship
+date, host facts, observations, and hand-written expectations. They are not
+captures or evidence of native platform validation.
+
+The test-only loader in `src/catalog/windows/fixtures.rs` binds `policy` and
+`setting` tokens to each control's compiled targets. The files cannot supply a
+registry path, command, or write target. Each observation declares the native
+registry view and retains the same `Evidence` type and exact raw bytes as the
+live reader. An omitted observation remains undetermined; it is not converted
+to an absent value. Replay asserts effective state, uncertainty, authority,
+ineffectiveness, outcome, support, remediation, and result coherence. It also
+guards against an added file being omitted from the suite.
+
+The full capture format below remains the target. Mutation fixtures, native
+shape checks, a fixture clock for staleness, and complete control coverage are
+not implemented by these initial suites.
 
 One file per state, carrying:
 

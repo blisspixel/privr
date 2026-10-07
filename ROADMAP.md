@@ -21,7 +21,7 @@ The decisions that constrain every milestone are recorded in
 
 ## Current state
 
-Reviewed 2026-10-03 against `main`. This section is the single statement of
+Reviewed 2026-10-06 against source and tests. This section is the single statement of
 what exists; other documents link here rather than repeating counts.
 
 Terms: **implemented** means the code exists; **tested** means automated tests
@@ -39,9 +39,11 @@ milestone and its results should not be trusted.
 | Agent server (`mcp`) | Implemented and tested. Synchronous stdio server with read-only tools and gated mutation. Conforms to Model Context Protocol and Agent Plugins v1.0.0. Supports workload personas and friction budgets. |
 | `doctor` | Implemented and tested. Reports non-identifying OS facts, privilege level, platform adapters, storage integrity, reparse-point verification, and schema versions. |
 | Profile ladder | Implemented and verified. Baseline <= Strict <= Restrictive ladder partitions controls monotonically. |
-| Custom policy files, sections | Not built. Subplan sections and external policy files scheduled for 0.3.0. |
+| Custom policy files, sections | Not built. The minimum custom-policy schema and section approval are 0.2.0 prerequisites; policy inheritance and exceptions are planned for 0.5.0. |
 | PowerShell session-only history | Planned research and guided configuration. No PSReadLine history or prediction control is implemented. See [the proposal](#powershell-session-only-history-planned). |
-| Fixture files, staleness, signed releases | In progress. |
+| Privacy-cache inspection and clearing | Proposed research and guided workflows, with aggressive purge selection by default and a polite option. `purge` is not implemented. See [candidate priorities, sources, and safety gates](docs/CACHE_PRIVACY_PLAN.md); automated clearing remains in 0.5.0. |
+| Fixture files | Initial file replay for 2 Windows controls (advertising ID and diagnostic data), covering 51 synthetic observation states. The compiled probes and evaluator run against exact typed bytes through recorded Context. Native captures, remaining controls, and mutation fixtures are still owed. |
+| Staleness, signed releases | In progress. |
 
 ### Known issues
 
@@ -68,15 +70,33 @@ Mutation (blocks 0.2.0):
 - [x] A registry test writes to the live `HKEY_CURRENT_USER` hive of whoever
   runs the suite. (Fixed: live registry write test gated behind PRIVR_LIVE_WRITE_TEST=1
   for disposable VMs; unit suite verifies via in-memory recorded context).
+- [x] Application tests run confirmed live apply and latest-history rollback,
+  while journal tests write into the user's transaction history. (Fixed:
+  confirmed apply tests preview only, a test helper rejects live apply, journal
+  tests and application dispatch use isolated directories, and the missing-ID
+  CLI rollback test redirects only its child process's journal location.)
+- [x] Journal loading accepts unsupported schema versions and mismatched
+  filename/record identifiers. (Fixed: reject both before rollback uses the
+  record, preserve its bytes, and distinguish unreadable or unsupported records
+  from missing history.)
 
 Reporting (blocks 0.1.0):
 
 - [x] `plan` prints "machine matches policy" when drift exists that has no
   automatic remediation. (Fixed: `plan` distinguishes unautomated drift from
   full policy compliance and reports honestly).
-- [ ] Controls ship without per-control fixture files, so the fixture
-  requirements in [CONTROL_STANDARD.md](docs/CONTROL_STANDARD.md) are unmet for
-  all of them.
+- [ ] Per-control fixture requirements in
+  [CONTROL_STANDARD.md](docs/CONTROL_STANDARD.md) remain unmet. Advertising ID
+  and diagnostic data now have synthetic observation files and CI replay;
+  native captures, full state coverage, and mutation fixtures remain required.
+- [x] Windows catalogue tests require the runner's actual settings to be
+  readable and conclusive, and some conditional assertions can pass without
+  exercising edition gating. (Fixed: catalogue tests use recorded Context
+  observations, with both gated and honored edition cases checked explicitly.)
+- [x] Advertising ID and diagnostic data classify every inconclusive policy
+  read as denied, hiding malformed, unsupported, and missing evidence.
+  (Fixed: preserve the typed uncertainty and block lower-priority fallback;
+  synthetic fixture replay asserts the reason and unknown outcome.)
 - [ ] The `security` section (LLMNR, WPAD, NCSI active probing) is closer to
   generic hardening, a stated non-goal, than to optional data sharing. Decide
   whether it belongs in the catalogue.
@@ -120,7 +140,7 @@ Completed foundations:
 - [x] Implement typed read-only registry probing that keeps absent, denied, and
   malformed apart.
 - [x] Implement seven read-only Windows controls end to end.
-- [x] Grow the Windows catalogue to 23 read-only controls. Fixture files are
+- [x] Grow the Windows catalogue to 23 read-only controls. Complete fixtures are
   still owed; see Known issues.
 - [x] Implement `check`, `explain`, and `list`.
 - [x] Implement terminal presentation: colour, progress, wrapping, and explicit
@@ -137,7 +157,7 @@ Required before the first useful release:
 - [x] Implement the profile ladder, so `baseline`, `strict`, and `restrictive`
   select different control sets rather than all controls being enforced.
 - [ ] Implement review staleness against a real reviewed-version range.
-- [ ] Implement `doctor` against real discovery.
+- [x] Implement `doctor` against real discovery.
 - [ ] Reach fifteen documented controls. The catalogue exceeds that count;
   what remains is the documentation and fixtures each needs under the control
   standard. See [Current state](#current-state) for counts.
@@ -378,6 +398,25 @@ false pass, and no control reports success from an uncommitted write.
 - [ ] Add `purge` for local privacy residue, invoking documented vendor erasure
   mechanisms only, never deleting files directly, and journaling every
   irreversible action so a later rollback fails loudly.
+- [ ] Deliver residue preview before automation, with separate browser cache,
+  cookies/site storage, and history categories, local-only scope checks,
+  metadata-only evidence, and independent post-state verification. Research
+  Windows thumbnails as the first automated candidate; keep it guided unless
+  a narrowly scoped documented interface is proven. Follow
+  [the privacy cache capability plan](docs/CACHE_PRIVACY_PLAN.md).
+- [ ] Default purge selection to thorough clearing of reviewed disposable caches
+  and temp files. Both modes preserve cookies, site data, history, recent-file
+  lists, OS operation, and recovery; optional activity-data clearing requires
+  exact selection and named approval. `--polite` additionally retains disruptive
+  caches. Show selected and retained categories, and prove preservation with
+  fixtures and native VM tests.
+- [ ] Research supported disposable temporary-file categories alongside privacy
+  caches. Preserve vendor age and in-use rules, autosave, recovery data, and
+  active work; report verified removal without claiming media sanitization.
+- [ ] Require per-target admission evidence, preservation tests in disposable
+  VMs, truthful cancellation and timeout handling, and measured preview,
+  execution, and verification timings. Treat routine cleanup within one minute
+  on a documented reference desktop as a provisional goal, not a shipped claim.
 - [ ] Add local transaction history and machine-change comparison.
 - [ ] Add an interactive terminal interface in the same signed binary, adding no
   capability the non-interactive commands lack.
@@ -408,8 +447,9 @@ false pass, and no control reports success from an uncommitted write.
 - Browser-extension management.
 - VPN, DNS, firewall, or hosts-file blocklists.
 - Debloating, application removal, or generic hardening.
-- Generic disk cleanup. Size is computable; whether the operator still wants the
-  data is not.
+- Broad disk optimization or deletion of arbitrary old or large user files.
+  Documented disposable temporary-file categories are separate purge research;
+  temporary location alone is not evidence that a file is safe to remove.
 - Erasing security, audit, forensic, crash, shell-history, or cloud data.
   Preventing future shell-history persistence is separate planned work, not
   erasure of existing history or suppression of security logging.

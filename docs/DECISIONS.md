@@ -288,10 +288,29 @@ Preview is the default and is contractually free of side effects. Warnings are
 structured metadata naming the artifact, the capability it supports, that the
 action cannot be undone, and the consequence.
 
-Generic disk cleanup is out of scope. It belongs to a separate tool or to the
-calling agent, which already holds the context for judgments the tool cannot
-make. Size, age, lock state, and whether a supported mechanism exists are
-computable. Whether the operator still wants the data is not.
+Clearing intensity defaults to aggressive within reviewed disposable caches and
+temporary files. Both modes preserve cookies, persistent site data,
+browser/download history, and ordinary recent-file lists unless separately
+selected and approved. `--polite` additionally retains caches whose rebuilding
+would disrupt convenience or workflows. Both modes preserve OS components,
+updates, restore points, installer state, autosave, and recovery data, and honor
+explicit user exceptions. Intensity does not grant permission: an unconfirmed
+call previews its selected mode, and execution still requires each target's
+named risk acknowledgement. Neither mode expands eligibility or overrides
+excluded data, unknown scope, or external management. See the
+[privacy cache capability plan](CACHE_PRIVACY_PLAN.md).
+
+Documented disposable temporary-file categories are eligible for purge research
+alongside privacy caches. Vendor eligibility, age conditions, and in-use
+protections remain binding in aggressive mode. Never infer that autosave,
+recovery data, an active workspace, or a durable file is disposable from its
+temporary location or name.
+
+Broad disk optimization and deletion of arbitrary old or large files remain
+out of scope. Size, age, lock state, and whether a supported mechanism exists
+are computable. Whether the operator still wants user content is not. Verified
+file removal does not establish secure media sanitization; the CLI must report
+the actual mechanism and verification limits.
 
 ## 14. No webview, and no promise of three native applications
 

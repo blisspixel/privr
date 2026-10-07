@@ -5,7 +5,7 @@
 //! rollback can verify no external changes occurred before restoring prior state.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -89,21 +89,27 @@ pub fn transactions_dir() -> PathBuf {
 
 /// Write a transaction to disk atomically.
 pub fn save_transaction(tx: &TransactionJournal) -> Result<PathBuf, std::io::Error> {
+    save_transaction_in(&transactions_dir(), tx)
+}
+
+pub(crate) fn save_transaction_in(
+    dir: &Path,
+    tx: &TransactionJournal,
+) -> Result<PathBuf, std::io::Error> {
     if !is_valid_transaction_id(&tx.transaction_id) {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
             "Invalid transaction identifier",
         ));
     }
-    let dir = transactions_dir();
-    fs::create_dir_all(&dir)?;
+    fs::create_dir_all(dir)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        if let Ok(metadata) = fs::metadata(&dir) {
+        if let Ok(metadata) = fs::metadata(dir) {
             let mut perms = metadata.permissions();
             perms.set_mode(0o700);
-            let _ = fs::set_permissions(&dir, perms);
+            let _ = fs::set_permissions(dir, perms);
         }
     }
     let final_path = dir.join(format!("{}.json", tx.transaction_id));
@@ -144,13 +150,20 @@ pub fn save_transaction(tx: &TransactionJournal) -> Result<PathBuf, std::io::Err
 
 /// Read a transaction from disk by ID.
 pub fn load_transaction(id: &str) -> Result<TransactionJournal, std::io::Error> {
+    load_transaction_in(&transactions_dir(), id)
+}
+
+pub(crate) fn load_transaction_in(
+    dir: &Path,
+    id: &str,
+) -> Result<TransactionJournal, std::io::Error> {
     if !is_valid_transaction_id(id) {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
             "Invalid transaction identifier",
         ));
     }
-    let path = transactions_dir().join(format!("{id}.json"));
+    let path = dir.join(format!("{id}.json"));
     if path.is_symlink() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,
@@ -164,13 +177,29 @@ pub fn load_transaction(id: &str) -> Result<TransactionJournal, std::io::Error> 
         ));
     }
     let content = fs::read_to_string(&path)?;
-    serde_json::from_str(&content)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+    let journal: TransactionJournal = serde_json::from_str(&content)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    if journal.schema != JOURNAL_SCHEMA {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "Unsupported transaction journal schema",
+        ));
+    }
+    if journal.transaction_id != id {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "Transaction journal identifier does not match its filename",
+        ));
+    }
+    Ok(journal)
 }
 
 /// List all saved transactions in chronological order.
 pub fn list_transactions() -> Vec<TransactionJournal> {
-    let dir = transactions_dir();
+    list_transactions_in(&transactions_dir())
+}
+
+pub(crate) fn list_transactions_in(dir: &Path) -> Vec<TransactionJournal> {
     let entries = match fs::read_dir(dir) {
         Ok(e) => e,
         Err(_) => return Vec::new(),
@@ -181,7 +210,7 @@ pub fn list_transactions() -> Vec<TransactionJournal> {
         if path.is_file()
             && path.extension().is_some_and(|ext| ext == "json")
             && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
-            && let Ok(tx) = load_transaction(stem)
+            && let Ok(tx) = load_transaction_in(dir, stem)
         {
             txs.push(tx);
         }
@@ -193,6 +222,38 @@ pub fn list_transactions() -> Vec<TransactionJournal> {
 /// Retrieve the most recent transaction recorded on disk.
 pub fn latest_transaction() -> Option<TransactionJournal> {
     list_transactions().pop()
+}
+
+/// A private, empty journal directory for each test, without environment changes.
+#[cfg(test)]
+pub(crate) struct TestDirectory(pub PathBuf);
+
+#[cfg(test)]
+impl TestDirectory {
+    pub fn new() -> Self {
+        static SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let sequence = SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "privr-journal-test-{}-{nanos}-{sequence}",
+            std::process::id()
+        ));
+        fs::create_dir(&path).expect("isolated test directory");
+        Self(path)
+    }
+}
+
+#[cfg(test)]
+impl Drop for TestDirectory {
+    fn drop(&mut self) {
+        for entry in fs::read_dir(&self.0).expect("test directory").flatten() {
+            fs::remove_file(entry.path()).expect("remove test journal");
+        }
+        fs::remove_dir(&self.0).expect("remove empty test directory");
+    }
 }
 
 #[cfg(test)]
@@ -238,6 +299,7 @@ mod tests {
 
     #[test]
     fn save_and_load_transaction_round_trips() {
+        let directory = TestDirectory::new();
         let tx = TransactionJournal {
             schema: JOURNAL_SCHEMA,
             transaction_id: "tx-test-roundtrip-42".to_owned(),
@@ -253,10 +315,11 @@ mod tests {
             }],
         };
 
-        let path = save_transaction(&tx).expect("save transaction");
+        let path = save_transaction_in(&directory.0, &tx).expect("save transaction");
         assert!(path.exists());
 
-        let loaded = load_transaction(&tx.transaction_id).expect("load transaction");
+        let loaded =
+            load_transaction_in(&directory.0, &tx.transaction_id).expect("load transaction");
         assert_eq!(loaded, tx);
 
         let _ = fs::remove_file(path);
@@ -264,18 +327,21 @@ mod tests {
 
     #[test]
     fn load_nonexistent_transaction_returns_not_found() {
-        let err = load_transaction("tx-nonexistent-id-999").unwrap_err();
+        let directory = TestDirectory::new();
+        let err = load_transaction_in(&directory.0, "tx-nonexistent-id-999").unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
     }
 
     #[test]
     fn load_invalid_transaction_id_returns_invalid_input() {
-        let err = load_transaction("../escape").unwrap_err();
+        let directory = TestDirectory::new();
+        let err = load_transaction_in(&directory.0, "../escape").unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
     }
 
     #[test]
     fn list_and_latest_transactions_return_saved_entries() {
+        let directory = TestDirectory::new();
         let tx1 = TransactionJournal {
             schema: JOURNAL_SCHEMA,
             transaction_id: "tx-test-list-1".to_owned(),
@@ -292,17 +358,101 @@ mod tests {
             profile: "baseline".to_owned(),
             operations: Vec::new(),
         };
-        let p1 = save_transaction(&tx1).expect("save tx1");
-        let p2 = save_transaction(&tx2).expect("save tx2");
+        let p1 = save_transaction_in(&directory.0, &tx1).expect("save tx1");
+        let p2 = save_transaction_in(&directory.0, &tx2).expect("save tx2");
 
-        let txs = list_transactions();
-        assert!(txs.iter().any(|t| t.transaction_id == "tx-test-list-1"));
-        assert!(txs.iter().any(|t| t.transaction_id == "tx-test-list-2"));
+        let txs = list_transactions_in(&directory.0);
+        assert_eq!(txs, vec![tx1, tx2.clone()]);
 
-        let latest = latest_transaction();
-        assert!(latest.is_some());
+        let latest = list_transactions_in(&directory.0).pop();
+        assert_eq!(latest, Some(tx2));
 
         let _ = fs::remove_file(p1);
         let _ = fs::remove_file(p2);
+    }
+
+    fn empty_transaction(id: &str) -> TransactionJournal {
+        TransactionJournal {
+            schema: JOURNAL_SCHEMA,
+            transaction_id: id.to_owned(),
+            timestamp: "2026-10-06T12:00:00Z".to_owned(),
+            platform: "windows".to_owned(),
+            profile: "baseline".to_owned(),
+            operations: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn invalid_identifiers_never_create_journal_files() {
+        let directory = TestDirectory::new();
+        let transaction = empty_transaction("../escape");
+        let error = save_transaction_in(&directory.0, &transaction).expect_err("invalid ID");
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+        assert_eq!(fs::read_dir(&directory.0).expect("directory").count(), 0);
+    }
+
+    #[test]
+    fn unsupported_schema_and_mismatched_identity_are_refused_without_changing_bytes() {
+        let directory = TestDirectory::new();
+        let mut unsupported = empty_transaction("tx-schema");
+        unsupported.schema = JOURNAL_SCHEMA + 1;
+        for (filename_id, transaction) in [
+            ("tx-schema", unsupported),
+            ("tx-requested", empty_transaction("tx-different")),
+        ] {
+            let path = directory.0.join(format!("{filename_id}.json"));
+            let bytes = serde_json::to_vec(&transaction).expect("synthetic journal");
+            fs::write(&path, &bytes).expect("fixture file");
+            let error = load_transaction_in(&directory.0, filename_id).expect_err("unsafe journal");
+            assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+            assert_eq!(fs::read(&path).expect("unchanged file"), bytes);
+        }
+        assert!(list_transactions_in(&directory.0).is_empty());
+    }
+
+    #[test]
+    fn corrupt_journals_do_not_hide_valid_history_or_get_rewritten() {
+        let directory = TestDirectory::new();
+        let transaction = empty_transaction("tx-valid");
+        save_transaction_in(&directory.0, &transaction).expect("valid journal");
+        let corrupt = directory.0.join("tx-corrupt.json");
+        fs::write(&corrupt, b"{broken-json").expect("corrupt fixture");
+        fs::write(directory.0.join("ignored.txt"), b"synthetic").expect("non-journal");
+        fs::write(directory.0.join("invalid.name.json"), b"{}").expect("invalid name");
+        let error = load_transaction_in(&directory.0, "tx-corrupt").expect_err("corrupt journal");
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        assert_eq!(list_transactions_in(&directory.0), vec![transaction]);
+        assert_eq!(
+            fs::read(corrupt).expect("unchanged corrupt fixture"),
+            b"{broken-json"
+        );
+    }
+
+    #[test]
+    fn updating_a_journal_replaces_the_record_and_leaves_no_temporary_files() {
+        let directory = TestDirectory::new();
+        let mut transaction = empty_transaction("tx-update");
+        let path = save_transaction_in(&directory.0, &transaction).expect("initial journal");
+        transaction.operations.push(OperationJournal {
+            control_id: "windows.advertising.id".to_owned(),
+            target_key: "synthetic-target".to_owned(),
+            preimage: Some(RawValue::u32(1)),
+            postimage: RawValue::u32(0),
+            verified: true,
+        });
+        assert_eq!(
+            save_transaction_in(&directory.0, &transaction).expect("updated journal"),
+            path
+        );
+        assert_eq!(
+            load_transaction_in(&directory.0, "tx-update").expect("latest bytes"),
+            transaction
+        );
+        assert_eq!(
+            fs::read_dir(&directory.0)
+                .expect("journal directory")
+                .count(),
+            1
+        );
     }
 }

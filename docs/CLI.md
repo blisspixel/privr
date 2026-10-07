@@ -32,7 +32,7 @@ privr recommend [--workload <general|developer|creative|mobile|high-assurance>]
 privr simulate [--profile <name>] [--control <id-or-prefix>] [--section <name>]
 privr apply [--profile <name> | --policy <path>] [--control <id-or-prefix>]
             [--section <name>] [--yes] [--force] [--accept-risk <control-id>]
-privr purge [--control <id>] [--preview] [--accept-risk <control-id>]
+privr purge [--control <id>] [--polite] [--preview] [--accept-risk <control-id>]
 privr history
 privr rollback [<transaction-id>] [--section <name>] [--yes] [--elevate]
 privr profiles list
@@ -221,6 +221,8 @@ remediation candidates from unautomated drift.
 
 ## `purge`
 
+Status: planned, not implemented.
+
 `purge` removes local privacy residue by invoking documented vendor erasure
 mechanisms. It never deletes files directly.
 
@@ -228,10 +230,38 @@ It is a separate verb precisely because it is irreversible. It is never part of
 `apply`, never included in a default profile, and never reachable from `--yes`.
 Each target requires `--accept-risk` naming that control.
 
+Aggressive clearing is the default intensity within reviewed disposable caches
+and temporary files. With no control filter, preview those categories for the
+current user and supported local profiles. Clear the full eligible category
+without extra age cutoffs; vendor age conditions and in-use protections remain
+binding. All losses appear in the plan before approval.
+
+Both modes preserve cookies, persistent site data, history, and recent-file lists
+unless separately selected and approved. `--polite` additionally retains caches
+classified as disruptive to rebuild. Both modes honor explicit user exceptions
+and preserve passwords, passkeys, bookmarks, downloaded files, OS components,
+updates, restore points, installer state, autosave, recovery data, and active
+work. A mixed vendor cleanup that cannot isolate disposable data remains guided
+or unsupported. Do not kill applications, stop services, or bypass file locks.
+Mode never authorizes cloud deletion or excluded artifacts. Temporary location
+or naming alone does not establish disposability. Purge reports verified removal
+and its limits; it does not promise secure erasure or media sanitization.
+
+`--control` and `--accept-risk` are repeatable for individually named targets.
+Exact selection and named acknowledgement can opt into a reviewed category
+omitted by the selected mode, with its tradeoffs displayed. Unknown IDs or
+mismatched acknowledgements are usage errors. Every selected execution target
+needs its own acknowledgement.
+
 `--preview` is the default and is contractually free of side effects. It reports
 what exists, how much space it occupies, whether the collection that produces it
 is still enabled, and whether a supported clear mechanism is available on this
 build.
+
+An unconfirmed `privr purge` previews aggressive selection; `privr purge --polite`
+previews polite selection. `--preview` always forbids mutation, including when
+`--accept-risk` is present. Preview and results identify the mode and retained
+categories, so polite cleanup cannot appear to have cleared all local residue.
 
 A purge writes a normal transaction journal entry recording that rollback is
 unavailable and why, so a later `rollback` on that transaction fails loudly

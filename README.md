@@ -20,6 +20,7 @@ designed to be driven by an agent harness as readily as by a person.
 - **Windows `check`, `explain`, `list`, `doctor`, `recommend`, `simulate`, `plan`, `apply`, `history`, and `rollback` are implemented**, with posture dimensions, rollback journaling, interactive terminal action prompts (`[y] apply safe fixes, [d] preview diff, [e] explain score, [q] quit`), scoring model and critical controls walkthroughs, convenient CLI aliases (`status`, `scan`, `diff`, `fix`, `harden`, `undo`, `log`), and native UAC elevation handling. Release blockers remain in the roadmap.
 - **Defensive and adaptive application**: `plan` and `apply` accept `--workload` (`general`, `developer`, `creative`, `mobile`, `high-assurance`) and `--max-friction`. When run unprivileged, batch operations apply eligible user-scope controls and report deferred machine-scope controls without failure.
 - **Linux and macOS `check` are experimental** with typed elevation metadata, tested in CI across multiple platforms.
+- **File-based probe replay has started** for Windows advertising ID and diagnostic data. Synthetic observations exercise the compiled probes and evaluator; native captures and full per-control coverage remain release blockers.
 - **Agent integration (`privr mcp`) is implemented**, providing a stdio Model Context Protocol (MCP) server exposing `privr_check`, `privr_plan`, `privr_apply`, `privr_recommend`, `privr_simulate`, `privr_explain`, and `privr_doctor` with Agent Plugins v1.0.0 packaging.
 
 The full state, including known defects, is in
@@ -47,7 +48,7 @@ disabled. It is not. The `pass` above means the effective required-only level
 matches the selected policy; it does not mean diagnostic transmission is off.
 
 What is designed but not built: custom policy files, sectioned approval,
-per-control fixture files, and signed releases. PowerShell session-only history
+complete per-control fixtures, and signed releases. PowerShell session-only history
 is planned, with [its scope and tradeoffs](docs/PRIVACY_RESIDUE.md#shell-command-histories)
 documented; it is not checked or changed by `privr` today.
 Cache and disposable-temp cleanup is [planned](docs/CACHE_PRIVACY_PLAN.md),

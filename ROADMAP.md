@@ -21,7 +21,7 @@ The decisions that constrain every milestone are recorded in
 
 ## Current state
 
-Reviewed 2026-10-03 against `main`. This section is the single statement of
+Reviewed 2026-10-06 against source and tests. This section is the single statement of
 what exists; other documents link here rather than repeating counts.
 
 Terms: **implemented** means the code exists; **tested** means automated tests
@@ -42,7 +42,8 @@ milestone and its results should not be trusted.
 | Custom policy files, sections | Not built. The minimum custom-policy schema and section approval are 0.2.0 prerequisites; policy inheritance and exceptions are planned for 0.5.0. |
 | PowerShell session-only history | Planned research and guided configuration. No PSReadLine history or prediction control is implemented. See [the proposal](#powershell-session-only-history-planned). |
 | Privacy-cache inspection and clearing | Proposed research and guided workflows, with aggressive purge selection by default and a polite option. `purge` is not implemented. See [candidate priorities, sources, and safety gates](docs/CACHE_PRIVACY_PLAN.md); automated clearing remains in 0.5.0. |
-| Fixture files, staleness, signed releases | In progress. |
+| Fixture files | Initial file replay for 2 Windows controls (advertising ID and diagnostic data), covering 51 synthetic observation states. The compiled probes and evaluator run against exact typed bytes through recorded Context. Native captures, remaining controls, and mutation fixtures are still owed. |
+| Staleness, signed releases | In progress. |
 
 ### Known issues
 
@@ -75,9 +76,18 @@ Reporting (blocks 0.1.0):
 - [x] `plan` prints "machine matches policy" when drift exists that has no
   automatic remediation. (Fixed: `plan` distinguishes unautomated drift from
   full policy compliance and reports honestly).
-- [ ] Controls ship without per-control fixture files, so the fixture
-  requirements in [CONTROL_STANDARD.md](docs/CONTROL_STANDARD.md) are unmet for
-  all of them.
+- [ ] Per-control fixture requirements in
+  [CONTROL_STANDARD.md](docs/CONTROL_STANDARD.md) remain unmet. Advertising ID
+  and diagnostic data now have synthetic observation files and CI replay;
+  native captures, full state coverage, and mutation fixtures remain required.
+- [x] Windows catalogue tests require the runner's actual settings to be
+  readable and conclusive, and some conditional assertions can pass without
+  exercising edition gating. (Fixed: catalogue tests use recorded Context
+  observations, with both gated and honored edition cases checked explicitly.)
+- [x] Advertising ID and diagnostic data classify every inconclusive policy
+  read as denied, hiding malformed, unsupported, and missing evidence.
+  (Fixed: preserve the typed uncertainty and block lower-priority fallback;
+  synthetic fixture replay asserts the reason and unknown outcome.)
 - [ ] The `security` section (LLMNR, WPAD, NCSI active probing) is closer to
   generic hardening, a stated non-goal, than to optional data sharing. Decide
   whether it belongs in the catalogue.
@@ -121,7 +131,7 @@ Completed foundations:
 - [x] Implement typed read-only registry probing that keeps absent, denied, and
   malformed apart.
 - [x] Implement seven read-only Windows controls end to end.
-- [x] Grow the Windows catalogue to 23 read-only controls. Fixture files are
+- [x] Grow the Windows catalogue to 23 read-only controls. Complete fixtures are
   still owed; see Known issues.
 - [x] Implement `check`, `explain`, and `list`.
 - [x] Implement terminal presentation: colour, progress, wrapping, and explicit

@@ -1,0 +1,115 @@
+{
+  "schema": 1,
+  "case": "policy-optional-conflict",
+  "control": "windows.diagnostics.level",
+  "provenance": {
+    "origin": "synthetic",
+    "authored_on": "2026-10-06",
+    "description": "Policy optional overrides a required setting."
+  },
+  "host": {
+    "platform": "windows",
+    "version": {
+      "state": "known",
+      "value": {
+        "components": [
+          10,
+          0,
+          26100
+        ],
+        "display": "10.0.26100"
+      }
+    },
+    "architecture": {
+      "state": "known",
+      "value": "x86_64"
+    },
+    "edition": {
+      "state": "known",
+      "value": "Professional"
+    },
+    "distribution": {
+      "state": "not_present"
+    },
+    "managed": {
+      "state": "unknown"
+    },
+    "write_model": {
+      "state": "known",
+      "value": "mutable"
+    },
+    "container": {
+      "state": "known",
+      "value": "none"
+    },
+    "session": {
+      "live_session": {
+        "state": "not_present"
+      },
+      "desktop": {
+        "state": "not_present"
+      },
+      "session_type": {
+        "state": "not_present"
+      },
+      "can_act_as_user": {
+        "state": "not_present"
+      }
+    },
+    "elevated": {
+      "state": "known",
+      "value": false
+    }
+  },
+  "observations": [
+    {
+      "target": "policy",
+      "view": "native",
+      "evidence": {
+        "evidence": "present",
+        "source": "group_policy",
+        "value": {
+          "kind": {
+            "kind": "u32"
+          },
+          "bytes": [
+            3,
+            0,
+            0,
+            0
+          ]
+        }
+      }
+    },
+    {
+      "target": "setting",
+      "view": "native",
+      "evidence": {
+        "evidence": "present",
+        "source": "local_policy",
+        "value": {
+          "kind": {
+            "kind": "u32"
+          },
+          "bytes": [
+            1,
+            0,
+            0,
+            0
+          ]
+        }
+      }
+    }
+  ],
+  "expected": {
+    "state": "optional",
+    "source": "group_policy",
+    "uncertainty": null,
+    "ineffective": null,
+    "outcome": "drift",
+    "support": "verified",
+    "remediation": "none",
+    "remediation_reason": "managed_externally",
+    "note_contains": null
+  }
+}

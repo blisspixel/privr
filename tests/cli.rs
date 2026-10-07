@@ -63,6 +63,17 @@ fn apply_without_confirmation_fails_closed() {
 #[test]
 fn rollback_fails_when_transaction_record_missing() {
     let mut command = Command::cargo_bin("privr").expect("binary");
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_nanos();
+    let isolated =
+        std::env::temp_dir().join(format!("privr-cli-history-{}-{nanos}", std::process::id()));
+    // Override only the child process. The isolated location has no journals,
+    // so an existing real tx-123 can never be selected by this test.
+    command
+        .env("LOCALAPPDATA", &isolated)
+        .env("XDG_DATA_HOME", &isolated);
     command
         .args(["rollback", "tx-123", "--yes"])
         .assert()

@@ -70,6 +70,11 @@ Mutation (blocks 0.2.0):
 - [x] A registry test writes to the live `HKEY_CURRENT_USER` hive of whoever
   runs the suite. (Fixed: live registry write test gated behind PRIVR_LIVE_WRITE_TEST=1
   for disposable VMs; unit suite verifies via in-memory recorded context).
+- [x] Application tests run confirmed live apply and latest-history rollback,
+  while journal tests write into the user's transaction history. (Fixed:
+  confirmed apply tests preview only, a test helper rejects live apply, journal
+  tests and application dispatch use isolated directories, and the missing-ID
+  CLI rollback test redirects only its child process's journal location.)
 
 Reporting (blocks 0.1.0):
 

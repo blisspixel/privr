@@ -52,6 +52,27 @@ struct RollbackReport {
 }
 
 pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
+    run_with_journal_dir(cli, out, err, &crate::journal::transactions_dir())
+}
+
+fn explicit_elevation_required(
+    control: &crate::catalog::Control,
+    elevated: bool,
+    selected: &[String],
+) -> bool {
+    control.requires_elevation()
+        && !elevated
+        && selected
+            .iter()
+            .any(|id| control.spec.id == *id || control.spec.id.starts_with(id))
+}
+
+fn run_with_journal_dir(
+    cli: Cli,
+    out: &mut impl Write,
+    err: &mut impl Write,
+    journal_dir: &std::path::Path,
+) -> i32 {
     let format = cli.format;
     let ui = crate::ui::Ui::for_stdout(cli.color.into());
     let elevated_output_path = match &cli.command {
@@ -164,7 +185,7 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                                 || trimmed == "a"
                                 || trimmed == "apply"
                             {
-                                return run(
+                                return run_with_journal_dir(
                                     Cli {
                                         format,
                                         color: cli.color,
@@ -183,13 +204,14 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                                     },
                                     out,
                                     err,
+                                    journal_dir,
                                 );
                             } else if trimmed == "d"
                                 || trimmed == "diff"
                                 || trimmed == "p"
                                 || trimmed == "plan"
                             {
-                                let plan_code = run(
+                                let plan_code = run_with_journal_dir(
                                     Cli {
                                         format,
                                         color: cli.color,
@@ -204,6 +226,7 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                                     },
                                     out,
                                     err,
+                                    journal_dir,
                                 );
                                 if plan_code == 0 {
                                     let apply_prompt =
@@ -218,7 +241,7 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                                     if std::io::stdin().read_line(&mut plan_input).is_ok() {
                                         let plan_trimmed = plan_input.trim().to_lowercase();
                                         if plan_trimmed == "y" || plan_trimmed == "yes" {
-                                            return run(
+                                            return run_with_journal_dir(
                                                 Cli {
                                                     format,
                                                     color: cli.color,
@@ -237,6 +260,7 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                                                 },
                                                 out,
                                                 err,
+                                                journal_dir,
                                             );
                                         }
                                     }
@@ -518,7 +542,7 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
             elevated_output: _,
         } => {
             if dry_run {
-                return run(
+                return run_with_journal_dir(
                     Cli {
                         format,
                         color: cli.color,
@@ -533,6 +557,7 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                     },
                     out,
                     err,
+                    journal_dir,
                 );
             }
             if policy.is_some() {
@@ -957,7 +982,7 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
             };
 
             // Verify journal storage is writable before mutating system state.
-            if let Err(e) = crate::journal::save_transaction(&journal) {
+            if let Err(e) = crate::journal::save_transaction_in(journal_dir, &journal) {
                 let _ = writeln!(
                     err,
                     "privr: failed to initialize transaction journal: {e}. Halting apply."
@@ -1012,11 +1037,7 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                         && c.apply.is_some()
                     {
                         if c.spec.requires_elevation && !is_elevated {
-                            if !controls.is_empty()
-                                && controls
-                                    .iter()
-                                    .any(|sel| c.spec.id == *sel || c.spec.id.starts_with(sel))
-                            {
+                            if explicit_elevation_required(c, is_elevated, &controls) {
                                 explicit_elevation_failure = Some(c.spec.id.clone());
                                 break;
                             }
@@ -1033,7 +1054,9 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                                     postimage: op.postimage,
                                     verified: true,
                                 });
-                                if let Err(e) = crate::journal::save_transaction(&journal) {
+                                if let Err(e) =
+                                    crate::journal::save_transaction_in(journal_dir, &journal)
+                                {
                                     let _ = writeln!(
                                         err,
                                         "privr: fatal error writing transaction journal: {e}. Applied {} change(s) (transaction {}). Halting apply.",
@@ -1069,7 +1092,7 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
             apply_progress.finish();
 
             if let Some(failed_id) = explicit_elevation_failure {
-                let initial_path = crate::journal::transactions_dir().join(format!("{tx_id}.json"));
+                let initial_path = journal_dir.join(format!("{tx_id}.json"));
                 let _ = std::fs::remove_file(initial_path);
                 let _ = writeln!(
                     err,
@@ -1079,7 +1102,7 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
             }
 
             if journal.operations.is_empty() {
-                let initial_path = crate::journal::transactions_dir().join(format!("{tx_id}.json"));
+                let initial_path = journal_dir.join(format!("{tx_id}.json"));
                 let _ = std::fs::remove_file(initial_path);
                 match format {
                     OutputFormat::Text => {
@@ -1166,7 +1189,7 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
         } => {
             let transaction_id = match transaction_id {
                 Some(id) => id,
-                None => match crate::journal::latest_transaction() {
+                None => match crate::journal::list_transactions_in(journal_dir).pop() {
                     Some(tx) => tx.transaction_id,
                     None => {
                         let _ = writeln!(err, "privr: no transaction history found to roll back.");
@@ -1214,7 +1237,7 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
                 return 2;
             }
 
-            let journal = match crate::journal::load_transaction(&transaction_id) {
+            let journal = match crate::journal::load_transaction_in(journal_dir, &transaction_id) {
                 Ok(j) => j,
                 Err(_) => {
                     let _ = writeln!(
@@ -1375,7 +1398,7 @@ pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
             0
         }
         Command::History => {
-            let txs = crate::journal::list_transactions();
+            let txs = crate::journal::list_transactions_in(journal_dir);
             match format {
                 OutputFormat::Text => {
                     if txs.is_empty() {
@@ -1770,9 +1793,21 @@ mod tests {
     }
 
     fn run_for_test(command: Option<Command>) -> (i32, String, String) {
+        assert!(
+            !matches!(
+                command,
+                Some(Command::Apply {
+                    dry_run: false,
+                    yes: true,
+                    ..
+                })
+            ),
+            "unit tests must not apply live controls"
+        );
+        let directory = crate::journal::TestDirectory::new();
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
-        let code = run(
+        let code = run_with_journal_dir(
             Cli {
                 color: crate::cli::ColorWhen::Never,
                 format: OutputFormat::Text,
@@ -1780,6 +1815,7 @@ mod tests {
             },
             &mut stdout,
             &mut stderr,
+            &directory.0,
         );
         (
             code,
@@ -1957,13 +1993,13 @@ mod tests {
     }
 
     #[test]
-    fn confirmed_apply_reports_clean_state_or_applied() {
+    fn confirmed_dry_run_previews_without_applying() {
         let (code, stdout, stderr) = run_for_test(Some(Command::Apply {
             profile: Some(Profile::Baseline),
             workload: None,
             max_friction: None,
             policy: None,
-            dry_run: false,
+            dry_run: true,
             yes: true,
             controls: Vec::new(),
             sections: Vec::new(),
@@ -1971,12 +2007,7 @@ mod tests {
             elevated_output: None,
         }));
         assert_eq!(code, 0, "stderr: {stderr}");
-        assert!(
-            stdout.contains("Machine matches policy")
-                || stdout.contains("Applied")
-                || stdout.contains("No automated changes to apply")
-                || stdout.contains("No user-scope changes to apply")
-        );
+        assert!(stdout.contains("Planned changes"));
     }
 
     #[test]
@@ -2198,9 +2229,10 @@ mod tests {
                 || stdout.contains("No transaction history found")
         );
 
+        let directory = crate::journal::TestDirectory::new();
         let mut out = Vec::new();
         let mut err = Vec::new();
-        let json_code = run(
+        let json_code = run_with_journal_dir(
             Cli {
                 color: crate::cli::ColorWhen::Never,
                 format: OutputFormat::Json,
@@ -2208,6 +2240,7 @@ mod tests {
             },
             &mut out,
             &mut err,
+            &directory.0,
         );
         assert_eq!(json_code, 0);
         let val: serde_json::Value = serde_json::from_slice(&out).expect("json");
@@ -2215,15 +2248,16 @@ mod tests {
     }
 
     #[test]
-    fn rollback_without_transaction_id_handles_missing_or_latest() {
-        let (code, _, _) = run_for_test(Some(Command::Rollback {
+    fn rollback_without_transaction_id_reports_empty_isolated_history() {
+        let (code, stdout, stderr) = run_for_test(Some(Command::Rollback {
             transaction_id: None,
             yes: true,
             elevate: false,
             elevated_output: None,
         }));
-        // If no transactions exist, exit code 1. If one exists, it attempts rollback.
-        assert!(matches!(code, 0 | 1 | 2 | 4));
+        assert_eq!(code, 1);
+        assert!(stdout.is_empty());
+        assert!(stderr.contains("no transaction history found"));
     }
 
     #[test]
@@ -2260,13 +2294,13 @@ mod tests {
     }
 
     #[test]
-    fn apply_with_workload_and_yes_succeeds() {
+    fn apply_with_workload_and_yes_dry_run_previews() {
         let (code, stdout, stderr) = run_for_test(Some(Command::Apply {
             profile: None,
             workload: Some(WorkloadPersona::Developer),
             max_friction: Some(FrictionTier::Tier0Transparent),
             policy: None,
-            dry_run: false,
+            dry_run: true,
             yes: true,
             controls: Vec::new(),
             sections: Vec::new(),
@@ -2274,39 +2308,46 @@ mod tests {
             elevated_output: None,
         }));
         assert_eq!(code, 0, "stderr: {stderr}");
-        assert!(
-            stdout.contains("Applied")
-                || stdout.contains("No user-scope changes to apply")
-                || stdout.contains("Machine matches policy")
-                || stdout.contains("No automated changes to apply")
-        );
+        assert!(stdout.contains("Planned changes"));
+        assert!(stdout.contains("Workload developer"));
     }
 
     #[test]
-    fn unelevated_explicit_machine_control_fails_closed_with_code_4() {
-        let host = crate::platform::discover();
-        if host.elevated == crate::model::host::Fact::Known(false) {
-            let control_id = if cfg!(windows) {
-                "windows.security.llmnr".to_owned()
-            } else if cfg!(target_os = "macos") {
-                "analytics.share-mac".to_owned()
-            } else {
-                "debian.popularity-contest".to_owned()
-            };
-            let (code, stdout, stderr) = run_for_test(Some(Command::Apply {
-                profile: None,
-                workload: None,
-                max_friction: None,
-                policy: None,
-                dry_run: false,
-                yes: true,
-                controls: vec![control_id],
-                sections: Vec::new(),
-                elevate: false,
-                elevated_output: None,
-            }));
-            assert_eq!(code, 4, "stdout: {stdout}");
-            assert!(stderr.contains("administrative privileges"));
-        }
+    fn explicit_machine_selection_requires_elevation() {
+        let controls = crate::catalog::all();
+        let machine = controls
+            .iter()
+            .find(|c| c.requires_elevation())
+            .expect("machine control");
+        assert!(explicit_elevation_required(
+            machine,
+            false,
+            std::slice::from_ref(&machine.spec.id)
+        ));
+        assert!(explicit_elevation_required(
+            machine,
+            false,
+            &[machine
+                .spec
+                .id
+                .split('.')
+                .next()
+                .expect("platform prefix")
+                .to_owned()]
+        ));
+        assert!(
+            !explicit_elevation_required(machine, false, &[]),
+            "batch changes defer machine controls"
+        );
+        assert!(!explicit_elevation_required(
+            machine,
+            false,
+            &["unrelated.control".to_owned()]
+        ));
+        assert!(!explicit_elevation_required(
+            machine,
+            true,
+            std::slice::from_ref(&machine.spec.id)
+        ));
     }
 }

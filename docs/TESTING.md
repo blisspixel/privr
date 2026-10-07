@@ -52,6 +52,9 @@ Implemented, and not merely designed:
 - Windows catalogue unit tests use recorded Context observations, including
   explicit edition-gating assertions, rather than requiring the runner's actual
   configuration to be readable or conclusive;
+- application and journal tests use private temporary journal directories;
+  confirmed apply cases exercise previews, and the application test helper
+  rejects live apply. Missing-history rollback cannot select real transactions;
 - a registry write test that is disabled in ordinary test runs and requires
   `PRIVR_LIVE_WRITE_TEST=1` in a disposable VM; the resolved defect is recorded in
   [ROADMAP.md](../ROADMAP.md#current-state);

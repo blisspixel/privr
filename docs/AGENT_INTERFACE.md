@@ -2,8 +2,9 @@
 
 ## Status
 
-Planned. No agent server exists yet. The JSON output of `check`, `list`,
-`explain`, and `plan` is available today; see
+The synchronous stdio MCP server (`privr mcp`) and CLI JSON reports are
+implemented. This document also contains planned interface requirements;
+verbosity tiers and pagination are not implemented. See
 [ROADMAP.md](../ROADMAP.md#current-state).
 
 This document describes how `privr` is consumed by an agent harness. For
@@ -118,6 +119,24 @@ tradeoff, destructive effect, or major functionality change. There is no blanket
 approval reachable through the agent interface.
 
 ## Token budget
+
+Current check contract: control and section selectors define the scope before
+observation and aggregation, using the same compiled report builder as CLI
+`check`. Explicit control selection requests evaluation regardless of the
+profile; a section selector alone preserves the profile. Control selectors
+match an exact ID or case-sensitive prefix. Section selectors match an exact
+name or prefix without ASCII case sensitivity. The two kinds combine with AND;
+repeated CLI selectors within one kind combine with OR.
+
+For `privr_check`, `all: false` hides `Pass` rows only. Summary counts and
+`complete` still describe the full selected scope. `carried` is the full
+compiled catalogue count, not the number of visible or selected rows. Zero
+evaluated controls means `complete: false`; an incomplete check is a successful
+tool response with `isError: false`, not a protocol error. Review results count
+as evaluated but do not establish a policy match. See [RESULTS.md](RESULTS.md).
+
+The following token-budget mechanisms are design requirements, not a claim
+that verbosity tiers or pagination already exist.
 
 A full report must fit a constrained context window. Measured cost is roughly
 10, 35, and 180 tokens per control for the three verbosity tiers, so a

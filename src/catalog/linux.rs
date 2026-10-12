@@ -10,6 +10,7 @@ use crate::model::host::ManagementSource;
 use crate::model::outcome::{Maturity, Remediation, Reversibility};
 use crate::model::posture::{FrictionTier, PostureDimension};
 use crate::model::profile::Profile;
+use crate::platform::linux::evidence::Target;
 
 fn enabled() -> SemanticState {
     SemanticState::new("enabled")
@@ -35,65 +36,53 @@ const SYSTEMD_JOURNALD_URL: &str =
     "https://manpages.debian.org/testing/systemd/journald.conf.5.en.html";
 
 /// Probe Debian popularity-contest configuration.
-fn probe_debian_popcon(_ctx: &Context) -> Resolution {
-    let path = std::path::Path::new("/etc/popularity-contest.conf");
-    if !path.exists() {
-        // When not installed or absent, the package does not participate.
-        return Resolution::determined(disabled(), ManagementSource::Default);
-    }
-    match std::fs::read_to_string(path) {
-        Ok(content) => {
+fn probe_debian_popcon(ctx: &Context) -> Resolution {
+    match ctx.linux.text(Target::DebianPopcon) {
+        Ok(None) => Resolution::determined(disabled(), ManagementSource::Default),
+        Ok(Some(content)) => {
             for line in content.lines() {
                 let trimmed = line.trim();
                 if trimmed.starts_with("PARTICIPATE=") {
                     let val = trimmed.trim_start_matches("PARTICIPATE=").trim_matches('"');
-                    if val.eq_ignore_ascii_case("no") {
-                        return Resolution::determined(disabled(), ManagementSource::User);
-                    }
-                    return Resolution::determined(enabled(), ManagementSource::User);
+                    return Resolution::determined(
+                        if val.eq_ignore_ascii_case("no") {
+                            disabled()
+                        } else {
+                            enabled()
+                        },
+                        ManagementSource::User,
+                    );
                 }
             }
             Resolution::determined(disabled(), ManagementSource::Default)
         }
-        Err(e) => {
-            if e.kind() == std::io::ErrorKind::PermissionDenied {
-                Resolution::uncertain(Uncertainty::Denied, ManagementSource::User)
-            } else {
-                Resolution::uncertain(Uncertainty::Undetermined, ManagementSource::User)
-            }
-        }
+        Err(reason) => Resolution::uncertain(reason, ManagementSource::User),
     }
 }
 
 /// Probe Ubuntu Insights opt-in status.
-fn probe_ubuntu_insights(_ctx: &Context) -> Resolution {
-    let opt_in = std::path::Path::new("/etc/ubuntu-insights/opt-in");
-    if opt_in.exists() {
-        Resolution::determined(enabled(), ManagementSource::User)
-    } else {
-        Resolution::determined(disabled(), ManagementSource::Default)
+fn probe_ubuntu_insights(ctx: &Context) -> Resolution {
+    match ctx.linux.exists(Target::UbuntuInsights) {
+        Ok(true) => Resolution::determined(enabled(), ManagementSource::User),
+        Ok(false) => Resolution::determined(disabled(), ManagementSource::Default),
+        Err(reason) => Resolution::uncertain(reason, ManagementSource::User),
     }
 }
 
 /// Probe Ubuntu Report telemetry status.
-fn probe_ubuntu_report(_ctx: &Context) -> Resolution {
-    if let Ok(home) = std::env::var("HOME") {
-        let metrics = std::path::PathBuf::from(home).join(".cache/ubuntu-report/metrics.json");
-        if metrics.exists() {
-            return Resolution::determined(enabled(), ManagementSource::User);
-        }
+fn probe_ubuntu_report(ctx: &Context) -> Resolution {
+    match ctx.linux.exists(Target::UbuntuReport) {
+        Ok(true) => Resolution::determined(enabled(), ManagementSource::User),
+        Ok(false) => Resolution::determined(disabled(), ManagementSource::Default),
+        Err(reason) => Resolution::uncertain(reason, ManagementSource::User),
     }
-    Resolution::determined(disabled(), ManagementSource::Default)
 }
 
 /// Probe Fedora ABRT automated reporting status.
-fn probe_fedora_abrt(_ctx: &Context) -> Resolution {
-    let conf = std::path::Path::new("/etc/abrt/abrt-action-save-package-data.conf");
-    if !conf.exists() {
-        return Resolution::determined(disabled(), ManagementSource::Default);
-    }
-    match std::fs::read_to_string(conf) {
-        Ok(content) => {
+fn probe_fedora_abrt(ctx: &Context) -> Resolution {
+    match ctx.linux.text(Target::FedoraAbrt) {
+        Ok(None) => Resolution::determined(disabled(), ManagementSource::Default),
+        Ok(Some(content)) => {
             for line in content.lines() {
                 let trimmed = line.trim();
                 if trimmed.starts_with("AutoreportingEvent") && trimmed.contains("none") {
@@ -102,7 +91,7 @@ fn probe_fedora_abrt(_ctx: &Context) -> Resolution {
             }
             Resolution::determined(enabled(), ManagementSource::LocalPolicy)
         }
-        Err(_) => Resolution::uncertain(Uncertainty::Undetermined, ManagementSource::LocalPolicy),
+        Err(reason) => Resolution::uncertain(reason, ManagementSource::LocalPolicy),
     }
 }
 
@@ -124,46 +113,48 @@ fn probe_gnome_desktop_setting(ctx: &Context) -> Resolution {
 }
 
 /// Probe KDE UserFeedback telemetry level.
-fn probe_kde_feedback(_ctx: &Context) -> Resolution {
-    if let Ok(home) = std::env::var("HOME") {
-        let conf = std::path::PathBuf::from(home).join(".config/KDE/UserFeedback.conf");
-        if let Ok(content) = std::fs::read_to_string(&conf) {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if trimmed.starts_with("FeedbackLevel=") {
-                    let level = trimmed.trim_start_matches("FeedbackLevel=");
-                    if level == "0" {
-                        return Resolution::determined(disabled(), ManagementSource::User);
+fn probe_kde_feedback(ctx: &Context) -> Resolution {
+    match ctx.linux.text(Target::KdeFeedback) {
+        Ok(content) => {
+            if let Some(content) = content {
+                for line in content.lines() {
+                    let trimmed = line.trim();
+                    if let Some(level) = trimmed.strip_prefix("FeedbackLevel=") {
+                        return Resolution::determined(
+                            if level == "0" { disabled() } else { enabled() },
+                            ManagementSource::User,
+                        );
                     }
-                    return Resolution::determined(enabled(), ManagementSource::User);
                 }
             }
+            Resolution::determined(disabled(), ManagementSource::Default)
         }
+        Err(reason) => Resolution::uncertain(reason, ManagementSource::User),
     }
-    Resolution::determined(disabled(), ManagementSource::Default)
 }
 
 /// Probe systemd core dump persistence.
-fn probe_systemd_coredump(_ctx: &Context) -> Resolution {
-    let conf = std::path::Path::new("/etc/systemd/coredump.conf");
-    if !conf.exists() {
-        return Resolution::determined(enabled(), ManagementSource::Default);
-    }
-    match std::fs::read_to_string(conf) {
+fn probe_systemd_coredump(ctx: &Context) -> Resolution {
+    match ctx.linux.text(Target::Coredump) {
         Ok(content) => {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if trimmed.starts_with("Storage=") {
-                    let val = trimmed.trim_start_matches("Storage=").trim();
-                    if val.eq_ignore_ascii_case("none") {
-                        return Resolution::determined(disabled(), ManagementSource::LocalPolicy);
+            if let Some(content) = content {
+                for line in content.lines() {
+                    let trimmed = line.trim();
+                    if let Some(val) = trimmed.strip_prefix("Storage=") {
+                        return Resolution::determined(
+                            if val.trim().eq_ignore_ascii_case("none") {
+                                disabled()
+                            } else {
+                                enabled()
+                            },
+                            ManagementSource::LocalPolicy,
+                        );
                     }
-                    return Resolution::determined(enabled(), ManagementSource::LocalPolicy);
                 }
             }
             Resolution::determined(enabled(), ManagementSource::Default)
         }
-        Err(_) => Resolution::uncertain(Uncertainty::Undetermined, ManagementSource::LocalPolicy),
+        Err(reason) => Resolution::uncertain(reason, ManagementSource::LocalPolicy),
     }
 }
 
@@ -173,40 +164,39 @@ fn probe_freedesktop_thumbnails(_ctx: &Context) -> Resolution {
 }
 
 /// Probe systemd fstrim timer status.
-fn probe_systemd_fstrim(_ctx: &Context) -> Resolution {
-    for path in [
-        "/etc/systemd/system/timers.target.wants/fstrim.timer",
-        "/lib/systemd/system/timers.target.wants/fstrim.timer",
-        "/usr/lib/systemd/system/timers.target.wants/fstrim.timer",
-    ] {
-        if std::path::Path::new(path).exists() {
-            return Resolution::determined(enabled(), ManagementSource::LocalPolicy);
+fn probe_systemd_fstrim(ctx: &Context) -> Resolution {
+    for target in [Target::FstrimAdmin, Target::FstrimLib, Target::FstrimVendor] {
+        match ctx.linux.exists(target) {
+            Ok(true) => return Resolution::determined(enabled(), ManagementSource::LocalPolicy),
+            Ok(false) => {}
+            Err(reason) => return Resolution::uncertain(reason, ManagementSource::LocalPolicy),
         }
     }
     Resolution::determined(disabled(), ManagementSource::Default)
 }
 
 /// Probe systemd-journald volatile storage.
-fn probe_systemd_journald(_ctx: &Context) -> Resolution {
-    let conf = std::path::Path::new("/etc/systemd/journald.conf");
-    if !conf.exists() {
-        return Resolution::determined(disabled(), ManagementSource::Default);
-    }
-    match std::fs::read_to_string(conf) {
+fn probe_systemd_journald(ctx: &Context) -> Resolution {
+    match ctx.linux.text(Target::Journald) {
         Ok(content) => {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if trimmed.starts_with("Storage=") {
-                    let val = trimmed.trim_start_matches("Storage=").trim();
-                    if val.eq_ignore_ascii_case("volatile") {
-                        return Resolution::determined(enabled(), ManagementSource::LocalPolicy);
+            if let Some(content) = content {
+                for line in content.lines() {
+                    let trimmed = line.trim();
+                    if let Some(val) = trimmed.strip_prefix("Storage=") {
+                        return Resolution::determined(
+                            if val.trim().eq_ignore_ascii_case("volatile") {
+                                enabled()
+                            } else {
+                                disabled()
+                            },
+                            ManagementSource::LocalPolicy,
+                        );
                     }
-                    return Resolution::determined(disabled(), ManagementSource::LocalPolicy);
                 }
             }
             Resolution::determined(disabled(), ManagementSource::Default)
         }
-        Err(_) => Resolution::uncertain(Uncertainty::Undetermined, ManagementSource::LocalPolicy),
+        Err(reason) => Resolution::uncertain(reason, ManagementSource::LocalPolicy),
     }
 }
 

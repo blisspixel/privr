@@ -19,11 +19,16 @@ const SERVER_NAME: &str = "privr";
 const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Run the stdio MCP server loop until stdin closes or an unrecoverable IO error occurs.
-pub fn run_stdio(
+pub fn run_stdio(allow_apply: bool, input: impl BufRead, out: impl Write, err: impl Write) -> i32 {
+    run_stdio_with_check_context(allow_apply, input, out, err, None)
+}
+
+fn run_stdio_with_check_context(
     allow_apply: bool,
     input: impl BufRead,
     mut out: impl Write,
     mut err: impl Write,
+    check_context: Option<&crate::catalog::Context>,
 ) -> i32 {
     let _ = writeln!(
         err,
@@ -62,7 +67,12 @@ pub fn run_stdio(
             }
         };
 
-        if let Some(response) = handle_message(&request, allow_apply, &mut err) {
+        let response = if check_context.is_some() {
+            handle_message_with_check_context(&request, allow_apply, &mut err, check_context)
+        } else {
+            handle_message(&request, allow_apply, &mut err)
+        };
+        if let Some(response) = response {
             if let Err(e) = writeln!(out, "{response}") {
                 let _ = writeln!(err, "privr: failed to write to stdout: {e}");
                 return 2;
@@ -75,6 +85,15 @@ pub fn run_stdio(
 }
 
 fn handle_message(req: &Value, allow_apply: bool, err: &mut impl Write) -> Option<Value> {
+    handle_message_with_check_context(req, allow_apply, err, None)
+}
+
+fn handle_message_with_check_context(
+    req: &Value,
+    allow_apply: bool,
+    err: &mut impl Write,
+    check_context: Option<&crate::catalog::Context>,
+) -> Option<Value> {
     let id = req.get("id");
     let method = match req.get("method").and_then(Value::as_str) {
         Some(m) => m,
@@ -91,7 +110,9 @@ fn handle_message(req: &Value, allow_apply: bool, err: &mut impl Write) -> Optio
         "initialize" => handle_initialize(req.get("params")),
         "ping" => Ok(json!({})),
         "tools/list" => Ok(handle_tools_list(allow_apply)),
-        "tools/call" => handle_tools_call(req.get("params"), allow_apply, err),
+        "tools/call" => {
+            handle_tools_call_with_check_context(req.get("params"), allow_apply, err, check_context)
+        }
         "resources/list" => Ok(json!({ "resources": [] })),
         "prompts/list" => Ok(json!({ "prompts": [] })),
         other => Err((
@@ -353,10 +374,11 @@ fn handle_tools_list(allow_apply: bool) -> Value {
     json!({ "tools": tools })
 }
 
-fn handle_tools_call(
+fn handle_tools_call_with_check_context(
     params: Option<&Value>,
     allow_apply: bool,
     _err: &mut impl Write,
+    check_context: Option<&crate::catalog::Context>,
 ) -> Result<Value, (i64, String)> {
     let params = params.ok_or((-32602, "Missing params".to_owned()))?;
     let name = params
@@ -405,22 +427,28 @@ fn handle_tools_call(
                 .and_then(Value::as_str)
                 .unwrap_or("baseline");
             let profile = parse_profile(profile_str)?;
-            let host = crate::platform::discover();
-            let mut report = crate::report::Report::build(&host, profile.as_str());
-
-            if let Some(filter) = arguments.get("control").and_then(Value::as_str) {
-                report
-                    .results
-                    .retain(|r| r.id == filter || r.id.starts_with(filter));
-            }
-            if let Some(sec) = arguments.get("section").and_then(Value::as_str) {
-                report.results.retain(|r| {
-                    r.section.eq_ignore_ascii_case(sec)
-                        || r.section
-                            .to_ascii_lowercase()
-                            .starts_with(&sec.to_ascii_lowercase())
-                });
-            }
+            let controls: Vec<String> = arguments
+                .get("control")
+                .and_then(Value::as_str)
+                .map(|s| vec![s.to_owned()])
+                .unwrap_or_default();
+            let sections: Vec<String> = arguments
+                .get("section")
+                .and_then(Value::as_str)
+                .map(|s| vec![s.to_owned()])
+                .unwrap_or_default();
+            let mut report = if let Some(context) = check_context {
+                crate::report::Report::build_with_context(
+                    context,
+                    Some(profile.as_str()),
+                    None,
+                    &controls,
+                    &sections,
+                )
+            } else {
+                let host = crate::platform::discover();
+                crate::report::Report::build_filtered(&host, profile.as_str(), &controls, &sections)
+            };
             if !arguments
                 .get("all")
                 .and_then(Value::as_bool)
@@ -1182,6 +1210,98 @@ fn parse_max_friction(s: &str) -> Result<crate::model::posture::FrictionTier, (i
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    fn recorded_check(arguments: Value, context: &crate::catalog::Context) -> (Value, Value) {
+        let request = json!({"jsonrpc":"2.0","id":42,"method":"tools/call", "params":{"name":"privr_check","arguments":arguments}});
+        let input = format!("{request}\n");
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        assert_eq!(
+            run_stdio_with_check_context(
+                false,
+                input.as_bytes(),
+                &mut out,
+                &mut err,
+                Some(context)
+            ),
+            0
+        );
+        let response: Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(response["id"], 42);
+        assert!(response.get("error").is_none(), "{response}");
+        assert_eq!(response["result"]["isError"], false);
+        let report =
+            serde_json::from_str(response["result"]["content"][0]["text"].as_str().unwrap())
+                .unwrap();
+        (response, report)
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn issue19_mcp_selected_scope_is_aggregated_before_presentation() {
+        use crate::platform::linux::evidence::Target;
+        let host = crate::test_context::host("debian", "hyprland");
+        let reader = crate::test_context::reader([(
+            Target::DebianPopcon,
+            crate::test_context::text(b"PARTICIPATE=\"no\"\n"),
+        )]);
+        let context = crate::test_context::context(&host, &reader);
+        let (_, report) = recorded_check(json!({"section":"SyStEmD","all":true}), &context);
+        assert_eq!(report["results"].as_array().unwrap().len(), 3);
+        assert_eq!(report["summary"]["pass"], 0);
+        assert_eq!(report["summary"]["not_selected"], 3);
+        assert_eq!(report["complete"], false);
+        assert_eq!(report["carried"], 13);
+        assert!(reader.requested().is_empty());
+
+        let (_, shown) = recorded_check(json!({"control":"debian", "all":true}), &context);
+        let (_, hidden) = recorded_check(json!({"control":"debian", "all":false}), &context);
+        assert_eq!(shown["summary"]["pass"], 1);
+        assert_eq!(shown["summary"], hidden["summary"]);
+        assert_eq!(shown["complete"], true);
+        assert_eq!(hidden["complete"], true);
+        assert_eq!(shown["results"].as_array().unwrap().len(), 1);
+        assert!(hidden["results"].as_array().unwrap().is_empty());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn issue19_mcp_explicit_control_enforces_and_empty_scopes_stay_incomplete() {
+        use crate::platform::linux::evidence::Target;
+        let host = crate::test_context::host("arch", "hyprland");
+        let reader = crate::test_context::reader([(
+            Target::Coredump,
+            crate::test_context::text(b"Storage=none\n"),
+        )]);
+        let context = crate::test_context::context(&host, &reader);
+        for (arguments, rows, not_applicable, not_selected) in [
+            (json!({"all":true}), 13, 7, 6),
+            (json!({"control":"missing","all":true}), 0, 0, 0),
+            (json!({"section":"UbU","all":true}), 2, 2, 0),
+            (
+                json!({"control":"systemd", "section":"ubuntu","all":true}),
+                0,
+                0,
+                0,
+            ),
+            (json!({"control":"Systemd","all":true}), 0, 0, 0),
+        ] {
+            let (_, report) = recorded_check(arguments, &context);
+            assert_eq!(report["results"].as_array().unwrap().len(), rows);
+            assert_eq!(report["summary"]["not_applicable"], not_applicable);
+            assert_eq!(report["summary"]["not_selected"], not_selected);
+            assert_eq!(report["complete"], false);
+            assert_eq!(report["carried"], 13);
+        }
+        assert!(reader.requested().is_empty());
+        let (_, report) =
+            recorded_check(json!({"control":"systemd.coredump","all":true}), &context);
+        assert_eq!(report["summary"]["pass"], 1);
+        assert_eq!(report["summary"]["not_selected"], 0);
+        assert_eq!(report["complete"], true);
+        assert_eq!(reader.requested(), vec![Target::Coredump]);
+    }
 
     #[test]
     fn initialize_returns_protocol_version_and_tools_capability() {

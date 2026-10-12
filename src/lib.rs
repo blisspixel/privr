@@ -20,6 +20,9 @@ pub mod platform;
 mod report;
 pub mod ui;
 
+#[cfg(all(test, target_os = "linux"))]
+mod test_context;
+
 pub use app::run;
 pub use cli::Cli;
 pub use cli::{Command, OutputFormat, Platform, Profile};

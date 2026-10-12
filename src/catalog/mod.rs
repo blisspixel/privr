@@ -28,6 +28,8 @@ pub struct Context<'a> {
     pub host: &'a HostFacts,
     #[cfg(windows)]
     pub registry: &'a crate::platform::windows::registry::Registry,
+    #[cfg(target_os = "linux")]
+    pub linux: &'a crate::platform::linux::evidence::Reader,
 }
 
 impl<'a> Context<'a> {
@@ -44,7 +46,14 @@ impl<'a> Context<'a> {
         }
     }
 
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    pub fn live(host: &'a HostFacts) -> Self {
+        static LIVE: crate::platform::linux::evidence::Reader =
+            crate::platform::linux::evidence::Reader::Live;
+        Self { host, linux: &LIVE }
+    }
+
+    #[cfg(not(any(windows, target_os = "linux")))]
     pub fn live(host: &'a HostFacts) -> Self {
         Self { host }
     }

@@ -321,9 +321,10 @@ impl Summary {
         self.unknown + self.not_checked + self.error
     }
 
-    /// A report is complete only when nothing conceals state.
+    /// A report is complete only when something was evaluated and nothing
+    /// conceals state. Exclusion alone cannot establish compliance.
     pub const fn is_complete(&self) -> bool {
-        self.concealed() == 0
+        self.evaluated() > 0 && self.concealed() == 0
     }
 }
 
@@ -350,6 +351,32 @@ mod tests {
             exception: Exception::None,
             note: None,
             ineffective: None,
+        }
+    }
+
+    #[test]
+    fn zero_evaluated_scope_cannot_be_complete() {
+        for summary in [
+            Summary::default(),
+            Summary {
+                not_applicable: 7,
+                not_selected: 6,
+                ..Summary::default()
+            },
+            Summary {
+                not_applicable: 2,
+                ..Summary::default()
+            },
+            Summary {
+                not_selected: 3,
+                ..Summary::default()
+            },
+        ] {
+            assert_eq!(summary.evaluated(), 0);
+            assert!(
+                !summary.is_complete(),
+                "unevaluated scope reported complete: {summary:?}"
+            );
         }
     }
 

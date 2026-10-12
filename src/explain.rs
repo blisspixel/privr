@@ -9,6 +9,7 @@ use crate::catalog::{self, Control};
 use crate::engine::evaluate::{Mode, Resolution, Uncertainty, evaluate};
 use crate::model::host::{HostFacts, ManagementSource};
 use crate::model::outcome::{ControlResult, Exception, Remediation, Support};
+use crate::model::posture::PostureDimension;
 use crate::ui::{Ui, style};
 
 /// Why a control could not be found.
@@ -187,9 +188,12 @@ pub fn render(control: &Control, host: &HostFacts, ui: &Ui) -> String {
     out
 }
 
-/// Renders an educational walkthrough of the posture scoring model, orthogonal dimensions,
-/// friction tiers, and most critical privacy/security controls in the current build.
+/// Render the posture model and examples from this build's compiled catalogue.
 pub fn render_overview(ui: &Ui) -> String {
+    render_overview_for(&catalog::all(), ui)
+}
+
+fn render_overview_for(controls: &[Control], ui: &Ui) -> String {
     let mut out = String::new();
     out.push_str(&format!(
         "{}\n\n",
@@ -214,8 +218,9 @@ pub fn render_overview(ui: &Ui) -> String {
         )
     ));
     out.push_str(&ui.wrap(
-        "Controls not selected by the active profile do not enter the denominator, ensuring honest \
-         completeness without penalizing tailored personas.",
+        "Unknown, unchecked, error, and excluded results do not enter this denominator. \
+         The percentage describes evaluated controls only; read the counts and completeness \
+         before drawing conclusions. With no evaluated controls, posture is unavailable.",
         2,
     ));
     out.push_str("\n\n");
@@ -224,34 +229,23 @@ pub fn render_overview(ui: &Ui) -> String {
         "{}\n",
         ui.paint(style::HEADING, "2. Five Orthogonal Posture Dimensions")
     ));
-    let dims = [
-        (
-            "Behavioral & Commercial",
-            "Advertising IDs, consumer telemetry, tailored suggestions, web search highlights.",
-        ),
-        (
-            "Forensic Residue",
-            "Shell MRU, Jump Lists, TypedPaths, thumbnail caches, cloud clipboard sync.",
-        ),
-        (
-            "Network Exposure",
-            "Active probing (NCSI), LLMNR, NetBIOS broadcast, WPAD, captive portal checks.",
-        ),
-        (
-            "Diagnostic & Crash",
-            "Windows Error Reporting crash dumps, diagnostic telemetry level, inventory collection.",
-        ),
-        (
-            "Sensor & Perimeter",
-            "Geolocation, background camera/microphone permissions, speech and inking dictionaries.",
-        ),
-    ];
-    for (name, desc) in dims {
+    for dimension in PostureDimension::ALL {
+        let examples: Vec<_> = controls
+            .iter()
+            .filter(|control| control.spec.dimension == dimension)
+            .map(|control| control.title)
+            .collect();
+        let description = if examples.is_empty() {
+            "No controls in this platform build.".to_owned()
+        } else {
+            examples.join(", ")
+        };
         out.push_str(&format!(
-            "  {:26} {}\n",
-            ui.paint(style::IDENT, name),
-            ui.paint(style::MUTED, desc)
+            "  {}\n",
+            ui.paint(style::IDENT, dimension.display_name()),
         ));
+        out.push_str(&ui.wrap(&description, 4));
+        out.push('\n');
     }
     out.push('\n');
 
@@ -262,19 +256,19 @@ pub fn render_overview(ui: &Ui) -> String {
     let tiers = [
         (
             "Tier 0 (Transparent)",
-            "Zero workflow disruption, zero visible UI changes, zero breakage risk.",
+            "No expected workflow disruption or visible interface change.",
         ),
         (
             "Tier 1 (Cosmetic)",
-            "Minor visual indicators (e.g. web results omitted from local Start search).",
+            "Minor visual changes without a workflow change.",
         ),
         (
             "Tier 2 (Workflow Altering)",
-            "Disables user-facing conveniences (e.g. multi-device cloud clipboard sync).",
+            "Changes a user-facing workflow or removes a convenience.",
         ),
         (
             "Tier 3 (Incompatible / Tradeoff)",
-            "High friction; requires specific developer or enterprise compatibility exceptions.",
+            "Compatibility, diagnostic, or security tradeoffs requiring deliberate review.",
         ),
     ];
     for (name, desc) in tiers {
@@ -288,45 +282,24 @@ pub fn render_overview(ui: &Ui) -> String {
 
     out.push_str(&format!(
         "{}\n",
-        ui.paint(
-            style::HEADING,
-            "4. Most Critical Privacy & Security Controls"
-        )
+        ui.paint(style::HEADING, "4. Compiled Controls For This Platform")
     ));
-    let critical = [
-        (
-            "windows.security.llmnr",
-            "Link-Local Multicast Name Resolution",
-            "Multicast queries broadcast host presence and allow credential theft via rogue LLMNR responders on local networks.",
-        ),
-        (
-            "windows.security.wpad",
-            "Web Proxy Auto-Discovery",
-            "Automated broadcast WPAD queries allow local network attackers to inject rogue proxy servers and intercept HTTP traffic.",
-        ),
-        (
-            "windows.diagnostics.error-reporting",
-            "Windows Error Reporting",
-            "Crash dumps transmit user memory, call stacks, and application data to remote Microsoft telemetry services.",
-        ),
-        (
-            "windows.diagnostics.inventory-collector",
-            "Inventory Collection",
-            "Continuously scans installed software, drivers, and device hardware to upload compatibility telemetry.",
-        ),
-        (
-            "windows.delivery-optimization.mode",
-            "Delivery Optimization",
-            "P2P update sharing broadcasts machine presence and consumes local bandwidth sharing updates with external peers.",
-        ),
-    ];
-    for (id, title, impact) in critical {
+    if controls.is_empty() {
+        out.push_str("  No controls are compiled for this platform.\n");
+    }
+    for control in controls {
         out.push_str(&format!(
             "  {} {}\n",
-            ui.paint(style::IDENT, title),
-            ui.paint(style::MUTED, &format!("({id})"))
+            ui.paint(style::IDENT, control.title),
+            ui.paint(style::MUTED, &format!("({})", control.spec.id))
         ));
-        out.push_str(&ui.paint(style::MUTED, &ui.wrap(impact, 4)));
+        out.push_str(&ui.paint(style::MUTED, &ui.wrap(control.summary, 4)));
+        out.push('\n');
+        out.push_str(&ui.wrap(control.spec.friction.display_name(), 4));
+        if let Some(tradeoff) = control.tradeoff {
+            out.push('\n');
+            out.push_str(&ui.wrap(tradeoff, 4));
+        }
         out.push('\n');
     }
     out.push('\n');
@@ -345,10 +318,10 @@ pub fn render_overview(ui: &Ui) -> String {
     ));
     out.push_str(&format!(
         "  {:18} {}\n",
-        ui.paint(style::IDENT, "privr fix"),
+        ui.paint(style::IDENT, "privr check"),
         ui.paint(
             style::MUTED,
-            "Apply recommended daily-driver privacy protections in-place"
+            "Read outcomes, unknown counts, and selected-profile completeness"
         )
     ));
     out.push_str(&format!(
@@ -356,7 +329,7 @@ pub fn render_overview(ui: &Ui) -> String {
         ui.paint(style::IDENT, "privr explain <id>"),
         ui.paint(
             style::MUTED,
-            "Inspect technical evidence, registry paths, and citations for any control"
+            "Inspect current evidence, tradeoffs, and citations for a compiled control"
         )
     ));
 
@@ -517,8 +490,44 @@ mod tests {
         assert!(text.contains("1. How Posture Is Calculated"));
         assert!(text.contains("2. Five Orthogonal Posture Dimensions"));
         assert!(text.contains("3. Four Operational Friction Tiers"));
-        assert!(text.contains("4. Most Critical Privacy & Security Controls"));
-        assert!(text.contains("windows.security.llmnr"));
+        assert!(text.contains("4. Compiled Controls For This Platform"));
+        for control in catalog::all() {
+            assert!(text.contains(&control.spec.id), "{}", control.spec.id);
+        }
         assert!(!text.contains('\u{1b}'));
+    }
+
+    #[test]
+    fn empty_overview_does_not_invent_platform_examples_or_supported_mutations() {
+        let text = render_overview_for(&[], &Ui::plain());
+        assert_eq!(
+            text.matches("No controls in this platform build.").count(),
+            5
+        );
+        assert!(text.contains("No controls are compiled for this platform"));
+        assert!(!text.contains("windows."));
+        assert!(!text.contains("privr fix"));
+        assert!(
+            text.split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .contains("posture is unavailable")
+        );
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn non_windows_overview_has_no_windows_control_or_dimension_examples() {
+        let text = render_overview(&Ui::plain());
+        for unsupported in [
+            "windows.",
+            "Shell MRU",
+            "Jump Lists",
+            "NCSI",
+            "Windows Error Reporting",
+            "inking",
+        ] {
+            assert!(!text.contains(unsupported), "{unsupported}");
+        }
     }
 }

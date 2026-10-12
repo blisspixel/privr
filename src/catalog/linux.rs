@@ -486,7 +486,7 @@ pub fn controls() -> Vec<Control> {
                 title: "Systemd core dump persistence".to_owned(),
                 section: "systemd".to_owned(),
                 dimension: PostureDimension::DiagnosticCrash,
-                friction: FrictionTier::Tier0Transparent,
+                friction: FrictionTier::Tier3IncompatibleOrTradeoff,
                 applicability: Applicability::new(vec![Variant::new("linux-systemd", vec![])]),
                 desired: disabled(),
                 reversibility: Reversibility::Exact,
@@ -685,5 +685,52 @@ mod tests {
         let mut sorted = keys.clone();
         sorted.sort();
         assert_eq!(keys, sorted);
+    }
+
+    #[test]
+    fn coredump_has_a_shared_tradeoff_tier_and_file_intent_never_becomes_a_recommendation() {
+        use crate::model::posture::WorkloadPersona;
+        use crate::platform::linux::systemd::ConfigurationFamily;
+        let host = crate::test_context::host("arch", "hyprland");
+        let reader = crate::test_context::configuration_reader(
+            ConfigurationFamily::Coredump,
+            b"[Coredump]\nStorage=external\n",
+        );
+        let context = crate::test_context::context(&host, &reader);
+        let controls = controls();
+        assert_eq!(controls.len(), 13);
+        let coredump = controls
+            .iter()
+            .find(|control| control.spec.id == "systemd.coredump.storage")
+            .expect("compiled control");
+        assert_eq!(
+            coredump.spec.friction,
+            FrictionTier::Tier3IncompatibleOrTradeoff
+        );
+        assert_eq!(coredump.observe(&context).state, None);
+        for workload in [
+            WorkloadPersona::General,
+            WorkloadPersona::Developer,
+            WorkloadPersona::HighAssurance,
+        ] {
+            assert!(
+                !crate::engine::recommend::is_control_recommended_for_workload(
+                    &coredump.spec,
+                    workload,
+                    Some(FrictionTier::Tier2WorkflowAltering),
+                )
+            );
+            assert!(
+                crate::engine::recommend::generate_recommendations(
+                    std::slice::from_ref(coredump),
+                    &context,
+                    &host,
+                    workload,
+                    None,
+                    None,
+                )
+                .is_empty()
+            );
+        }
     }
 }

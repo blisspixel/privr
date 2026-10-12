@@ -1,6 +1,33 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
 
+struct DoctorStorage(std::path::PathBuf);
+
+impl DoctorStorage {
+    fn new() -> Self {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let next = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let path =
+            std::env::temp_dir().join(format!("privr-cli-doctor-{}-{next}", std::process::id()));
+        std::fs::create_dir(&path).expect("private doctor storage");
+        Self(std::fs::canonicalize(path).expect("canonical private doctor storage"))
+    }
+
+    fn command(&self) -> Command {
+        let mut command = Command::cargo_bin("privr").expect("binary");
+        command
+            .env("XDG_DATA_HOME", &self.0)
+            .env("LOCALAPPDATA", &self.0);
+        command
+    }
+}
+
+impl Drop for DoctorStorage {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).expect("remove private doctor storage");
+    }
+}
+
 #[test]
 fn help_exposes_the_canonical_workflow() {
     let mut command = Command::cargo_bin("privr").expect("binary");
@@ -85,7 +112,8 @@ fn rollback_fails_when_transaction_record_missing() {
 
 #[test]
 fn doctor_reports_health_and_exposes_no_identifiers() {
-    let mut command = Command::cargo_bin("privr").expect("binary");
+    let storage = DoctorStorage::new();
+    let mut command = storage.command();
     command
         .args(["doctor", "--format", "json"])
         .assert()
@@ -99,7 +127,8 @@ fn doctor_reports_health_and_exposes_no_identifiers() {
 
 #[test]
 fn doctor_text_output_is_informative_and_clean() {
-    let mut command = Command::cargo_bin("privr").expect("binary");
+    let storage = DoctorStorage::new();
+    let mut command = storage.command();
     command
         .arg("doctor")
         .assert()
@@ -109,7 +138,58 @@ fn doctor_text_output_is_informative_and_clean() {
         .stdout(predicate::str::contains("Platform Adapters"))
         .stdout(predicate::str::contains("Storage and State"))
         .stdout(predicate::str::contains("Catalogue and Schemas"))
-        .stdout(predicate::str::contains("System is healthy"));
+        .stdout(predicate::str::contains(
+            "Transaction storage checks passed",
+        ))
+        .stdout(predicate::str::contains(
+            "Other host capabilities remain unverified",
+        ));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn doctor_does_not_trust_user_environment_for_privilege() {
+    let storage = DoctorStorage::new();
+    let run = |user: &str| {
+        let output = storage
+            .command()
+            .env("USER", user)
+            .args(["doctor", "--format", "json"])
+            .output()
+            .expect("doctor process");
+        assert!(output.status.success());
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).expect("doctor JSON")
+    };
+    let root_label = run("root");
+    let ordinary_label = run("synthetic-user");
+    assert_eq!(root_label["privilege"], ordinary_label["privilege"]);
+    assert_eq!(root_label["os"]["edition"], "not applicable");
+    assert_eq!(root_label["schema"], 1);
+    assert!(
+        !root_label["adapters"]
+            .as_array()
+            .expect("adapters")
+            .iter()
+            .any(|adapter| adapter == "systemd_dbus" || adapter == "gsettings")
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn no_recommendations_in_an_empty_dimension_does_not_claim_compliance() {
+    let mut command = Command::cargo_bin("privr").expect("binary");
+    command
+        .args(["recommend", "--dimension", "ambient-sensor"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "full compiled catalogue across profiles",
+        ))
+        .stdout(predicate::str::contains(
+            "No confirmed drift recommendations matched",
+        ))
+        .stdout(predicate::str::contains("do not establish compliance"))
+        .stdout(predicate::str::contains("machine matches target posture").not());
 }
 
 #[test]
@@ -218,13 +298,11 @@ fn plan_defaults_to_sensible_daily_driver_workload() {
 }
 
 #[test]
-fn recommend_suggests_privr_apply() {
+fn recommend_suggests_reviewing_a_plan_or_reports_no_confirmed_drift() {
     let mut command = Command::cargo_bin("privr").expect("binary");
     command.arg("recommend").assert().success().stdout(
-        predicate::str::contains("To apply recommended controls, run: privr apply").or(
-            predicate::str::contains(
-                "No recommendations matching workload and friction constraints",
-            ),
+        predicate::str::contains("Run privr plan to review eligible changes before applying.").or(
+            predicate::str::contains("No confirmed drift recommendations matched"),
         ),
     );
 }
@@ -255,7 +333,7 @@ fn explain_without_arguments_shows_scoring_and_critical_controls() {
             "Five Orthogonal Posture Dimensions",
         ))
         .stdout(predicate::str::contains(
-            "Most Critical Privacy & Security Controls",
+            "Compiled Controls For This Platform",
         ));
 }
 

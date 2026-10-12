@@ -18,6 +18,34 @@ const PROTOCOL_VERSION: &str = "2024-11-05";
 const SERVER_NAME: &str = "privr";
 const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+#[derive(Debug, Eq, PartialEq)]
+enum ElevationDecision {
+    NotRequired,
+    Defer,
+    Refuse,
+}
+
+fn automatic_elevation_decision(
+    control: &crate::catalog::Control,
+    result: &crate::model::outcome::ControlResult,
+    elevated: bool,
+    explicit: bool,
+) -> ElevationDecision {
+    use crate::model::outcome::{Outcome, Remediation};
+    if elevated
+        || !control.requires_elevation()
+        || control.apply.is_none()
+        || result.outcome != Outcome::Drift
+        || result.remediation != Remediation::Automatic
+    {
+        ElevationDecision::NotRequired
+    } else if explicit {
+        ElevationDecision::Refuse
+    } else {
+        ElevationDecision::Defer
+    }
+}
+
 /// Run the stdio MCP server loop until stdin closes or an unrecoverable IO error occurs.
 pub fn run_stdio(allow_apply: bool, input: impl BufRead, out: impl Write, err: impl Write) -> i32 {
     run_stdio_with_check_context(allow_apply, input, out, err, None)
@@ -163,7 +191,7 @@ fn handle_tools_list(allow_apply: bool) -> Value {
         }),
         json!({
             "name": "privr_doctor",
-            "description": "Run diagnostic capability, health, and storage integrity checks on the host environment.",
+            "description": "Report host facts, compiled adapters, and transaction storage checks. Compiled interfaces and successful storage checks do not attest live host capabilities.",
             "inputSchema": {
                 "type": "object",
                 "properties": {}
@@ -261,7 +289,7 @@ fn handle_tools_list(allow_apply: bool) -> Value {
         }),
         json!({
             "name": "privr_recommend",
-            "description": "Generate deterministic recommendations based on workload persona (general, developer, creative, mobile, high-assurance), optional maximum friction tier, and posture dimension.",
+            "description": "Recommend confirmed drift across the full eligible compiled catalogue and all profiles, filtered by workload, optional friction ceiling, and dimension. An empty list does not establish compliance; unknown, unchecked, and filtered controls remain unverified.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -864,8 +892,8 @@ fn handle_tools_call_with_check_context(
                     && eval.remediation == crate::model::outcome::Remediation::Automatic
                     && c.apply.is_some()
                 {
-                    if c.spec.requires_elevation && !is_elevated {
-                        if filter.is_some() {
+                    match automatic_elevation_decision(c, &eval, is_elevated, filter.is_some()) {
+                        ElevationDecision::Refuse => {
                             let initial_path =
                                 crate::journal::transactions_dir().join(format!("{tx_id}.json"));
                             let _ = std::fs::remove_file(initial_path);
@@ -874,8 +902,11 @@ fn handle_tools_call_with_check_context(
                                 c.spec.id
                             ));
                         }
-                        requires_elevation_drift += 1;
-                        continue;
+                        ElevationDecision::Defer => {
+                            requires_elevation_drift += 1;
+                            continue;
+                        }
+                        ElevationDecision::NotRequired => {}
                     }
 
                     match c.apply(&context) {
@@ -1210,6 +1241,35 @@ fn parse_max_friction(s: &str) -> Result<crate::model::posture::FrictionTier, (i
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn handle_message(req: &Value, allow_apply: bool, err: &mut impl Write) -> Option<Value> {
+        let params = &req["params"];
+        let confirmed_mutation = allow_apply
+            && matches!(
+                params["name"].as_str(),
+                Some("privr_apply" | "privr_rollback")
+            )
+            && params["arguments"]["yes"] == true;
+        assert!(
+            !confirmed_mutation,
+            "unit tests must not execute confirmed live mutations"
+        );
+        super::handle_message(req, allow_apply, err)
+    }
+
+    #[test]
+    #[should_panic(expected = "unit tests must not execute confirmed live mutations")]
+    fn test_dispatch_refuses_a_confirmed_live_mutation_before_host_access() {
+        let request = json!({"method":"tools/call", "params":{"name":"privr_apply", "arguments":{"yes":true}}});
+        let _ = handle_message(&request, true, &mut Vec::new());
+    }
+
+    #[test]
+    #[should_panic(expected = "unit tests must not execute confirmed live mutations")]
+    fn test_dispatch_refuses_a_confirmed_live_rollback_before_host_access() {
+        let request = json!({"method":"tools/call", "params":{"name":"privr_rollback", "arguments":{"yes":true, "transaction_id":"tx-fake"}}});
+        let _ = handle_message(&request, true, &mut Vec::new());
+    }
 
     #[cfg(target_os = "linux")]
     #[test]
@@ -1581,9 +1641,11 @@ mod tests {
         let resp2 = handle_message(&req_unconfirmed, true, &mut err).expect("response");
         assert_eq!(resp2["result"]["isError"], true);
 
-        // Confirmed but nonexistent transaction
-        let resp3 = handle_message(&req, true, &mut err).expect("response");
-        assert_eq!(resp3["result"]["isError"], true);
+        let text = resp2["result"]["content"][0]["text"]
+            .as_str()
+            .expect("confirmation error");
+        assert!(text.contains("Confirmation required"));
+        // Missing transactions are covered by isolated journal tests.
     }
 
     #[test]
@@ -1757,59 +1819,114 @@ mod tests {
     }
 
     #[test]
-    fn privr_apply_supports_workload_and_max_friction() {
+    fn privr_plan_accepts_workload_and_max_friction_without_mutation() {
         let req = json!({
             "jsonrpc": "2.0",
             "id": 31,
             "method": "tools/call",
             "params": {
-                "name": "privr_apply",
+                "name": "privr_plan",
                 "arguments": {
                     "workload": "developer",
-                    "max_friction": "tier0-transparent",
-                    "yes": true
+                    "max_friction": "tier0-transparent"
                 }
             }
         });
         let mut err = Vec::new();
-        let resp = handle_message(&req, true, &mut err).expect("response");
+        let resp = handle_message(&req, false, &mut err).expect("response");
         assert_eq!(resp["id"], 31);
         let text = resp["result"]["content"][0]["text"].as_str().expect("text");
         let val: Value = serde_json::from_str(text).expect("json");
         assert_eq!(val["workload"], "developer");
-        assert!(val["applied_changes"].as_u64().is_some());
+        assert!(val["planned_changes"].as_u64().is_some());
     }
 
     #[test]
-    fn privr_apply_unelevated_explicit_machine_control_fails_safely() {
-        let host = crate::platform::discover();
-        if host.elevated == crate::model::host::Fact::Known(false) {
-            let control_id = if cfg!(windows) {
-                "windows.security.llmnr"
-            } else if cfg!(target_os = "macos") {
-                "analytics.share-mac"
-            } else {
-                "debian.popularity-contest"
-            };
-            let req = json!({
-                "jsonrpc": "2.0",
-                "id": 32,
-                "method": "tools/call",
-                "params": {
-                    "name": "privr_apply",
-                    "arguments": {
-                        "control": control_id,
-                        "yes": true
-                    }
-                }
-            });
-            let mut err = Vec::new();
-            let resp = handle_message(&req, true, &mut err).expect("response");
-            assert_eq!(resp["id"], 32);
-            assert_eq!(resp["result"]["isError"], true);
-            let text = resp["result"]["content"][0]["text"].as_str().expect("text");
-            assert!(
-                text.contains("administrative privileges") || text.contains("requires elevation")
+    fn automatic_elevation_decision_uses_synthetic_capability_and_effective_privilege() {
+        use crate::engine::evaluate::{Mode, Resolution, SemanticState, evaluate};
+        use crate::model::host::{HostFacts, ManagementSource, Platform};
+        use crate::model::outcome::{Exception, Outcome, Remediation};
+        let host = HostFacts::unknown(Platform::current());
+        let mut control = crate::catalog::all()
+            .into_iter()
+            .find(|control| control.requires_elevation())
+            .expect("machine control");
+        control.spec.applicability = Default::default();
+        control.spec.verified_through = None;
+        control.spec.remediation = Remediation::Automatic;
+        control.spec.remediation_reason = None;
+        control.apply = Some(|_| panic!("synthetic mutation must never execute"));
+        let resolution = Resolution::determined(
+            SemanticState::new("synthetic-different-state"),
+            ManagementSource::User,
+        );
+        let mut result = evaluate(
+            &control.spec,
+            Mode::Enforce,
+            &resolution,
+            &host,
+            Exception::None,
+        );
+        assert_eq!(result.outcome, Outcome::Drift);
+        assert_eq!(result.remediation, Remediation::Automatic);
+        assert_eq!(
+            automatic_elevation_decision(&control, &result, false, true),
+            ElevationDecision::Refuse
+        );
+        assert_eq!(
+            automatic_elevation_decision(&control, &result, false, false),
+            ElevationDecision::Defer
+        );
+        assert_eq!(
+            automatic_elevation_decision(&control, &result, true, true),
+            ElevationDecision::NotRequired
+        );
+        // Unknown privilege is reduced to false by the real dispatcher.
+        assert_ne!(host.elevated, crate::model::host::Fact::Known(true));
+        control.apply = None;
+        assert_eq!(
+            automatic_elevation_decision(&control, &result, false, true),
+            ElevationDecision::NotRequired
+        );
+        control.apply = Some(|_| panic!("synthetic mutation must never execute"));
+        result.remediation = Remediation::AuditOnly;
+        assert_eq!(
+            automatic_elevation_decision(&control, &result, false, true),
+            ElevationDecision::NotRequired
+        );
+        result.remediation = Remediation::Automatic;
+        result.outcome = Outcome::Unknown;
+        assert_eq!(
+            automatic_elevation_decision(&control, &result, false, true),
+            ElevationDecision::NotRequired
+        );
+        result.outcome = Outcome::Drift;
+        control.spec.requires_elevation = false;
+        assert_eq!(
+            automatic_elevation_decision(&control, &result, false, true),
+            ElevationDecision::NotRequired
+        );
+    }
+
+    #[test]
+    fn mutation_argument_parsers_reject_invalid_workload_and_friction_without_host_access() {
+        assert_eq!(parse_workload("developer"), Ok(WorkloadPersona::Developer));
+        assert_eq!(
+            parse_workload("high-assurance"),
+            Ok(WorkloadPersona::HighAssurance)
+        );
+        assert_eq!(
+            parse_max_friction("tier3-incompatible-or-tradeoff"),
+            Ok(FrictionTier::Tier3IncompatibleOrTradeoff)
+        );
+        for invalid in ["", "unrecognized", "developer --yes"] {
+            assert_eq!(
+                parse_workload(invalid).expect_err("invalid workload").0,
+                -32602
+            );
+            assert_eq!(
+                parse_max_friction(invalid).expect_err("invalid friction").0,
+                -32602
             );
         }
     }

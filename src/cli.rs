@@ -126,7 +126,7 @@ pub enum Command {
     #[command(visible_alias = "log")]
     History,
 
-    /// Recommend privacy posture improvements based on workload and friction budget.
+    /// Recommend confirmed drift changes across profiles, filtered by workload and friction.
     Recommend {
         /// Workload persona (general, developer, creative, mobile, high-assurance).
         #[arg(long, value_enum, default_value_t = WorkloadPersona::General)]
@@ -166,7 +166,7 @@ pub enum Command {
         #[arg(value_name = "CONTROL_ID_OR_TOPIC")]
         id: Option<String>,
     },
-    /// Check whether commands needed by the current platform are available.
+    /// Report host facts, compiled adapters, and transaction storage checks.
     Doctor,
     /// Run a stdio Model Context Protocol (MCP) server for agent integration.
     Mcp {

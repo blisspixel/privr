@@ -265,6 +265,24 @@ impl Report {
         };
         out.push_str(&format!("{}{coverage}\n", field("Coverage")));
 
+        // Keep unavailable and excluded outcomes visible even when nothing
+        // enters the evaluated denominator.
+        let mut counts = vec![format!("{} pass", self.summary.pass)];
+        for (count, label) in [
+            (self.summary.drift, "drift"),
+            (self.summary.review, "review"),
+            (self.summary.unknown, "unknown"),
+            (self.summary.error, "error"),
+            (self.summary.not_checked, "not checked"),
+            (self.summary.not_applicable, "not applicable"),
+            (self.summary.not_selected, "not selected"),
+        ] {
+            if count > 0 {
+                counts.push(format!("{count} {label}"));
+            }
+        }
+        let breakdown = format!("({})", counts.join(", "));
+
         // Posture Score meter
         let score_label = if let Some(score_pct) = (self.summary.pass * 100).checked_div(evaluated)
         {
@@ -275,26 +293,16 @@ impl Report {
             } else {
                 ui.paint(style::outcome_style(Outcome::Drift), &score_str)
             };
-            let breakdown = if self.summary.drift > 0 {
-                format!(
-                    "({} pass, {} drift, {} not selected)",
-                    self.summary.pass, self.summary.drift, self.summary.not_selected
-                )
-            } else {
-                format!(
-                    "({} pass, {} not selected)",
-                    self.summary.pass, self.summary.not_selected
-                )
-            };
             format!(
-                "{styled_score} {meter} {}",
+                "{styled_score} {meter} evaluated controls only {}",
                 ui.paint(style::MUTED, &breakdown)
             )
         } else {
             let meter = render_meter(ui, 0, 0, 10);
             format!(
-                "  0% Hardened {meter} {}",
-                ui.paint(style::MUTED, "(no active controls evaluated)")
+                "unavailable {meter} {} {}",
+                ui.paint(style::MUTED, "(no active controls evaluated)"),
+                ui.paint(style::MUTED, &breakdown)
             )
         };
         out.push_str(&format!("{}{score_label}\n", field("Posture")));
@@ -975,6 +983,58 @@ mod tests {
     }
 
     #[test]
+    fn headline_preserves_every_outcome_and_qualifies_the_evaluated_percentage() {
+        let mut report = empty_report();
+        report.summary = Summary {
+            pass: 1,
+            drift: 2,
+            review: 3,
+            unknown: 4,
+            error: 5,
+            not_checked: 6,
+            not_applicable: 7,
+            not_selected: 8,
+        };
+        report.complete = false;
+        let text = report.to_text(&Ui::plain(), false);
+        let headline = text
+            .lines()
+            .find(|line| line.starts_with("Posture "))
+            .expect("headline");
+        for count in [
+            "1 pass",
+            "2 drift",
+            "3 review",
+            "4 unknown",
+            "5 error",
+            "6 not checked",
+            "7 not applicable",
+            "8 not selected",
+        ] {
+            assert!(headline.contains(count), "missing {count}: {headline}");
+        }
+        assert!(headline.contains("evaluated controls only"));
+    }
+
+    #[test]
+    fn zero_evaluated_headline_keeps_unknown_and_excluded_counts_without_a_percentage() {
+        let mut report = empty_report();
+        report.summary.unknown = 2;
+        report.summary.not_selected = 11;
+        report.complete = false;
+        let text = report.to_text(&Ui::plain(), false);
+        let headline = text
+            .lines()
+            .find(|line| line.starts_with("Posture "))
+            .expect("headline");
+        assert!(headline.contains("unavailable"));
+        assert!(headline.contains("2 unknown"));
+        assert!(headline.contains("11 not selected"));
+        assert!(!headline.contains('%'));
+        assert_eq!(report.exit_code(), 3);
+    }
+
+    #[test]
     fn coverage_is_reported_alongside_completeness() {
         // The failure this prevents: a one-control build reporting "complete"
         // and reading as a clean bill of health for the whole machine.
@@ -1097,8 +1157,18 @@ mod tests {
 
     #[test]
     fn test_to_text_renders_posture_and_dimensions() {
-        let host = platform::discover();
-        let report = Report::build(&host, "baseline");
+        let mut report = empty_report();
+        report.carried = 2;
+        report.summary.pass = 1;
+        report.summary.drift = 1;
+        report.posture.record(
+            crate::model::posture::PostureDimension::BehavioralCommercial,
+            Outcome::Pass,
+        );
+        report.posture.record(
+            crate::model::posture::PostureDimension::BehavioralCommercial,
+            Outcome::Drift,
+        );
         let plain = Ui::plain();
         let text = report.to_text(&plain, true);
 

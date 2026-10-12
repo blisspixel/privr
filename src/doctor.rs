@@ -133,13 +133,13 @@ impl DoctorReport {
 
         out.push_str(&format!(
             "{}\n",
-            ui.paint(style::HEADING, "Platform Adapters")
+            ui.paint(style::HEADING, "Compiled Platform Adapters")
         ));
         for adapter in &self.adapters {
             out.push_str(&format!(
                 "  {:20} {}\n",
                 ui.paint(style::IDENT, adapter),
-                ui.paint(style::VALUE, "available")
+                ui.paint(style::VALUE, "compiled (live capability unverified)")
             ));
         }
         out.push('\n');
@@ -210,7 +210,7 @@ impl DoctorReport {
                 "{}\n",
                 ui.paint(
                     style::outcome_style(crate::model::outcome::Outcome::Pass),
-                    "System is healthy. All capability checks passed."
+                    "Transaction storage checks passed. Other host capabilities remain unverified."
                 )
             ));
         } else {
@@ -374,17 +374,33 @@ pub fn check_storage_integrity(dir: &Path) -> DoctorStorageFacts {
 
 /// Run full system diagnostics and build the `DoctorReport`.
 pub fn diagnose(host: &HostFacts) -> DoctorReport {
+    diagnose_with_storage(host, &crate::journal::transactions_dir())
+}
+
+pub(crate) fn diagnose_with_storage(host: &HostFacts, tx_dir: &Path) -> DoctorReport {
+    diagnose_with_storage_facts(host, check_storage_integrity(tx_dir))
+}
+
+fn diagnose_with_storage_facts(
+    host: &HostFacts,
+    storage_facts: DoctorStorageFacts,
+) -> DoctorReport {
     let version_str = host
         .version
         .known()
         .map(|v| v.display.clone())
-        .unwrap_or_else(|| "unknown".to_string());
+        .unwrap_or_else(|| {
+            host.distribution
+                .known()
+                .map(|distribution| format!("{distribution} (version unknown)"))
+                .unwrap_or_else(|| "unknown".to_owned())
+        });
 
-    let edition_str = host
-        .edition
-        .known()
-        .cloned()
-        .unwrap_or_else(|| "unknown".to_string());
+    let edition_str = match &host.edition {
+        Fact::Known(edition) => edition.clone(),
+        Fact::NotPresent => "not applicable".to_owned(),
+        Fact::Unknown => "unknown".to_owned(),
+    };
 
     let arch_str = match host.architecture.known() {
         Some(Architecture::X86) => "x86",
@@ -416,9 +432,8 @@ pub fn diagnose(host: &HostFacts) -> DoctorReport {
     };
 
     let elevation_path = match host.platform {
-        Platform::Windows => "User Account Control (UAC) / allowlisted elevation helper",
-        Platform::Linux => "sudo / pkexec",
-        Platform::Macos => "AuthorizationExecuteWithPrivileges / sudo",
+        Platform::Windows => "UAC via PowerShell (availability unverified)",
+        Platform::Linux | Platform::Macos => "sudo (availability unverified)",
     };
 
     let privilege_facts = DoctorPrivilegeFacts {
@@ -455,22 +470,15 @@ pub fn diagnose(host: &HostFacts) -> DoctorReport {
             "host_discovery".to_string(),
         ],
         Platform::Linux => vec![
-            "procfs".to_string(),
-            "sysfs".to_string(),
-            "systemd_dbus".to_string(),
-            "gsettings".to_string(),
+            "bounded_file_reads".to_string(),
+            "systemd_configuration_intent".to_string(),
             "host_discovery".to_string(),
         ],
         Platform::Macos => vec![
-            "defaults".to_string(),
-            "tcc".to_string(),
-            "sysctl".to_string(),
+            "property_list_file_reads".to_string(),
             "host_discovery".to_string(),
         ],
     };
-
-    let tx_dir = crate::journal::transactions_dir();
-    let storage_facts = check_storage_integrity(&tx_dir);
 
     let all_controls = crate::catalog::all();
     let catalog_facts = DoctorCatalogFacts {
@@ -506,10 +514,51 @@ pub fn diagnose(host: &HostFacts) -> DoctorReport {
 mod tests {
     use super::*;
 
+    fn diagnose_test_host(host: &HostFacts) -> DoctorReport {
+        diagnose_with_storage_facts(
+            host,
+            DoctorStorageFacts {
+                root: "<private-test-storage>".to_owned(),
+                exists: true,
+                writable: true,
+                reparse_point: false,
+                status: "ok".to_owned(),
+            },
+        )
+    }
+
+    #[test]
+    fn storage_checks_accept_a_canonical_private_directory() {
+        let directory = crate::journal::TestDirectory::new();
+        let path = std::fs::canonicalize(&directory.0).expect("canonical private fixture");
+        let host = HostFacts::unknown(Platform::current());
+        let report = diagnose_with_storage(&host, &path);
+        assert!(report.storage.exists);
+        assert!(report.storage.writable);
+        assert!(!report.storage.reparse_point);
+        assert!(report.healthy);
+        assert_eq!(report.storage.status, "ok");
+        assert_eq!(report.storage.root, sanitize_storage_path(&path));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn storage_checks_reject_a_symlink_in_a_private_fixture() {
+        let directory = crate::journal::TestDirectory::new();
+        let root = std::fs::canonicalize(&directory.0).expect("canonical private fixture");
+        let link = root.join("storage-link");
+        std::os::unix::fs::symlink(&root, &link).expect("private symlink fixture");
+        let host = HostFacts::unknown(Platform::current());
+        let report = diagnose_with_storage(&host, &link);
+        assert!(report.storage.writable);
+        assert!(report.storage.reparse_point);
+        assert!(!report.healthy);
+    }
+
     #[test]
     fn doctor_diagnose_produces_healthy_report() {
-        let host = crate::platform::discover();
-        let report = diagnose(&host);
+        let host = HostFacts::unknown(Platform::current());
+        let report = diagnose_test_host(&host);
 
         assert_eq!(report.schema, 1);
         assert_eq!(report.platform, host.platform.as_str());
@@ -529,8 +578,8 @@ mod tests {
 
     #[test]
     fn doctor_text_rendering_has_no_emojis_or_em_dashes() {
-        let host = crate::platform::discover();
-        let report = diagnose(&host);
+        let host = HostFacts::unknown(Platform::current());
+        let report = diagnose_test_host(&host);
         let ui = Ui::plain();
         let text = report.to_text(&ui);
 
@@ -540,7 +589,8 @@ mod tests {
         assert!(text.contains("Platform Adapters"));
         assert!(text.contains("Storage and State"));
         assert!(text.contains("Catalogue and Schemas"));
-        assert!(text.contains("System is healthy"));
+        assert!(text.contains("Transaction storage checks passed"));
+        assert!(text.contains("Other host capabilities remain unverified"));
     }
 
     #[test]
@@ -558,8 +608,8 @@ mod tests {
 
     #[test]
     fn unhealthy_report_rendering_shows_issues() {
-        let host = crate::platform::discover();
-        let mut report = diagnose(&host);
+        let host = HostFacts::unknown(Platform::current());
+        let mut report = diagnose_test_host(&host);
         report.healthy = false;
         report.storage.writable = false;
         report.storage.reparse_point = true;
@@ -580,14 +630,67 @@ mod tests {
         host.elevated = Fact::Known(true);
         host.managed = Fact::Known(true);
 
-        let report = diagnose(&host);
+        let report = diagnose_test_host(&host);
         assert_eq!(report.os.architecture, "aarch64");
         assert_eq!(report.os.container, "container");
         assert!(report.privilege.elevated);
         assert_eq!(report.management.status, "present");
 
         host.managed = Fact::Known(false);
-        let report2 = diagnose(&host);
+        let report2 = diagnose_test_host(&host);
         assert_eq!(report2.management.status, "absent");
+    }
+
+    #[test]
+    fn rolling_linux_display_does_not_confuse_distribution_edition_and_numeric_version() {
+        let mut host = HostFacts::unknown(Platform::Linux);
+        host.distribution = Fact::Known("omarchy".into());
+        host.edition = Fact::NotPresent;
+        host.elevated = Fact::Known(false);
+        let report = diagnose_test_host(&host);
+        assert_eq!(report.os.version, "omarchy (version unknown)");
+        assert_eq!(report.os.edition, "not applicable");
+        assert_eq!(report.privilege.level, "standard (unprivileged)");
+        assert_eq!(host.version, Fact::Unknown);
+        assert_eq!(host.edition, Fact::NotPresent);
+        let text = report.to_text(&Ui::plain());
+        assert!(text.contains("linux omarchy (version unknown)"));
+        for unsupported in ["systemd_dbus", "gsettings", "sysfs", "pkexec"] {
+            assert!(!text.contains(unsupported), "{unsupported}");
+        }
+        assert!(text.contains("compiled (live capability unverified)"));
+    }
+
+    #[test]
+    fn unknown_facts_stay_distinct_from_platform_absence() {
+        let host = HostFacts::unknown(Platform::Windows);
+        let report = diagnose_test_host(&host);
+        assert_eq!(report.os.version, "unknown");
+        assert_eq!(report.os.edition, "unknown");
+        assert_eq!(report.privilege.level, "unknown");
+        assert!(!report.privilege.elevated);
+        assert!(
+            !report
+                .to_text(&Ui::plain())
+                .contains("All capability checks passed")
+        );
+    }
+
+    #[test]
+    fn macos_lists_compiled_file_reader_without_claiming_native_preference_or_tcc_interfaces() {
+        let mut host = HostFacts::unknown(Platform::Macos);
+        host.edition = Fact::NotPresent;
+        let report = diagnose_test_host(&host);
+        assert_eq!(
+            report.adapters,
+            ["property_list_file_reads", "host_discovery"]
+        );
+        assert_eq!(report.os.edition, "not applicable");
+        assert!(
+            !report
+                .privilege
+                .elevation_path
+                .contains("AuthorizationExecuteWithPrivileges")
+        );
     }
 }

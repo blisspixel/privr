@@ -138,6 +138,11 @@ denominator and the report says so. A summary that rises when the tool can see
 less is the scoring form of a false pass.
 
 `privr` publishes no single privacy score.
+The current text posture percentage describes only evaluated controls, alongside
+the selected scope's completeness and all nonzero outcome counts. It is not a
+whole-machine privacy rating. Unknown, error, and not-checked counts stay in the
+headline even when no control was evaluated; in that case posture is unavailable
+rather than an established zero percent.
 
 ## Drift definition
 

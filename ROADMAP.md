@@ -37,7 +37,7 @@ milestone and its results should not be trusted.
 | Linux `check` | Experimental. Discovery and 13 controls (GNOME, Ubuntu, Debian, Fedora, KDE, FreeDesktop, systemd) with elevation metadata. Typed recorded Context tests exercise the existing file probes; zero-evaluation checks are incomplete. Compiled and tested in CI; never checked against a real desktop. |
 | macOS `check` | Experimental. Discovery and 6 controls with elevation metadata. Compiled and tested in CI; never checked against a real Mac. |
 | Agent server (`mcp`) | Implemented and tested. Synchronous stdio server with read-only tools and gated mutation. Conforms to Model Context Protocol and Agent Plugins v1.0.0. Supports workload personas and friction budgets. |
-| `doctor` | Implemented and tested. Reports non-identifying OS facts, privilege level, platform adapters, storage integrity, reparse-point verification, and schema versions. |
+| `doctor` | Implemented and tested. Reports non-identifying OS facts, authoritative Linux effective privilege, compiled adapters with live capability unverified, storage integrity, reparse-point verification, and schema versions. Rolling-distribution IDs remain visible without inventing a numeric version or Windows edition. |
 | Profile ladder | Implemented and verified. Baseline <= Strict <= Restrictive ladder partitions controls monotonically. |
 | Custom policy files, sections | Not built. The minimum custom-policy schema and section approval are 0.2.0 prerequisites; policy inheritance and exceptions are planned for 0.5.0. |
 | PowerShell session-only history | Planned research and guided configuration. No PSReadLine history or prediction control is implemented. See [the proposal](#powershell-session-only-history-planned). |
@@ -81,6 +81,17 @@ Mutation (blocks 0.2.0):
   from missing history.)
 
 Reporting (blocks 0.1.0):
+
+- [x] Linux first-run output hides unknown counts, reuses a Windows developer
+  rationale, classifies lost core debugging as transparent, and presents an
+  empty recommendation list as a clean machine (issue 20, 2026-10-12).
+  Headlines retain all outcome counts and qualify evaluated percentages;
+  zero-evaluation posture is unavailable. Recommendations state their
+  catalogue-wide scope, coredump is Tier 3, and overview examples come from the
+  current build. Bounded Linux discovery uses effective UID and authoritative
+  os-release precedence; installation instructions identify the executable and
+  Cargo's PATH destination. These changes do not validate a real desktop or
+  promote experimental platform controls.
 
 - [x] A nonempty check with only not-applicable and not-selected controls can
   claim compliance. (Fixed: completeness requires an evaluated result and no

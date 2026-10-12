@@ -195,6 +195,11 @@ Externally managed controls are not overwritten.
 
 `recommend` generates prioritized, explainable remediation recommendations
 based on evaluated machine drift, workload personas, and friction budgets.
+It examines the full eligible compiled catalogue across profiles, then applies
+the workload, dimension, and friction filters. This differs from `check`, which
+defaults to baseline. Only confirmed drift produces a recommendation. An empty
+list does not establish compliance: unknown, unchecked, and filtered controls
+remain outside that claim. Use `check` for selected-profile completeness.
 
 Instead of reducing complex operational trade-offs to a lossy scalar score,
 recommendations are ordered by friction tier (Tier 0 Transparent, Tier 1 Cosmetic,
@@ -202,7 +207,9 @@ Tier 2 Workflow-Altering, Tier 3 Incompatible/Tradeoff) and tailored to specific
 workload personas:
 
 - `general`: daily-driver workstation with zero workflow disruption;
-- `developer`: preserves local crash minidumps for debugging;
+- `developer`: uses a Windows reporting-specific rationale; other controls keep
+  their own platform rationale and diagnostic tradeoffs. Linux core retention
+  removal is Tier 3 and is excluded by a lower friction ceiling;
 - `creative`: preserves local thumbnail caching for image and video asset curation;
 - `mobile`: suppresses broadcast protocols (LLMNR, WPAD) on untrusted Wi-Fi while
   omitting slow pagefile clearing on shutdown;
@@ -321,13 +328,24 @@ speaks over standard input and output only.
 - operating-system version, edition, and architecture;
 - current privilege and supported elevation path;
 - whether relevant external management is present;
-- available compiled platform adapters;
+- compiled platform adapters, with live capability explicitly unverified;
 - transaction-root permission and reparse-point checks;
 - catalogue staleness summary;
 - catalogue, policy, report, and journal schema versions.
 
 It does not print tenant IDs, enrollment IDs, account IDs, security identifiers,
 policy object identifiers, usernames, or machine identifiers.
+Windows editions are shown as not applicable on Linux/macOS, distinct from an
+unknown edition. Linux privilege uses the effective UID from `/proc/self/status`,
+not environment variables. A rolling distribution can have a known ID and no
+numeric version; that version remains unknown for applicability. Reported
+elevation mechanisms are implemented paths, not proof that the helper is
+installed. A successful storage check does not attest other host capabilities.
+The fixed Linux discovery interfaces follow the kernel's
+[procfs UID ordering](https://www.kernel.org/doc/html/latest/filesystems/proc.html)
+and the [os-release specification](https://www.freedesktop.org/software/systemd/man/latest/os-release.html).
+`/etc/os-release` exclusively takes precedence over the vendor file; an
+unreadable or malformed present file does not permit a lower-priority fallback.
 
 ## Selection
 

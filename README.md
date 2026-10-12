@@ -24,6 +24,11 @@ designed to be driven by an agent harness as readily as by a person.
   and drop-in reads explain that intent; coredump and journald storage remain
   Unknown until loaded state can be attested. See [the evidence limits](docs/SYSTEMD_EVIDENCE.md).
 - **Check completeness follows the selected scope**. Zero evaluated controls are incomplete (exit 3), even when every result is not applicable or not selected. CLI and MCP selectors share the compiled report builder; hiding passing rows does not change summary counts. See [report semantics](docs/RESULTS.md#completeness).
+- **First-run output keeps uncertainty visible**. The headline includes unknown
+  and other outcome counts; a percentage covers evaluated controls only.
+  Recommendations examine the eligible catalogue across profiles, while
+  `check` defaults to baseline. An empty recommendation list is not a compliance
+  result. Overview examples come from the platform's compiled catalogue.
 - **File-based probe replay has started** for Windows advertising ID and diagnostic data. Advertising policy distinguishes enforcement from user choice. Synthetic observations exercise the compiled probes and evaluator; native captures and full per-control coverage remain release blockers.
 - **Agent integration (`privr mcp`) is implemented**, providing a stdio Model Context Protocol (MCP) server exposing `privr_check`, `privr_plan`, `privr_apply`, `privr_recommend`, `privr_simulate`, `privr_explain`, and `privr_doctor` with Agent Plugins v1.0.0 packaging.
 
@@ -120,6 +125,25 @@ cd privr
 cargo build --locked --release
 ```
 
+The executable is `target/release/privr` (`target\release\privr.exe` on
+Windows). Run it directly before installing:
+
+```bash
+./target/release/privr check
+```
+
+On PowerShell, use `.\target\release\privr.exe check`. To install the binary
+from this checkout so that `privr` can be called from another directory:
+
+```bash
+cargo install --locked --path .
+```
+
+Cargo installs into `$CARGO_HOME/bin`, usually `~/.cargo/bin` (on Windows,
+`%USERPROFILE%\.cargo\bin`). Ensure that directory is on your shell's `PATH`;
+if it is not, use the built executable directly or add Cargo's bin directory
+to your shell configuration.
+
 One-line installers and package manager entries ship with the first signed
 release. The installer will place an unprivileged binary and nothing else;
 `privr` requests elevation only at apply time, after showing you the plan.
@@ -146,10 +170,18 @@ privr history (or privr log)
 privr undo (or privr rollback)
 ```
 
-- `doctor` reports capability facts, elevation paths, platform adapters, storage integrity, and schema versions.
+- `doctor` reports host facts, implemented elevation paths, compiled adapters,
+  transaction storage checks, and schema versions. A compiled adapter does not
+  attest live service capability. Linux privilege comes from the effective UID;
+  Windows editions are not applicable there, and a known rolling-distribution ID
+  remains visible even when its numeric version is unknown.
 - `check` (aliases: `status`, `scan`, `audit`) reads effective state and compares it against a policy across five posture dimensions (behavioral-commercial, forensic-residue, network-exposure, diagnostic-crash, ambient-sensor).
 - `explain` without arguments (or with `score`, `critical`, `posture`) walks through the posture calculation, five dimensions, four friction tiers, and critical controls; passing an exact ID shows technical evidence, applicability, management source, and tradeoffs.
-- `recommend` computes deterministic change recommendations ordered by friction tier (Tier 0 transparent to Tier 3 incompatible/tradeoff), workload persona, or friction budget.
+- `recommend` examines the full eligible compiled catalogue across profiles,
+  then filters confirmed drift by workload and optional dimension/friction
+  constraints. It does not default to baseline. Recommendations are ordered by
+  friction tier (Tier 0 transparent to Tier 3 incompatible/tradeoff); unknown
+  evidence and excluded controls cannot establish compliance.
 - `simulate` performs a dry-run counterfactual posture vector projection without mutating host state, reporting transition deltas, friction counts, and reboot or signout requirements.
 - `plan` (alias: `diff`) is read-only and shows the exact eligible change set. Running `privr plan` without arguments defaults to the daily-driver general persona and cosmetic friction ceiling.
 - `apply` (aliases: `fix`, `harden`) executes safe, verified remediation with transaction journaling, interactive plan review, and native in-place elevation (`-e, --elevate`). Running `privr apply` without arguments applies recommended daily-driver controls with zero workflow disruption.

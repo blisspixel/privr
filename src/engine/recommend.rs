@@ -73,12 +73,10 @@ pub fn generate_recommendations(
             continue;
         }
 
-        // 2. Developer Persona:
-        //    Preserve local crash minidumps for debugging.
+        // This Windows control governs reporting, not local dump retention.
+        // Other platforms retain their own control-specific explanation.
         let custom_rationale = if workload == WorkloadPersona::Developer
-            && (spec.id == "windows.diagnostics.error-reporting"
-                || spec.id == "systemd.coredump.storage"
-                || spec.id == "macos.analytics.share-with-developers")
+            && spec.id == "windows.diagnostics.error-reporting"
         {
             Some(
                 "Suppresses remote vendor crash telemetry while preserving local crash dumps for debugger symbol inspection.",
@@ -230,5 +228,51 @@ mod tests {
             recs.is_empty(),
             "thumbnail cache should be excluded for creative persona"
         );
+    }
+
+    #[test]
+    fn developer_rationale_never_reuses_windows_reporting_claims_for_other_platforms() {
+        let host = HostFacts::unknown(Platform::Linux);
+        let context = Context::live(&host);
+        for id in [
+            "windows.diagnostics.error-reporting",
+            "systemd.coredump.storage",
+            "macos.analytics.share-with-developers",
+        ] {
+            let mut control = make_test_control(
+                id,
+                PostureDimension::DiagnosticCrash,
+                FrictionTier::Tier3IncompatibleOrTradeoff,
+                |_| {
+                    crate::engine::evaluate::Resolution::determined(
+                        crate::engine::evaluate::SemanticState::new("enabled"),
+                        crate::model::host::ManagementSource::User,
+                    )
+                },
+            );
+            control.rationale = "Control-specific cited rationale.";
+            let recommendations = generate_recommendations(
+                &[control],
+                &context,
+                &host,
+                WorkloadPersona::Developer,
+                None,
+                None,
+            );
+            assert_eq!(recommendations.len(), 1, "{id}");
+            if id == "windows.diagnostics.error-reporting" {
+                assert!(
+                    recommendations[0]
+                        .rationale
+                        .contains("preserving local crash dumps")
+                );
+            } else {
+                assert_eq!(
+                    recommendations[0].rationale,
+                    "Control-specific cited rationale."
+                );
+                assert!(!recommendations[0].rationale.contains("remote vendor"));
+            }
+        }
     }
 }

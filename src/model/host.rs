@@ -221,7 +221,7 @@ pub struct HostFacts {
     pub platform: Platform,
     pub version: Fact<OsVersion>,
     pub architecture: Fact<Architecture>,
-    /// Windows edition, or distribution identifier on Linux. Lowercased.
+    /// Windows edition, lowercased. Not present on Linux or macOS.
     pub edition: Fact<String>,
     /// Distribution or product identifier where it differs from the platform.
     pub distribution: Fact<String>,

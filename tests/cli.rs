@@ -10,7 +10,7 @@ impl DoctorStorage {
         let path =
             std::env::temp_dir().join(format!("privr-cli-doctor-{}-{next}", std::process::id()));
         std::fs::create_dir(&path).expect("private doctor storage");
-        Self(path)
+        Self(std::fs::canonicalize(path).expect("canonical private doctor storage"))
     }
 
     fn command(&self) -> Command {

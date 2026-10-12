@@ -378,6 +378,13 @@ pub fn diagnose(host: &HostFacts) -> DoctorReport {
 }
 
 pub(crate) fn diagnose_with_storage(host: &HostFacts, tx_dir: &Path) -> DoctorReport {
+    diagnose_with_storage_facts(host, check_storage_integrity(tx_dir))
+}
+
+fn diagnose_with_storage_facts(
+    host: &HostFacts,
+    storage_facts: DoctorStorageFacts,
+) -> DoctorReport {
     let version_str = host
         .version
         .known()
@@ -473,8 +480,6 @@ pub(crate) fn diagnose_with_storage(host: &HostFacts, tx_dir: &Path) -> DoctorRe
         ],
     };
 
-    let storage_facts = check_storage_integrity(tx_dir);
-
     let all_controls = crate::catalog::all();
     let catalog_facts = DoctorCatalogFacts {
         total_controls: all_controls.len(),
@@ -510,15 +515,44 @@ mod tests {
     use super::*;
 
     fn diagnose_test_host(host: &HostFacts) -> DoctorReport {
-        let count = PROBE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!(
-            "privr-doctor-fixture-{}-{count}",
-            std::process::id()
-        ));
-        std::fs::create_dir(&dir).expect("private storage fixture");
-        let report = diagnose_with_storage(host, &dir);
-        std::fs::remove_dir(&dir).expect("doctor leaves no probe files");
-        report
+        diagnose_with_storage_facts(
+            host,
+            DoctorStorageFacts {
+                root: "<private-test-storage>".to_owned(),
+                exists: true,
+                writable: true,
+                reparse_point: false,
+                status: "ok".to_owned(),
+            },
+        )
+    }
+
+    #[test]
+    fn storage_checks_accept_a_canonical_private_directory() {
+        let directory = crate::journal::TestDirectory::new();
+        let path = std::fs::canonicalize(&directory.0).expect("canonical private fixture");
+        let host = HostFacts::unknown(Platform::current());
+        let report = diagnose_with_storage(&host, &path);
+        assert!(report.storage.exists);
+        assert!(report.storage.writable);
+        assert!(!report.storage.reparse_point);
+        assert!(report.healthy);
+        assert_eq!(report.storage.status, "ok");
+        assert_eq!(report.storage.root, sanitize_storage_path(&path));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn storage_checks_reject_a_symlink_in_a_private_fixture() {
+        let directory = crate::journal::TestDirectory::new();
+        let root = std::fs::canonicalize(&directory.0).expect("canonical private fixture");
+        let link = root.join("storage-link");
+        std::os::unix::fs::symlink(&root, &link).expect("private symlink fixture");
+        let host = HostFacts::unknown(Platform::current());
+        let report = diagnose_with_storage(&host, &link);
+        assert!(report.storage.writable);
+        assert!(report.storage.reparse_point);
+        assert!(!report.healthy);
     }
 
     #[test]

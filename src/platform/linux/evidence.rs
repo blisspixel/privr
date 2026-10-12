@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::io::Read;
 use std::path::PathBuf;
 
+use super::systemd::{self, ConfigurationEvidence, ConfigurationFamily};
 use crate::engine::evaluate::Uncertainty;
 use crate::model::evidence::{DenialReason, Evidence, RawValue, UndeterminedReason, ValueKind};
 use crate::model::host::ManagementSource;
@@ -18,8 +19,6 @@ pub enum Target {
     UbuntuInsights,
     UbuntuReport,
     KdeFeedback,
-    Coredump,
-    Journald,
     FstrimAdmin,
     FstrimLib,
     FstrimVendor,
@@ -37,8 +36,6 @@ impl Target {
             Self::KdeFeedback => {
                 PathBuf::from(std::env::var_os("HOME")?).join(".config/KDE/UserFeedback.conf")
             }
-            Self::Coredump => "/etc/systemd/coredump.conf".into(),
-            Self::Journald => "/etc/systemd/journald.conf".into(),
             Self::FstrimAdmin => "/etc/systemd/system/timers.target.wants/fstrim.timer".into(),
             Self::FstrimLib => "/lib/systemd/system/timers.target.wants/fstrim.timer".into(),
             Self::FstrimVendor => "/usr/lib/systemd/system/timers.target.wants/fstrim.timer".into(),
@@ -60,8 +57,11 @@ impl Target {
 #[derive(Debug)]
 pub struct Recording {
     entries: BTreeMap<Target, Evidence>,
+    configurations: BTreeMap<ConfigurationFamily, ConfigurationEvidence>,
     #[cfg(test)]
     requested: std::sync::Mutex<Vec<Target>>,
+    #[cfg(test)]
+    requested_configurations: std::sync::Mutex<Vec<ConfigurationFamily>>,
 }
 
 #[derive(Debug, Default)]
@@ -73,11 +73,57 @@ pub enum Reader {
 
 impl Reader {
     pub fn recorded(entries: BTreeMap<Target, Evidence>) -> Self {
+        Self::recorded_with_configurations(entries, BTreeMap::new())
+    }
+
+    pub fn recorded_with_configurations(
+        entries: BTreeMap<Target, Evidence>,
+        configurations: BTreeMap<ConfigurationFamily, ConfigurationEvidence>,
+    ) -> Self {
         Self::Recorded(Recording {
             entries,
+            configurations,
             #[cfg(test)]
             requested: std::sync::Mutex::default(),
+            #[cfg(test)]
+            requested_configurations: std::sync::Mutex::default(),
         })
+    }
+
+    pub fn configuration(
+        &self,
+        family: ConfigurationFamily,
+    ) -> crate::engine::evaluate::Resolution {
+        match self {
+            Self::Live => systemd::resolve(family, &systemd::read_live(family)),
+            Self::Recorded(recording) => {
+                #[cfg(test)]
+                recording
+                    .requested_configurations
+                    .lock()
+                    .expect("recorded trace lock")
+                    .push(family);
+                systemd::resolve(
+                    family,
+                    recording
+                        .configurations
+                        .get(&family)
+                        .unwrap_or(&ConfigurationEvidence::default()),
+                )
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn requested_configurations(&self) -> Vec<ConfigurationFamily> {
+        match self {
+            Self::Recorded(recording) => recording
+                .requested_configurations
+                .lock()
+                .expect("recorded trace lock")
+                .clone(),
+            Self::Live => panic!("recorded read trace requires a recording"),
+        }
     }
 
     #[cfg(test)]

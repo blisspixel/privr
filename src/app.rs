@@ -1816,6 +1816,78 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
+    fn issue18_cli_file_only_storage_is_incomplete() {
+        use crate::platform::linux::systemd::ConfigurationFamily;
+        use clap::Parser;
+        for (family, selector, bytes) in [
+            (
+                ConfigurationFamily::Coredump,
+                "systemd.coredump",
+                b"[Coredump]\nStorage=none\n".as_slice(),
+            ),
+            (
+                ConfigurationFamily::Journald,
+                "systemd.journald",
+                b"[Journal]\nStorage=volatile\n".as_slice(),
+            ),
+        ] {
+            let host = crate::test_context::host("arch", "hyprland");
+            let reader = crate::test_context::configuration_reader(family, bytes);
+            let context = crate::test_context::context(&host, &reader);
+            for format in ["text", "json"] {
+                let cli = Cli::try_parse_from([
+                    "privr",
+                    "--color",
+                    "never",
+                    "--format",
+                    format,
+                    "check",
+                    "--control",
+                    selector,
+                    "--all",
+                ])
+                .unwrap();
+                let mut out = Vec::new();
+                let mut err = Vec::new();
+                assert_eq!(
+                    run_with_check_context(
+                        cli,
+                        &mut out,
+                        &mut err,
+                        std::path::Path::new("unused-read-only-check"),
+                        Some(&context)
+                    ),
+                    3
+                );
+                assert!(err.is_empty());
+                if format == "json" {
+                    let value: serde_json::Value = serde_json::from_slice(&out).unwrap();
+                    assert_eq!(value["complete"], false);
+                    assert_eq!(value["summary"]["unknown"], 1);
+                    assert!(
+                        value["results"][0]["note"]
+                            .as_str()
+                            .unwrap()
+                            .contains("Loaded storage is unverified")
+                    );
+                } else {
+                    let text = String::from_utf8(out).unwrap();
+                    let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+                    assert!(text.contains("Configured intent"));
+                    assert!(text.contains("Loaded storage is unverified"));
+                    assert!(text.contains(if family == ConfigurationFamily::Coredump {
+                        "temporary writes"
+                    } else {
+                        "existing history"
+                    }));
+                    assert!(!text.contains("Machine is compliant"));
+                }
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
     fn issue19_cli_default_and_aliases_use_compiled_unevaluated_scope() {
         use clap::Parser;
         let host = crate::test_context::host("arch", "hyprland");
@@ -1863,6 +1935,7 @@ mod tests {
             }
         }
         assert!(reader.requested().is_empty());
+        assert!(reader.requested_configurations().is_empty());
     }
 
     #[cfg(target_os = "linux")]

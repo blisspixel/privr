@@ -21,7 +21,7 @@ The decisions that constrain every milestone are recorded in
 
 ## Current state
 
-Reviewed 2026-10-07 against source and tests. This section is the single statement of
+Reviewed 2026-10-12 against source and tests. This section is the single statement of
 what exists; other documents link here rather than repeating counts.
 
 Terms: **implemented** means the code exists; **tested** means automated tests
@@ -113,6 +113,12 @@ Reporting (blocks 0.1.0):
 
 Linux and macOS probes (block 0.3.0 and 0.4.0), each a false-pass risk:
 
+- [x] Systemd storage probes inspect only the first main-file assignment and
+  miss drop-ins (issue 18, 2026-10-12). Bounded recorded evidence now resolves
+  current-standard-path configured intent with priority, basename shadowing,
+  masks and lexical ordering. Both file-only controls remain Unknown, including
+  desired and adverse settings; loaded version, generation and higher-precedence
+  inputs are unverified. See [the evidence contract](docs/SYSTEMD_EVIDENCE.md).
 - [ ] macOS analytics searches the raw text of a property list for a key and a
   `false` value anywhere in the file. The 0.3.0 requirements forbid parsing
   preference files directly.

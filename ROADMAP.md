@@ -34,7 +34,7 @@ milestone and its results should not be trusted.
 | Windows `check`, `explain`, `list` | Implemented and tested with recorded evidence. 28 controls across 5 posture dimensions. Validated on Windows 11 Pro 25H2. `privr explain` includes scoring walkthrough and critical controls. |
 | Windows `plan`, `apply`, `rollback` | Implemented and tested. 25 controls carry live, verified apply and rollback routines with pre/postimage validation. Native in-place elevation (-e, --elevate) invokes UAC/sudo with typed CLI argument serialization; interactive plan review and approval prompts run in terminals; noninteractive mode defaults safely to daily-driver with --yes. |
 | Posture vectors and personas | Implemented and tested. 5 posture dimensions, 4 friction tiers, 5 workload personas across `check`, `recommend`, `simulate`, `plan`, and `apply`. |
-| Linux `check` | Experimental. Discovery and 13 controls (GNOME, Ubuntu, Debian, Fedora, KDE, FreeDesktop, systemd) with elevation metadata. Compiled and tested in CI; never checked against a real desktop. |
+| Linux `check` | Experimental. Discovery and 13 controls (GNOME, Ubuntu, Debian, Fedora, KDE, FreeDesktop, systemd) with elevation metadata. Typed recorded Context tests exercise the existing file probes; zero-evaluation checks are incomplete. Compiled and tested in CI; never checked against a real desktop. |
 | macOS `check` | Experimental. Discovery and 6 controls with elevation metadata. Compiled and tested in CI; never checked against a real Mac. |
 | Agent server (`mcp`) | Implemented and tested. Synchronous stdio server with read-only tools and gated mutation. Conforms to Model Context Protocol and Agent Plugins v1.0.0. Supports workload personas and friction budgets. |
 | `doctor` | Implemented and tested. Reports non-identifying OS facts, privilege level, platform adapters, storage integrity, reparse-point verification, and schema versions. |
@@ -81,6 +81,12 @@ Mutation (blocks 0.2.0):
   from missing history.)
 
 Reporting (blocks 0.1.0):
+
+- [x] A nonempty check with only not-applicable and not-selected controls can
+  claim compliance. (Fixed: completeness requires an evaluated result and no
+  concealed state. CLI aliases and MCP evaluate selectors before aggregation;
+  passing-row visibility does not change the summary. Compiled Linux probes
+  run against typed recorded evidence, with missing observations unknown.)
 
 - [x] A disabled advertising policy is treated as forcing sharing. (Fixed:
   preserve user choice, report absent user values as defaults, and replay both

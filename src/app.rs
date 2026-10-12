@@ -73,6 +73,16 @@ fn run_with_journal_dir(
     err: &mut impl Write,
     journal_dir: &std::path::Path,
 ) -> i32 {
+    run_with_check_context(cli, out, err, journal_dir, None)
+}
+
+fn run_with_check_context(
+    cli: Cli,
+    out: &mut impl Write,
+    err: &mut impl Write,
+    journal_dir: &std::path::Path,
+    check_context: Option<&crate::catalog::Context>,
+) -> i32 {
     let format = cli.format;
     let ui = crate::ui::Ui::for_stdout(cli.color.into());
     let elevated_output_path = match &cli.command {
@@ -134,14 +144,24 @@ fn run_with_journal_dir(
                 let msg =
                     format!("Scanning {total_controls} controls across 5 posture dimensions...");
                 let _progress = ui.spinner_for(&msg, format);
-                let host = crate::platform::discover();
-                crate::report::Report::build_filtered_workload(
-                    &host,
-                    profile_str,
-                    workload,
-                    &controls,
-                    &sections,
-                )
+                if let Some(context) = check_context {
+                    crate::report::Report::build_with_context(
+                        context,
+                        profile_str,
+                        workload,
+                        &controls,
+                        &sections,
+                    )
+                } else {
+                    let host = crate::platform::discover();
+                    crate::report::Report::build_filtered_workload(
+                        &host,
+                        profile_str,
+                        workload,
+                        &controls,
+                        &sections,
+                    )
+                }
             };
 
             match format {
@@ -1793,6 +1813,110 @@ Run privr explain without arguments for the posture overview, or privr list to s
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn issue19_cli_default_and_aliases_use_compiled_unevaluated_scope() {
+        use clap::Parser;
+        let host = crate::test_context::host("arch", "hyprland");
+        let reader = crate::test_context::reader([]);
+        let context = crate::test_context::context(&host, &reader);
+        for command in [
+            None,
+            Some("check"),
+            Some("status"),
+            Some("audit"),
+            Some("scan"),
+        ] {
+            for format in ["json", "text"] {
+                let mut argv = vec!["privr", "--color", "never", "--format", format];
+                if let Some(command) = command {
+                    argv.push(command);
+                }
+                let cli = Cli::try_parse_from(argv).unwrap();
+                let mut out = Vec::new();
+                let mut err = Vec::new();
+                let code = run_with_check_context(
+                    cli,
+                    &mut out,
+                    &mut err,
+                    std::path::Path::new("unused-read-only-check"),
+                    Some(&context),
+                );
+                assert_eq!(code, 3, "{command:?}/{format}");
+                assert!(err.is_empty());
+                if format == "json" {
+                    let value: serde_json::Value = serde_json::from_slice(&out).unwrap();
+                    assert_eq!(value["complete"], false);
+                    assert_eq!(value["summary"]["not_selected"], 6);
+                    assert_eq!(value["summary"]["not_applicable"], 7);
+                } else {
+                    let text = String::from_utf8(out).unwrap();
+                    assert!(text.contains("No controls were evaluated"));
+                    assert!(text.contains("privr list"));
+                    assert!(matches!(
+                        Cli::try_parse_from(["privr", "list"]).unwrap().command,
+                        Some(Command::List { .. })
+                    ));
+                    assert!(!text.contains("Machine is compliant"));
+                }
+            }
+        }
+        assert!(reader.requested().is_empty());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn issue19_cli_selected_pass_drift_and_visibility_loss_keep_real_exit_codes() {
+        use crate::platform::linux::evidence::Target;
+        use clap::Parser;
+        for (bytes, expected) in [
+            (Some(b"PARTICIPATE=\"no\"\n".as_slice()), 0),
+            (Some(b"PARTICIPATE=\"yes\"\n".as_slice()), 1),
+            (None, 3),
+        ] {
+            let host = crate::test_context::host("debian", "hyprland");
+            let reader = crate::test_context::reader(
+                bytes.map(|b| (Target::DebianPopcon, crate::test_context::text(b))),
+            );
+            let context = crate::test_context::context(&host, &reader);
+            for format in ["json", "text"] {
+                let cli = Cli::try_parse_from([
+                    "privr",
+                    "--color",
+                    "never",
+                    "--format",
+                    format,
+                    "check",
+                    "--control",
+                    "debian",
+                    "--section",
+                    "DeB",
+                    "--all",
+                ])
+                .unwrap();
+                let mut out = Vec::new();
+                let mut err = Vec::new();
+                assert_eq!(
+                    run_with_check_context(
+                        cli,
+                        &mut out,
+                        &mut err,
+                        std::path::Path::new("unused-read-only-check"),
+                        Some(&context)
+                    ),
+                    expected
+                );
+                assert!(err.is_empty());
+                if format == "json" {
+                    let value: serde_json::Value = serde_json::from_slice(&out).unwrap();
+                    assert_eq!(value["complete"], expected != 3);
+                    assert_eq!(value["results"].as_array().unwrap().len(), 1);
+                    assert_eq!(value["carried"], 13);
+                }
+            }
+        }
+    }
 
     /// Collapse whitespace so assertions are not coupled to column padding.
     fn flatten(text: &str) -> String {

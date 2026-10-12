@@ -154,11 +154,18 @@ malformed evidence, adapter failure, or another uncertainty that could hide
 drift. Unsupported controls remain visible but only make the report incomplete
 when the selected policy expected them to be evaluated on that host.
 
+A scope with no evaluated controls is also incomplete. A nonempty set of only
+`not_applicable` and `not_selected` results establishes no policy compliance.
+Evaluated counts `pass`, `drift`, and `review`; review still requires operator
+judgment and does not mean policy matches. Completeness and exit codes use the
+selected scope before passing rows are hidden. `carried` counts the entire
+compiled catalogue, while summary counts describe the requested scope.
+
 Truncation for output size is always reported explicitly. Silently omitting
 results reads as a pass.
 
-The current build reports `complete: true` only when every selected control
-was evaluated. Some Linux and macOS probes can report a determined state from
+The current build reports `complete: true` only when at least one control was
+evaluated and no selected result conceals state. Some Linux and macOS probes can report a determined state from
 insufficient evidence; see [ROADMAP.md](../ROADMAP.md#current-state).
 
 ## Exit codes

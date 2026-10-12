@@ -5,8 +5,9 @@ use std::collections::BTreeMap;
 use serde::Serialize;
 
 use crate::catalog;
-use crate::engine::evaluate::{Mode, evaluate};
+use crate::engine::evaluate::{Mode, Resolution, Uncertainty, evaluate};
 use crate::model::Profile;
+use crate::model::applicability::Applies;
 use crate::model::host::HostFacts;
 use crate::model::outcome::{ControlResult, Exception, Outcome, Summary};
 use crate::model::posture::{FrictionTier, PostureVector};
@@ -18,6 +19,14 @@ fn capitalise(text: &str) -> String {
     chars.next().map_or_else(String::new, |first| {
         first.to_uppercase().collect::<String>() + chars.as_str()
     })
+}
+
+fn completed_scope_status(summary: &Summary) -> &'static str {
+    if summary.review > 0 {
+        "\nStatus: Selected controls were evaluated; review items require operator judgment.\n"
+    } else {
+        "\nStatus: All evaluated controls in the selected scope match policy.\n"
+    }
 }
 
 /// The report schema version. Any change to the shape of this output is a
@@ -84,6 +93,7 @@ fn render_meter(ui: &Ui, compliant: usize, total: usize, width: usize) -> String
 
 impl Report {
     /// Evaluate every applicable control against this host.
+    #[cfg(test)]
     pub fn build(host: &HostFacts, profile: &str) -> Self {
         Self::build_filtered(host, profile, &[], &[])
     }
@@ -106,10 +116,26 @@ impl Report {
         control_filter: &[String],
         section_filter: &[String],
     ) -> Self {
+        Self::build_with_context(
+            &catalog::Context::live(host),
+            profile,
+            workload,
+            control_filter,
+            section_filter,
+        )
+    }
+
+    pub(crate) fn build_with_context(
+        context: &catalog::Context,
+        profile: Option<&str>,
+        workload: Option<crate::model::posture::WorkloadPersona>,
+        control_filter: &[String],
+        section_filter: &[String],
+    ) -> Self {
+        let host = context.host;
         let selected_profile = profile
             .and_then(|p| p.parse::<Profile>().ok())
             .unwrap_or_default();
-        let context = catalog::Context::live(host);
         let all_controls = catalog::all();
         let recommended_ids: Option<std::collections::BTreeSet<String>> = workload.map(|w| {
             all_controls
@@ -149,13 +175,19 @@ impl Report {
                 } else {
                     Mode::Ignore
                 };
-                evaluate(
-                    &control.spec,
-                    mode,
-                    &control.observe(&context),
-                    host,
-                    Exception::None,
-                )
+                // Keep observation in this adapter layer. The pure evaluator
+                // owns outcome precedence, including Ignore before applicability.
+                let resolution = if mode == Mode::Ignore
+                    || control.spec.applicability.resolve(host).applies != Applies::Yes
+                {
+                    Resolution::uncertain(
+                        Uncertainty::Undetermined,
+                        crate::model::host::ManagementSource::Unknown,
+                    )
+                } else {
+                    control.observe(context)
+                };
+                evaluate(&control.spec, mode, &resolution, host, Exception::None)
             })
             .collect();
 
@@ -176,15 +208,13 @@ impl Report {
 
         Self {
             schema: SCHEMA,
-            // A build with no controls has observed nothing, so it cannot claim
-            // to be complete however clean the summary looks.
-            complete: summary.is_complete() && !results.is_empty(),
+            complete: summary.is_complete(),
             truncated: false,
             profile: profile_str,
             platform: host.platform.as_str().to_owned(),
             os_version: host.version.known().map(|v| v.display.clone()),
             edition: host.edition.known().cloned(),
-            carried: results.len(),
+            carried: all_controls.len(),
             summary,
             posture,
             results,
@@ -439,7 +469,7 @@ impl Report {
             }
         }
 
-        if self.results.is_empty() {
+        if self.carried == 0 {
             out.push_str(&format!(
                 "\n{}\n",
                 ui.wrap(
@@ -447,6 +477,13 @@ impl Report {
                      about the machine.",
                     0,
                 )
+            ));
+        } else if self.summary.evaluated() == 0 {
+            out.push_str(&ui.wrap(
+                "\nNo controls were evaluated in the selected scope. This check establishes no \
+                 policy compliance. Inspect 'privr list' and choose an applicable control \
+                 with 'privr check --control <id>' or an appropriate profile explicitly.\n",
+                0,
             ));
         } else if self.summary.drift > 0 {
             let divider = if ui.unicode() {
@@ -460,8 +497,8 @@ impl Report {
                 ui.paint(style::IDENT, "privr diff"),
                 ui.paint(style::IDENT, "privr fix")
             ));
-        } else if self.complete && self.summary.drift == 0 {
-            out.push_str("\nStatus: All evaluated controls match policy. Machine is compliant.\n");
+        } else if self.complete {
+            out.push_str(completed_scope_status(&self.summary));
         }
         out.push('\n');
 
@@ -494,6 +531,375 @@ mod tests {
     use crate::model::host::Platform;
     use crate::platform;
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn issue19_unevaluated_compiled_scope_is_incomplete() {
+        let host = crate::test_context::host("arch", "hyprland");
+        let reader = crate::test_context::reader([]);
+        let context = crate::test_context::context(&host, &reader);
+        let report = Report::build_with_context(&context, Some("baseline"), None, &[], &[]);
+        assert_eq!(report.results.len(), 13);
+        assert_eq!(report.summary.not_applicable, 7);
+        assert_eq!(report.summary.not_selected, 6);
+        assert_eq!(report.summary.evaluated(), 0);
+        assert!(reader.requested().is_empty());
+        assert!(!report.complete);
+        assert_eq!(report.exit_code(), 3);
+        let json = serde_json::to_value(&report).unwrap();
+        assert_eq!(json["schema"], 1);
+        assert_eq!(json["complete"], false);
+        let text = report.to_text(&Ui::plain(), false);
+        assert!(!text.contains("Machine is compliant"));
+        assert!(text.contains("No controls were evaluated"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn issue19_filters_define_scope_but_not_carried_catalogue() {
+        let host = crate::test_context::host("arch", "hyprland");
+        let reader = crate::test_context::reader([]);
+        let context = crate::test_context::context(&host, &reader);
+        for (controls, sections, expected, not_selected, not_applicable) in [
+            (vec![], vec!["SyStEmD".to_owned()], 3, 3, 0),
+            (vec![], vec!["ubuntu".to_owned()], 2, 0, 2),
+            (vec!["missing".to_owned()], vec![], 0, 0, 0),
+            (
+                vec!["debian".to_owned()],
+                vec!["systemd".to_owned()],
+                0,
+                0,
+                0,
+            ),
+        ] {
+            let report =
+                Report::build_with_context(&context, Some("baseline"), None, &controls, &sections);
+            assert_eq!(report.results.len(), expected);
+            assert_eq!(report.summary.not_selected, not_selected);
+            assert_eq!(report.summary.not_applicable, not_applicable);
+            assert_eq!(report.summary.evaluated(), 0);
+            assert_eq!(report.carried, 13);
+            assert!(!report.complete);
+            assert_eq!(report.exit_code(), 3);
+            assert!(
+                !report
+                    .to_text(&Ui::plain(), true)
+                    .contains("No controls are implemented")
+            );
+        }
+        assert!(reader.requested().is_empty());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn issue19_real_probe_pass_drift_and_review_remain_distinct() {
+        use crate::platform::linux::evidence::Target;
+        for (bytes, outcome, exit) in [
+            (b"PARTICIPATE=\"no\"\n".as_slice(), Outcome::Pass, 0),
+            (b"PARTICIPATE=\"yes\"\n".as_slice(), Outcome::Drift, 1),
+        ] {
+            let host = crate::test_context::host("debian", "hyprland");
+            let reader = crate::test_context::reader([(
+                Target::DebianPopcon,
+                crate::test_context::text(bytes),
+            )]);
+            let context = crate::test_context::context(&host, &reader);
+            let report = Report::build_with_context(
+                &context,
+                Some("baseline"),
+                None,
+                &["debian".to_owned()],
+                &[],
+            );
+            assert_eq!(report.results.len(), 1);
+            assert_eq!(report.results[0].outcome, outcome);
+            assert!(report.complete);
+            assert_eq!(report.exit_code(), exit);
+            assert_eq!(report.carried, 13);
+            assert_eq!(reader.requested(), vec![Target::DebianPopcon]);
+            let control = catalog::all()
+                .into_iter()
+                .find(|c| c.spec.id.starts_with("debian"))
+                .unwrap();
+            let review = evaluate(
+                &control.spec,
+                Mode::Review,
+                &control.observe(&context),
+                &host,
+                Exception::None,
+            );
+            assert_eq!(review.outcome, Outcome::Review);
+            let summary = Summary::of([&review]);
+            assert!(summary.is_complete());
+            assert_eq!(summary.evaluated(), 1);
+            assert!(completed_scope_status(&summary).contains("operator judgment"));
+            assert!(!completed_scope_status(&summary).contains("match policy"));
+            assert!(
+                !report
+                    .to_text(&Ui::plain(), true)
+                    .contains("Machine is compliant")
+            );
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn issue19_failed_raw_observations_never_become_a_default_pass() {
+        use crate::model::evidence::{
+            DenialReason, Evidence, RawValue, UndeterminedReason, ValueKind,
+        };
+        use crate::model::host::ManagementSource;
+        use crate::platform::linux::evidence::{MAX_FILE_BYTES, Target};
+        let source = ManagementSource::Unknown;
+        for evidence in [
+            None,
+            Some(Evidence::Denied {
+                source,
+                reason: DenialReason::Permission,
+            }),
+            Some(Evidence::Undetermined {
+                source,
+                reason: UndeterminedReason::ProbeFailed,
+            }),
+            Some(Evidence::Unsupported { source }),
+            Some(Evidence::Malformed {
+                source,
+                expected: ValueKind::String,
+                found: ValueKind::Binary,
+            }),
+            Some(crate::test_context::text(&[0xff])),
+            Some(crate::test_context::text(&vec![b'x'; MAX_FILE_BYTES + 1])),
+            Some(Evidence::Present {
+                source,
+                value: RawValue::u32(0),
+            }),
+            Some(Evidence::Present {
+                source,
+                value: RawValue::new(ValueKind::Bool, vec![1]),
+            }),
+        ] {
+            let host = crate::test_context::host("debian", "hyprland");
+            let reader = crate::test_context::reader(evidence.map(|e| (Target::DebianPopcon, e)));
+            let context = crate::test_context::context(&host, &reader);
+            let report = Report::build_with_context(
+                &context,
+                Some("baseline"),
+                None,
+                &["debian".to_owned()],
+                &[],
+            );
+            assert_eq!(report.results[0].outcome, Outcome::Unknown);
+            assert_eq!(report.summary.pass, 0);
+            assert!(!report.complete);
+            assert_eq!(report.exit_code(), 3);
+            assert_eq!(reader.requested(), vec![Target::DebianPopcon]);
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn issue19_unknown_applicability_and_ignored_controls_are_not_observed() {
+        let host = HostFacts::unknown(Platform::Linux);
+        let reader = crate::test_context::reader([]);
+        let context = crate::test_context::context(&host, &reader);
+        let report = Report::build_with_context(
+            &context,
+            Some("baseline"),
+            None,
+            &["debian".to_owned()],
+            &[],
+        );
+        assert_eq!(report.results[0].outcome, Outcome::Unknown);
+        assert!(!report.complete);
+        let report = Report::build_with_context(
+            &context,
+            Some("baseline"),
+            None,
+            &[],
+            &["gnome".to_owned()],
+        );
+        assert_eq!(report.summary.not_selected, 2);
+        assert_eq!(report.summary.unknown, 2);
+        assert!(reader.requested().is_empty());
+        for result in report.results {
+            assert_eq!(
+                result.management_source,
+                crate::model::host::ManagementSource::Unknown
+            );
+            assert!(result.note.is_none());
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn issue19_drift_with_unknown_remains_incomplete() {
+        use crate::platform::linux::evidence::Target;
+        let host = crate::test_context::host("debian", "gnome");
+        let reader = crate::test_context::reader([(
+            Target::DebianPopcon,
+            crate::test_context::text(b"PARTICIPATE=\"yes\"\n"),
+        )]);
+        let context = crate::test_context::context(&host, &reader);
+        let report = Report::build_with_context(&context, Some("baseline"), None, &[], &[]);
+        assert_eq!(report.summary.drift, 1);
+        assert_eq!(report.summary.unknown, 2);
+        assert_eq!(report.summary.evaluated(), 1);
+        assert!(!report.complete);
+        assert_eq!(report.exit_code(), 3);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn issue19_repeated_selectors_keep_prefix_case_and_and_or_semantics() {
+        use crate::platform::linux::evidence::Target;
+        let host = crate::test_context::host("debian", "hyprland");
+        let reader = crate::test_context::reader([
+            (
+                Target::DebianPopcon,
+                crate::test_context::text(b"PARTICIPATE=\"no\"\n"),
+            ),
+            (
+                Target::Journald,
+                crate::test_context::text(b"Storage=volatile\n"),
+            ),
+        ]);
+        let context = crate::test_context::context(&host, &reader);
+        let report = Report::build_with_context(
+            &context,
+            Some("baseline"),
+            None,
+            &["debian".to_owned(), "systemd.journald".to_owned()],
+            &["DeB".to_owned(), "SYS".to_owned()],
+        );
+        assert_eq!(report.results.len(), 2);
+        assert_eq!(report.summary.pass, 2);
+        assert!(report.complete);
+        let wrong_case = Report::build_with_context(
+            &context,
+            Some("baseline"),
+            None,
+            &["Debian".to_owned()],
+            &[],
+        );
+        assert!(wrong_case.results.is_empty());
+        assert!(!wrong_case.complete);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn issue19_compiled_linux_targets_use_only_the_recorded_reader() {
+        use crate::model::evidence::{Evidence, RawValue, ValueKind};
+        use crate::model::host::ManagementSource;
+        use crate::platform::linux::evidence::Target;
+        let absent = Evidence::Absent {
+            source: ManagementSource::Unknown,
+        };
+        let present = Evidence::Present {
+            source: ManagementSource::Unknown,
+            value: RawValue::new(ValueKind::Bool, vec![1]),
+        };
+        for (distribution, desktop, selector, entries, expected, requested) in [
+            (
+                "fedora",
+                "hyprland",
+                "fedora",
+                vec![(
+                    Target::FedoraAbrt,
+                    crate::test_context::text(b"AutoreportingEvent=none\n"),
+                )],
+                Outcome::Pass,
+                vec![Target::FedoraAbrt],
+            ),
+            (
+                "arch",
+                "kde",
+                "kde",
+                vec![(
+                    Target::KdeFeedback,
+                    crate::test_context::text(b"FeedbackLevel=0\n"),
+                )],
+                Outcome::Pass,
+                vec![Target::KdeFeedback],
+            ),
+            (
+                "arch",
+                "hyprland",
+                "systemd.coredump",
+                vec![(
+                    Target::Coredump,
+                    crate::test_context::text(b"Storage=none\n"),
+                )],
+                Outcome::Pass,
+                vec![Target::Coredump],
+            ),
+            (
+                "arch",
+                "hyprland",
+                "systemd.journald",
+                vec![(
+                    Target::Journald,
+                    crate::test_context::text(b"Storage=volatile\n"),
+                )],
+                Outcome::Pass,
+                vec![Target::Journald],
+            ),
+            (
+                "arch",
+                "hyprland",
+                "systemd.fstrim",
+                vec![
+                    (Target::FstrimAdmin, absent.clone()),
+                    (Target::FstrimLib, absent.clone()),
+                    (Target::FstrimVendor, present.clone()),
+                ],
+                Outcome::Pass,
+                vec![Target::FstrimAdmin, Target::FstrimLib, Target::FstrimVendor],
+            ),
+            (
+                "ubuntu",
+                "hyprland",
+                "ubuntu.insights",
+                vec![(Target::UbuntuInsights, present.clone())],
+                Outcome::Drift,
+                vec![Target::UbuntuInsights],
+            ),
+            (
+                "ubuntu",
+                "hyprland",
+                "ubuntu.report",
+                vec![(Target::UbuntuReport, present)],
+                Outcome::Drift,
+                vec![Target::UbuntuReport],
+            ),
+        ] {
+            let host = crate::test_context::host(distribution, desktop);
+            let reader = crate::test_context::reader(entries);
+            let context = crate::test_context::context(&host, &reader);
+            let report = Report::build_with_context(
+                &context,
+                Some("baseline"),
+                None,
+                &[selector.to_owned()],
+                &[],
+            );
+            assert_eq!(report.results.len(), 1, "{selector}");
+            assert_eq!(report.results[0].outcome, expected, "{selector}");
+            assert!(report.complete, "{selector}");
+            assert_eq!(reader.requested(), requested);
+            // An omitted recording must not silently read a real host value.
+            let missing = crate::test_context::reader([]);
+            let context = crate::test_context::context(&host, &missing);
+            let report = Report::build_with_context(
+                &context,
+                Some("baseline"),
+                None,
+                &[selector.to_owned()],
+                &[],
+            );
+            assert_eq!(report.results[0].outcome, Outcome::Unknown, "{selector}");
+            assert_eq!(report.exit_code(), 3);
+        }
+    }
+
     fn empty_report() -> Report {
         Report {
             schema: SCHEMA,
@@ -515,7 +921,7 @@ mod tests {
         // Observing nothing is not the same as finding nothing wrong. A clean
         // summary over an empty result set would be the emptiest possible false
         // pass, so completeness requires that something was evaluated.
-        assert!(Summary::default().is_complete());
+        assert!(!Summary::default().is_complete());
 
         let host = HostFacts::unknown(Platform::Linux);
         let built = Report::build(&host, "baseline");

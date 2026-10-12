@@ -1576,6 +1576,11 @@ Run privr explain without arguments for the posture overview, or privr list to s
                         |name: &str| ui.paint(crate::ui::style::MUTED, &format!("{name:<16}"));
                     let _ = writeln!(out, "{}privr recommend", field("Command"));
                     let _ = writeln!(out, "{}recommendation report", field("Status"));
+                    let _ = writeln!(
+                        out,
+                        "{}full compiled catalogue across profiles; workload and filters apply",
+                        field("Scope")
+                    );
                     let _ = writeln!(out, "{}{}", field("Workload"), workload.as_str());
                     let friction_label = max_friction.map(|f| f.as_str()).unwrap_or("unlimited");
                     let _ = writeln!(out, "{}{}", field("Max Friction"), friction_label);
@@ -1591,7 +1596,7 @@ Run privr explain without arguments for the posture overview, or privr list to s
                     if recommendations.is_empty() {
                         let _ = writeln!(
                             out,
-                            "No recommendations matching workload and friction constraints (machine matches target posture)."
+                            "No confirmed drift recommendations matched the workload and filters."
                         );
                     } else {
                         for rec in &recommendations {
@@ -1630,8 +1635,15 @@ Run privr explain without arguments for the posture overview, or privr list to s
                             }
                             let _ = writeln!(out);
                         }
-                        let _ = writeln!(out, "To apply recommended controls, run: privr apply");
+                        let _ = writeln!(
+                            out,
+                            "Run privr plan to review eligible changes before applying."
+                        );
                     }
+                    let _ = writeln!(
+                        out,
+                        "Unknown, unchecked, and filtered controls do not establish compliance. Run privr check for the selected profile's completeness and outcomes."
+                    );
                 }
                 OutputFormat::Json => {
                     if serde_json::to_writer_pretty(&mut *out, &report).is_ok() {
@@ -1789,7 +1801,7 @@ Run privr explain without arguments for the posture overview, or privr list to s
         }
         Command::Doctor => {
             let host = crate::platform::discover();
-            let report = crate::doctor::diagnose(&host);
+            let report = crate::doctor::diagnose_with_storage(&host, journal_dir);
             match format {
                 OutputFormat::Text => {
                     let _ = write!(out, "{}", report.to_text(&ui));
@@ -2149,7 +2161,7 @@ mod tests {
         assert!(stdout.contains("privr Posture Model & Critical Controls"));
         assert!(stdout.contains("1. How Posture Is Calculated"));
         assert!(stdout.contains("2. Five Orthogonal Posture Dimensions"));
-        assert!(stdout.contains("4. Most Critical Privacy & Security Controls"));
+        assert!(stdout.contains("4. Compiled Controls For This Platform"));
     }
 
     #[test]
@@ -2338,6 +2350,12 @@ mod tests {
         assert!(stdout.contains("privr recommend"));
         assert!(stdout.contains("Workload"));
         assert!(stdout.contains("developer"));
+        assert!(stdout.contains("full compiled catalogue across profiles"));
+        assert!(
+            stdout
+                .contains("Unknown, unchecked, and filtered controls do not establish compliance")
+        );
+        assert!(!stdout.contains("machine matches target posture"));
 
         // JSON format test
         let mut out = Vec::new();
@@ -2359,6 +2377,24 @@ mod tests {
         let val: serde_json::Value = serde_json::from_slice(&out).expect("json");
         assert_eq!(val["schema"], 1);
         assert_eq!(val["workload"], "creative");
+        let keys: Vec<_> = val
+            .as_object()
+            .expect("object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            keys,
+            [
+                "dimension_filter",
+                "max_friction",
+                "platform",
+                "recommendations",
+                "recommendations_count",
+                "schema",
+                "workload"
+            ]
+        );
     }
 
     #[test]

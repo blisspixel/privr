@@ -1212,6 +1212,47 @@ mod tests {
     use super::*;
 
     #[cfg(target_os = "linux")]
+    #[test]
+    fn issue18_mcp_file_only_storage_is_successful_but_unknown() {
+        use crate::platform::linux::systemd::ConfigurationFamily;
+        for (family, selector, bytes) in [
+            (
+                ConfigurationFamily::Coredump,
+                "systemd.coredump",
+                b"[Coredump]\nStorage=none\n".as_slice(),
+            ),
+            (
+                ConfigurationFamily::Journald,
+                "systemd.journald",
+                b"[Journal]\nStorage=volatile\n".as_slice(),
+            ),
+        ] {
+            let host = crate::test_context::host("arch", "hyprland");
+            let reader = crate::test_context::configuration_reader(family, bytes);
+            let context = crate::test_context::context(&host, &reader);
+            let (response, report) =
+                recorded_check(json!({"control":selector,"all":true}), &context);
+            assert_eq!(response["result"]["isError"], false);
+            assert_eq!(report["complete"], false);
+            assert_eq!(report["summary"]["unknown"], 1);
+            assert_eq!(report["summary"]["pass"], 0);
+            assert!(report["results"][0]["note"].as_str().unwrap().contains(
+                if family == ConfigurationFamily::Coredump {
+                    "temporary writes"
+                } else {
+                    "existing history"
+                }
+            ));
+            assert!(
+                report["results"][0]["note"]
+                    .as_str()
+                    .unwrap()
+                    .contains("Loaded storage is unverified")
+            );
+        }
+    }
+
+    #[cfg(target_os = "linux")]
     fn recorded_check(arguments: Value, context: &crate::catalog::Context) -> (Value, Value) {
         let request = json!({"jsonrpc":"2.0","id":42,"method":"tools/call", "params":{"name":"privr_check","arguments":arguments}});
         let input = format!("{request}\n");
@@ -1268,12 +1309,12 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn issue19_mcp_explicit_control_enforces_and_empty_scopes_stay_incomplete() {
-        use crate::platform::linux::evidence::Target;
+        use crate::platform::linux::systemd::ConfigurationFamily;
         let host = crate::test_context::host("arch", "hyprland");
-        let reader = crate::test_context::reader([(
-            Target::Coredump,
-            crate::test_context::text(b"Storage=none\n"),
-        )]);
+        let reader = crate::test_context::configuration_reader(
+            ConfigurationFamily::Coredump,
+            b"[Coredump]\nStorage=none\n",
+        );
         let context = crate::test_context::context(&host, &reader);
         for (arguments, rows, not_applicable, not_selected) in [
             (json!({"all":true}), 13, 7, 6),
@@ -1295,12 +1336,24 @@ mod tests {
             assert_eq!(report["carried"], 13);
         }
         assert!(reader.requested().is_empty());
+        assert!(reader.requested_configurations().is_empty());
         let (_, report) =
             recorded_check(json!({"control":"systemd.coredump","all":true}), &context);
-        assert_eq!(report["summary"]["pass"], 1);
+        assert_eq!(report["summary"]["pass"], 0);
+        assert_eq!(report["summary"]["unknown"], 1);
+        assert!(
+            report["results"][0]["note"]
+                .as_str()
+                .unwrap()
+                .contains("Storage=none")
+        );
         assert_eq!(report["summary"]["not_selected"], 0);
-        assert_eq!(report["complete"], true);
-        assert_eq!(reader.requested(), vec![Target::Coredump]);
+        assert_eq!(report["complete"], false);
+        assert!(reader.requested().is_empty());
+        assert_eq!(
+            reader.requested_configurations(),
+            vec![ConfigurationFamily::Coredump]
+        );
     }
 
     #[test]

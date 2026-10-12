@@ -527,6 +527,49 @@ pub fn humanize_section(section: &str) -> &str {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn issue18_file_configuration_never_attests_loaded_storage() {
+        use crate::model::outcome::Outcome;
+        use crate::platform::linux::systemd::ConfigurationFamily;
+        for (family, selector, bytes) in [
+            (
+                ConfigurationFamily::Coredump,
+                "systemd.coredump",
+                b"[Coredump]\nStorage=none\nStorage=external\n".as_slice(),
+            ),
+            (
+                ConfigurationFamily::Journald,
+                "systemd.journald",
+                b"[Journal]\nStorage=volatile\nStorage=persistent\n".as_slice(),
+            ),
+        ] {
+            let host = crate::test_context::host("arch", "hyprland");
+            let reader = crate::test_context::configuration_reader(family, bytes);
+            let context = crate::test_context::context(&host, &reader);
+            let report = super::Report::build_with_context(
+                &context,
+                Some("baseline"),
+                None,
+                &[selector.to_owned()],
+                &[],
+            );
+            assert_eq!(report.results[0].outcome, Outcome::Unknown);
+            assert!(report.results[0].note.as_ref().unwrap().contains(
+                if family == ConfigurationFamily::Coredump {
+                    "Storage=external"
+                } else {
+                    "Storage=persistent"
+                }
+            ));
+            assert_eq!(reader.requested_configurations(), vec![family]);
+            assert!(reader.requested().is_empty());
+            assert_eq!(report.summary.pass, 0);
+            assert_eq!(report.summary.drift, 0);
+            assert!(!report.complete);
+            assert_eq!(report.exit_code(), 3);
+        }
+    }
     use super::*;
     use crate::model::host::Platform;
     use crate::platform;
@@ -543,6 +586,7 @@ mod tests {
         assert_eq!(report.summary.not_selected, 6);
         assert_eq!(report.summary.evaluated(), 0);
         assert!(reader.requested().is_empty());
+        assert!(reader.requested_configurations().is_empty());
         assert!(!report.complete);
         assert_eq!(report.exit_code(), 3);
         let json = serde_json::to_value(&report).unwrap();
@@ -587,6 +631,7 @@ mod tests {
             );
         }
         assert!(reader.requested().is_empty());
+        assert!(reader.requested_configurations().is_empty());
     }
 
     #[cfg(target_os = "linux")]
@@ -720,6 +765,7 @@ mod tests {
         assert_eq!(report.summary.not_selected, 2);
         assert_eq!(report.summary.unknown, 2);
         assert!(reader.requested().is_empty());
+        assert!(reader.requested_configurations().is_empty());
         for result in report.results {
             assert_eq!(
                 result.management_source,
@@ -750,18 +796,19 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn issue19_repeated_selectors_keep_prefix_case_and_and_or_semantics() {
-        use crate::platform::linux::evidence::Target;
+        use crate::platform::linux::evidence::{Reader, Target};
+        use crate::platform::linux::systemd::ConfigurationFamily;
         let host = crate::test_context::host("debian", "hyprland");
-        let reader = crate::test_context::reader([
-            (
+        let reader = Reader::recorded_with_configurations(
+            std::collections::BTreeMap::from([(
                 Target::DebianPopcon,
                 crate::test_context::text(b"PARTICIPATE=\"no\"\n"),
-            ),
-            (
-                Target::Journald,
-                crate::test_context::text(b"Storage=volatile\n"),
-            ),
-        ]);
+            )]),
+            std::collections::BTreeMap::from([(
+                ConfigurationFamily::Journald,
+                crate::test_context::configuration(b"[Journal]\nStorage=volatile\n"),
+            )]),
+        );
         let context = crate::test_context::context(&host, &reader);
         let report = Report::build_with_context(
             &context,
@@ -771,8 +818,14 @@ mod tests {
             &["DeB".to_owned(), "SYS".to_owned()],
         );
         assert_eq!(report.results.len(), 2);
-        assert_eq!(report.summary.pass, 2);
-        assert!(report.complete);
+        assert_eq!(report.summary.pass, 1);
+        assert_eq!(report.summary.unknown, 1);
+        assert!(!report.complete);
+        assert!(report.results.iter().any(|r| {
+            r.note
+                .as_ref()
+                .is_some_and(|note| note.contains("Storage=volatile"))
+        }));
         let wrong_case = Report::build_with_context(
             &context,
             Some("baseline"),
@@ -819,28 +872,6 @@ mod tests {
                 )],
                 Outcome::Pass,
                 vec![Target::KdeFeedback],
-            ),
-            (
-                "arch",
-                "hyprland",
-                "systemd.coredump",
-                vec![(
-                    Target::Coredump,
-                    crate::test_context::text(b"Storage=none\n"),
-                )],
-                Outcome::Pass,
-                vec![Target::Coredump],
-            ),
-            (
-                "arch",
-                "hyprland",
-                "systemd.journald",
-                vec![(
-                    Target::Journald,
-                    crate::test_context::text(b"Storage=volatile\n"),
-                )],
-                Outcome::Pass,
-                vec![Target::Journald],
             ),
             (
                 "arch",

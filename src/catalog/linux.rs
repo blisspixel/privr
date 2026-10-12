@@ -11,6 +11,7 @@ use crate::model::outcome::{Maturity, Remediation, Reversibility};
 use crate::model::posture::{FrictionTier, PostureDimension};
 use crate::model::profile::Profile;
 use crate::platform::linux::evidence::Target;
+use crate::platform::linux::systemd::ConfigurationFamily;
 
 fn enabled() -> SemanticState {
     SemanticState::new("enabled")
@@ -28,12 +29,12 @@ const DEBIAN_POPCON_URL: &str =
 const FEDORA_ABRT_URL: &str = "https://github.com/abrt/doc/blob/master/conf.rst";
 const KDE_USERFEEDBACK_URL: &str = "https://develop.kde.org/docs/administration/kiosk/keys/";
 const SYSTEMD_COREDUMP_URL: &str =
-    "https://manpages.debian.org/testing/systemd-coredump/systemd-coredump.conf.5.en.html";
+    "https://github.com/systemd/systemd/blob/v262/man/coredump.conf.xml";
 const FREEDESKTOP_THUMBNAIL_URL: &str =
     "https://specifications.freedesktop.org/thumbnail-spec/thumbnail-spec-latest.html";
 const FSTRIM_DOCS_URL: &str = "https://manpages.debian.org/testing/util-linux/fstrim.8.en.html";
 const SYSTEMD_JOURNALD_URL: &str =
-    "https://manpages.debian.org/testing/systemd/journald.conf.5.en.html";
+    "https://github.com/systemd/systemd/blob/v262/man/journald.conf.xml";
 
 /// Probe Debian popularity-contest configuration.
 fn probe_debian_popcon(ctx: &Context) -> Resolution {
@@ -135,27 +136,7 @@ fn probe_kde_feedback(ctx: &Context) -> Resolution {
 
 /// Probe systemd core dump persistence.
 fn probe_systemd_coredump(ctx: &Context) -> Resolution {
-    match ctx.linux.text(Target::Coredump) {
-        Ok(content) => {
-            if let Some(content) = content {
-                for line in content.lines() {
-                    let trimmed = line.trim();
-                    if let Some(val) = trimmed.strip_prefix("Storage=") {
-                        return Resolution::determined(
-                            if val.trim().eq_ignore_ascii_case("none") {
-                                disabled()
-                            } else {
-                                enabled()
-                            },
-                            ManagementSource::LocalPolicy,
-                        );
-                    }
-                }
-            }
-            Resolution::determined(enabled(), ManagementSource::Default)
-        }
-        Err(reason) => Resolution::uncertain(reason, ManagementSource::LocalPolicy),
-    }
+    ctx.linux.configuration(ConfigurationFamily::Coredump)
 }
 
 /// Probe FreeDesktop thumbnail caching.
@@ -177,27 +158,7 @@ fn probe_systemd_fstrim(ctx: &Context) -> Resolution {
 
 /// Probe systemd-journald volatile storage.
 fn probe_systemd_journald(ctx: &Context) -> Resolution {
-    match ctx.linux.text(Target::Journald) {
-        Ok(content) => {
-            if let Some(content) = content {
-                for line in content.lines() {
-                    let trimmed = line.trim();
-                    if let Some(val) = trimmed.strip_prefix("Storage=") {
-                        return Resolution::determined(
-                            if val.trim().eq_ignore_ascii_case("volatile") {
-                                enabled()
-                            } else {
-                                disabled()
-                            },
-                            ManagementSource::LocalPolicy,
-                        );
-                    }
-                }
-            }
-            Resolution::determined(disabled(), ManagementSource::Default)
-        }
-        Err(reason) => Resolution::uncertain(reason, ManagementSource::LocalPolicy),
-    }
+    ctx.linux.configuration(ConfigurationFamily::Journald)
 }
 
 /// Return all Linux controls, sorted by identifier.
@@ -537,18 +498,18 @@ pub fn controls() -> Vec<Control> {
                 requires_elevation: true,
             },
             title: "Systemd core dump persistence",
-            summary: "systemd-coredump records process memory dumps to disk when applications crash.",
+            summary: "systemd-coredump can retain process core dumps when applications crash.",
             rationale: "Crash dumps store full process memory contents, which can expose passwords, encryption keys, decrypted tokens, and sensitive document text.",
             tradeoff: Some(
                 "Developers and administrators cannot inspect post-crash core dumps for offline debugging.",
             ),
             mitigation: Some(
-                "Crash stack traces and backtraces remain logged in systemd-journald.",
+                "Backtraces may remain available when processing permits; Storage=none alone does not prevent temporary disk writes.",
             ),
             sources: &[Source {
                 url: SYSTEMD_COREDUMP_URL,
-                claim: "Documents systemd-coredump storage configuration.",
-                reviewed: "2026-10-01",
+                claim: "Documents v262 configured core retention, including temporary-write and backtrace limits.",
+                reviewed: "2026-10-11",
             }],
             probe: probe_systemd_coredump,
             apply: None,
@@ -607,16 +568,18 @@ pub fn controls() -> Vec<Control> {
                 requires_elevation: true,
             },
             title: "Systemd journal memory storage",
-            summary: "systemd-journald stores system event logs in volatile memory instead of persistent disk files.",
+            summary: "systemd-journald supports volatile storage for the default journal instance.",
             rationale: "Persistent journal logs record command execution traces, process crashes, and user session metadata to disk, surviving across system shutdowns.",
-            tradeoff: Some("System logs are lost when the system is rebooted or powered down."),
+            tradeoff: Some(
+                "Volatile journal files do not survive reboot; existing persistent files or forwarded logs may remain.",
+            ),
             mitigation: Some(
-                "Real-time system logging and journalctl query commands remain fully functional during the active session.",
+                "The running journal may remain queryable while available; forwarding, namespaces and other logging inputs require separate verification.",
             ),
             sources: &[Source {
                 url: SYSTEMD_JOURNALD_URL,
-                claim: "Documents systemd-journald volatile storage configuration.",
-                reviewed: "2026-10-01",
+                claim: "Documents v262 journal configuration and command-line overrides; files do not attest loaded state.",
+                reviewed: "2026-10-11",
             }],
             probe: probe_systemd_journald,
             apply: None,

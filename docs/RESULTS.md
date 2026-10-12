@@ -31,6 +31,15 @@ applying to the host, and must never be counted as a pass.
 Unknown, unreadable, malformed, unsupported, denied, not-selected, and
 not-checked states never become `pass`.
 
+For Linux coredump and journald storage, the existing `note` describes bounded
+configured intent under systemd v262 standard paths. It is not a loaded-state
+observation: even `Storage=none` or `Storage=volatile` remains `unknown`, makes
+the selected check incomplete and yields CLI exit 3. Adverse file settings are
+also unknown, rather than observed drift. MCP `privr_check` returns the same
+report with `isError: false`; `privr_explain` retains its null state and existing
+schema. The full check and CLI explanation carry the qualification. See
+[systemd evidence](SYSTEMD_EVIDENCE.md) for version and retention limits.
+
 Effective state is what is evaluated. The presence of an enforcement mechanism,
 such as a policy object or a management payload, is not evidence that the
 setting itself holds. Where only the enforcement mechanism is readable, the

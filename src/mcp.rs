@@ -1349,11 +1349,11 @@ mod tests {
         )]);
         let context = crate::test_context::context(&host, &reader);
         let (_, report) = recorded_check(json!({"section":"SyStEmD","all":true}), &context);
-        assert_eq!(report["results"].as_array().unwrap().len(), 3);
+        assert_eq!(report["results"].as_array().unwrap().len(), 5);
         assert_eq!(report["summary"]["pass"], 0);
         assert_eq!(report["summary"]["not_selected"], 3);
         assert_eq!(report["complete"], false);
-        assert_eq!(report["carried"], 13);
+        assert_eq!(report["carried"], 17);
         assert!(reader.requested().is_empty());
 
         let (_, shown) = recorded_check(json!({"control":"debian", "all":true}), &context);
@@ -1377,7 +1377,7 @@ mod tests {
         );
         let context = crate::test_context::context(&host, &reader);
         for (arguments, rows, not_applicable, not_selected) in [
-            (json!({"all":true}), 13, 7, 6),
+            (json!({"all":true}), 17, 7, 7),
             (json!({"control":"missing","all":true}), 0, 0, 0),
             (json!({"section":"UbU","all":true}), 2, 2, 0),
             (
@@ -1393,7 +1393,7 @@ mod tests {
             assert_eq!(report["summary"]["not_applicable"], not_applicable);
             assert_eq!(report["summary"]["not_selected"], not_selected);
             assert_eq!(report["complete"], false);
-            assert_eq!(report["carried"], 13);
+            assert_eq!(report["carried"], 17);
         }
         assert!(reader.requested().is_empty());
         assert!(reader.requested_configurations().is_empty());

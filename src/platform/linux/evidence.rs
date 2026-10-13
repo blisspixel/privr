@@ -4,6 +4,9 @@ use std::collections::BTreeMap;
 use std::io::Read;
 use std::path::PathBuf;
 
+use super::exposure::{
+    self, AvahiFiles, ExposureRecords, NmFiles, ResolvedRecord, ThumbnailRecord,
+};
 use super::systemd::{self, ConfigurationEvidence, ConfigurationFamily};
 use crate::engine::evaluate::Uncertainty;
 use crate::model::evidence::{DenialReason, Evidence, RawValue, UndeterminedReason, ValueKind};
@@ -58,6 +61,7 @@ impl Target {
 pub struct Recording {
     entries: BTreeMap<Target, Evidence>,
     configurations: BTreeMap<ConfigurationFamily, ConfigurationEvidence>,
+    exposure: Box<ExposureRecords>,
     #[cfg(test)]
     requested: std::sync::Mutex<Vec<Target>>,
     #[cfg(test)]
@@ -80,14 +84,51 @@ impl Reader {
         entries: BTreeMap<Target, Evidence>,
         configurations: BTreeMap<ConfigurationFamily, ConfigurationEvidence>,
     ) -> Self {
+        Self::recorded_with_exposure(entries, configurations, ExposureRecords::default())
+    }
+
+    pub fn recorded_with_exposure(
+        entries: BTreeMap<Target, Evidence>,
+        configurations: BTreeMap<ConfigurationFamily, ConfigurationEvidence>,
+        exposure: ExposureRecords,
+    ) -> Self {
         Self::Recorded(Recording {
             entries,
             configurations,
+            exposure: Box::new(exposure),
             #[cfg(test)]
             requested: std::sync::Mutex::default(),
             #[cfg(test)]
             requested_configurations: std::sync::Mutex::default(),
         })
+    }
+
+    pub fn network_manager(&self) -> Option<NmFiles> {
+        match self {
+            Self::Live => exposure::read_live_network_manager(),
+            Self::Recorded(recording) => recording.exposure.network_manager.clone(),
+        }
+    }
+
+    pub fn avahi(&self) -> Option<AvahiFiles> {
+        match self {
+            Self::Live => exposure::read_live_avahi(),
+            Self::Recorded(recording) => recording.exposure.avahi.clone(),
+        }
+    }
+
+    pub fn resolved(&self) -> Option<ResolvedRecord> {
+        match self {
+            Self::Live => exposure::read_live_resolved(),
+            Self::Recorded(recording) => recording.exposure.resolved.clone(),
+        }
+    }
+
+    pub fn thumbnails(&self) -> Option<ThumbnailRecord> {
+        match self {
+            Self::Live => exposure::read_live_thumbnails(),
+            Self::Recorded(recording) => recording.exposure.thumbnails.clone(),
+        }
     }
 
     pub fn configuration(

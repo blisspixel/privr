@@ -589,9 +589,10 @@ mod tests {
         let reader = crate::test_context::reader([]);
         let context = crate::test_context::context(&host, &reader);
         let report = Report::build_with_context(&context, Some("baseline"), None, &[], &[]);
-        assert_eq!(report.results.len(), 13);
+        assert_eq!(report.results.len(), 17);
         assert_eq!(report.summary.not_applicable, 7);
-        assert_eq!(report.summary.not_selected, 6);
+        assert_eq!(report.summary.not_selected, 7);
+        assert_eq!(report.summary.unknown, 3);
         assert_eq!(report.summary.evaluated(), 0);
         assert!(reader.requested().is_empty());
         assert!(reader.requested_configurations().is_empty());
@@ -612,7 +613,7 @@ mod tests {
         let reader = crate::test_context::reader([]);
         let context = crate::test_context::context(&host, &reader);
         for (controls, sections, expected, not_selected, not_applicable) in [
-            (vec![], vec!["SyStEmD".to_owned()], 3, 3, 0),
+            (vec![], vec!["SyStEmD".to_owned()], 5, 3, 0),
             (vec![], vec!["ubuntu".to_owned()], 2, 0, 2),
             (vec!["missing".to_owned()], vec![], 0, 0, 0),
             (
@@ -629,7 +630,7 @@ mod tests {
             assert_eq!(report.summary.not_selected, not_selected);
             assert_eq!(report.summary.not_applicable, not_applicable);
             assert_eq!(report.summary.evaluated(), 0);
-            assert_eq!(report.carried, 13);
+            assert_eq!(report.carried, 17);
             assert!(!report.complete);
             assert_eq!(report.exit_code(), 3);
             assert!(
@@ -667,7 +668,7 @@ mod tests {
             assert_eq!(report.results[0].outcome, outcome);
             assert!(report.complete);
             assert_eq!(report.exit_code(), exit);
-            assert_eq!(report.carried, 13);
+            assert_eq!(report.carried, 17);
             assert_eq!(reader.requested(), vec![Target::DebianPopcon]);
             let control = catalog::all()
                 .into_iter()
@@ -795,7 +796,7 @@ mod tests {
         let context = crate::test_context::context(&host, &reader);
         let report = Report::build_with_context(&context, Some("baseline"), None, &[], &[]);
         assert_eq!(report.summary.drift, 1);
-        assert_eq!(report.summary.unknown, 2);
+        assert_eq!(report.summary.unknown, 5);
         assert_eq!(report.summary.evaluated(), 1);
         assert!(!report.complete);
         assert_eq!(report.exit_code(), 3);

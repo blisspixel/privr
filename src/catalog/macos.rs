@@ -307,6 +307,8 @@ mod tests {
             );
             assert_eq!(result.outcome, Outcome::Unknown);
             assert_eq!(result.remediation, Remediation::AuditOnly);
+            let report_result = serde_json::to_value(&result).unwrap();
+            assert_eq!(report_result["management_source"], "unknown");
             assert!(control.apply.is_none());
             assert!(control.rollback.is_none());
             let explanation = crate::explain::render(&control, &host, &crate::ui::Ui::plain());

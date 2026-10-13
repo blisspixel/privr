@@ -1863,7 +1863,7 @@ mod tests {
                 assert_eq!(report["complete"], false);
                 assert_eq!(report["summary"]["unknown"], 1);
                 assert_eq!(report["summary"]["pass"], 0);
-                assert_eq!(report["results"][0]["source"], "unknown");
+                assert_eq!(report["results"][0]["management_source"], "unknown");
             } else {
                 let text = String::from_utf8(out).unwrap();
                 assert!(text.contains("unverified"));

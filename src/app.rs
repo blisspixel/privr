@@ -1826,6 +1826,54 @@ Run privr explain without arguments for the posture overview, or privr list to s
 mod tests {
     use super::*;
 
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_analytics_cli_keeps_the_selected_scope_unknown() {
+        use clap::Parser;
+        let host = crate::model::host::HostFacts::unknown(crate::model::host::Platform::Macos);
+        let context = crate::catalog::Context { host: &host };
+        for format in ["text", "json"] {
+            let cli = Cli::try_parse_from([
+                "privr",
+                "--color",
+                "never",
+                "--format",
+                format,
+                "check",
+                "--control",
+                "macos.analytics.share-mac",
+                "--all",
+            ])
+            .unwrap();
+            let mut out = Vec::new();
+            let mut err = Vec::new();
+            assert_eq!(
+                run_with_check_context(
+                    cli,
+                    &mut out,
+                    &mut err,
+                    std::path::Path::new("unused-read-only-check"),
+                    Some(&context),
+                ),
+                3,
+            );
+            assert!(err.is_empty());
+            if format == "json" {
+                let report: serde_json::Value = serde_json::from_slice(&out).unwrap();
+                assert_eq!(report["complete"], false);
+                assert_eq!(report["summary"]["unknown"], 1);
+                assert_eq!(report["summary"]["pass"], 0);
+                assert_eq!(report["results"][0]["management_source"], "unknown");
+            } else {
+                let text = String::from_utf8(out).unwrap();
+                assert!(text.contains("unverified"));
+                assert!(
+                    !text.contains("All evaluated controls in the selected scope match policy")
+                );
+            }
+        }
+    }
+
     #[cfg(target_os = "linux")]
     #[test]
     fn issue18_cli_file_only_storage_is_incomplete() {

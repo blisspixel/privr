@@ -24,16 +24,15 @@ const GATEKEEPER_DOCS_URL: &str =
     "https://support.apple.com/guide/security/gatekeeper-and-runtime-protection-sec5599b520d/web";
 
 fn probe_macos_analytics(_ctx: &Context) -> Resolution {
-    let path = std::path::Path::new(
-        "/Library/Application Support/CrashReporter/DiagnosticMessagesHistory.plist",
+    // Diagnostic history is not authoritative evidence of the effective
+    // preference or its management source. A supported preferences reader
+    // needs versioned fixtures and native validation before determining either.
+    let mut resolution = Resolution::uncertain(Uncertainty::Unsupported, ManagementSource::Unknown);
+    resolution.note = Some(
+        "Mac analytics sharing and its management source are unverified. Diagnostic history cannot establish the effective setting."
+            .to_owned(),
     );
-    if let Ok(content) = std::fs::read_to_string(path)
-        && content.contains("<key>AutoSubmit</key>")
-        && content.contains("<false/>")
-    {
-        return Resolution::determined(disabled(), ManagementSource::LocalPolicy);
-    }
-    Resolution::uncertain(Uncertainty::Undetermined, ManagementSource::User)
+    resolution
 }
 
 fn probe_macos_unmanaged_guided(_ctx: &Context) -> Resolution {
@@ -281,6 +280,43 @@ pub fn controls() -> Vec<Control> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine::evaluate::{Mode, evaluate};
+    use crate::model::host::{Fact, HostFacts};
+    use crate::model::outcome::{Exception, Outcome};
+
+    #[test]
+    fn analytics_has_no_authoritative_read_or_management_evidence() {
+        let control = controls()
+            .into_iter()
+            .find(|control| control.spec.id == "macos.analytics.share-mac")
+            .unwrap();
+        for managed in [Fact::Unknown, Fact::Known(false), Fact::Known(true)] {
+            let mut host = HostFacts::unknown(Platform::Macos);
+            host.managed = managed;
+            let context = Context::live(&host);
+            let resolution = control.observe(&context);
+            assert_eq!(resolution.state, None);
+            assert_eq!(resolution.source, ManagementSource::Unknown);
+            assert_eq!(resolution.uncertainty, Some(Uncertainty::Unsupported));
+            let result = evaluate(
+                &control.spec,
+                Mode::Enforce,
+                &resolution,
+                &host,
+                Exception::None,
+            );
+            assert_eq!(result.outcome, Outcome::Unknown);
+            assert_eq!(result.remediation, Remediation::AuditOnly);
+            let report_result = serde_json::to_value(&result).unwrap();
+            assert_eq!(report_result["management_source"], "unknown");
+            assert!(control.apply.is_none());
+            assert!(control.rollback.is_none());
+            let explanation = crate::explain::render(&control, &host, &crate::ui::Ui::plain());
+            assert!(explanation.contains("unknown"));
+            assert!(explanation.contains("authority that could not be identified"));
+            assert!(!explanation.contains("your own setting"));
+        }
+    }
 
     #[test]
     fn macos_catalogue_is_sorted_by_section_then_identifier() {

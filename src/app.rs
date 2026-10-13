@@ -1932,7 +1932,8 @@ mod tests {
                 if format == "json" {
                     let value: serde_json::Value = serde_json::from_slice(&out).unwrap();
                     assert_eq!(value["complete"], false);
-                    assert_eq!(value["summary"]["not_selected"], 6);
+                    assert_eq!(value["summary"]["not_selected"], 7);
+                    assert_eq!(value["summary"]["unknown"], 3);
                     assert_eq!(value["summary"]["not_applicable"], 7);
                 } else {
                     let text = String::from_utf8(out).unwrap();
@@ -1997,7 +1998,7 @@ mod tests {
                     let value: serde_json::Value = serde_json::from_slice(&out).unwrap();
                     assert_eq!(value["complete"], expected != 3);
                     assert_eq!(value["results"].as_array().unwrap().len(), 1);
-                    assert_eq!(value["carried"], 13);
+                    assert_eq!(value["carried"], 17);
                 }
             }
         }

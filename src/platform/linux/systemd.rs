@@ -407,6 +407,30 @@ fn list_directory(path: &Path) -> DirectoryListing {
     list_directory_with(path, || {})
 }
 
+fn directory_conf_names(path: &Path) -> Result<Vec<Vec<u8>>, Uncertainty> {
+    let entries = std::fs::read_dir(path).map_err(|e| io_uncertainty(&e))?;
+    let mut names = Vec::new();
+    for entry in entries {
+        let name = entry
+            .map_err(|e| io_uncertainty(&e))?
+            .file_name()
+            .as_bytes()
+            .to_vec();
+        if !name.ends_with(b".conf") {
+            continue;
+        }
+        if !valid_name(&name) {
+            return Err(Uncertainty::Malformed);
+        }
+        if names.len() == MAX_ENTRIES {
+            return Err(Uncertainty::Undetermined);
+        }
+        names.push(name);
+    }
+    names.sort();
+    Ok(names)
+}
+
 fn list_directory_with(path: &Path, after_listing: impl FnOnce()) -> DirectoryListing {
     let read = || -> Result<DirectoryListing, Uncertainty> {
         let metadata = match std::fs::symlink_metadata(path) {
@@ -419,34 +443,39 @@ fn list_directory_with(path: &Path, after_listing: impl FnOnce()) -> DirectoryLi
         if !metadata.is_dir() || metadata.file_type().is_symlink() {
             return Err(Uncertainty::Undetermined);
         }
-        let entries = std::fs::read_dir(path).map_err(|e| io_uncertainty(&e))?;
-        let mut names = Vec::new();
-        for entry in entries {
-            let name = entry
-                .map_err(|e| io_uncertainty(&e))?
-                .file_name()
-                .as_bytes()
-                .to_vec();
-            if !name.ends_with(b".conf") {
-                continue;
-            }
-            if !valid_name(&name) {
-                return Err(Uncertainty::Malformed);
-            }
-            if names.len() == MAX_ENTRIES {
-                return Err(Uncertainty::Undetermined);
-            }
-            names.push(name);
-        }
-        names.sort();
+        let names = directory_conf_names(path)?;
         after_listing();
         let after = std::fs::symlink_metadata(path).map_err(|e| io_uncertainty(&e))?;
         if !same_file(&metadata, &after) {
             return Err(Uncertainty::Undetermined);
         }
+        // Directory timestamps move on a coarse tick. A new drop-in inside that
+        // tick still changes the sorted .conf names.
+        let names_after = directory_conf_names(path)?;
+        if names != names_after {
+            return Err(Uncertainty::Undetermined);
+        }
         Ok(DirectoryListing::Complete(names))
     };
     read().unwrap_or_else(DirectoryListing::Uncertain)
+}
+
+pub(crate) fn read_regular(path: &Path) -> ConfigurationFile {
+    read_file(path)
+}
+
+pub(crate) fn read_conf_directory(
+    path: &Path,
+) -> (DirectoryListing, BTreeMap<Vec<u8>, ConfigurationFile>) {
+    let listing = list_directory(path);
+    let mut files = BTreeMap::new();
+    if let DirectoryListing::Complete(names) = &listing {
+        for name in names {
+            let file_path = path.join(std::ffi::OsStr::from_bytes(name));
+            files.insert(name.clone(), read_file(&file_path));
+        }
+    }
+    (listing, files)
 }
 
 pub(super) fn read_live(family: ConfigurationFamily) -> ConfigurationEvidence {

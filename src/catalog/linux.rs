@@ -35,6 +35,12 @@ const FREEDESKTOP_THUMBNAIL_URL: &str =
 const FSTRIM_DOCS_URL: &str = "https://manpages.debian.org/testing/util-linux/fstrim.8.en.html";
 const SYSTEMD_JOURNALD_URL: &str =
     "https://github.com/systemd/systemd/blob/v262/man/journald.conf.xml";
+const NETWORKMANAGER_CONF_URL: &str =
+    "https://networkmanager.dev/docs/api/latest/NetworkManager.conf.html";
+const AVAHI_CONF_URL: &str =
+    "https://manpages.debian.org/testing/avahi-daemon/avahi-daemon.conf.5.en.html";
+const RESOLVED_DBUS_URL: &str =
+    "https://www.freedesktop.org/software/systemd/man/latest/org.freedesktop.resolve1.html";
 
 /// Probe Debian popularity-contest configuration.
 fn probe_debian_popcon(ctx: &Context) -> Resolution {
@@ -140,8 +146,24 @@ fn probe_systemd_coredump(ctx: &Context) -> Resolution {
 }
 
 /// Probe FreeDesktop thumbnail caching.
-fn probe_freedesktop_thumbnails(_ctx: &Context) -> Resolution {
-    Resolution::uncertain(Uncertainty::Undetermined, ManagementSource::User)
+fn probe_freedesktop_thumbnails(ctx: &Context) -> Resolution {
+    crate::platform::linux::exposure::thumbnails(ctx.linux)
+}
+
+fn probe_networkmanager_connectivity(ctx: &Context) -> Resolution {
+    crate::platform::linux::exposure::network_manager(ctx.linux)
+}
+
+fn probe_avahi_publishing(ctx: &Context) -> Resolution {
+    crate::platform::linux::exposure::avahi(ctx.linux)
+}
+
+fn probe_resolved_llmnr(ctx: &Context) -> Resolution {
+    crate::platform::linux::exposure::resolved_llmnr(ctx.linux)
+}
+
+fn probe_resolved_mdns(ctx: &Context) -> Resolution {
+    crate::platform::linux::exposure::resolved_mdns(ctx.linux)
 }
 
 /// Probe systemd fstrim timer status.
@@ -254,10 +276,7 @@ pub fn controls() -> Vec<Control> {
                 section: "freedesktop".to_owned(),
                 dimension: PostureDimension::ForensicResidue,
                 friction: FrictionTier::Tier2WorkflowAltering,
-                applicability: Applicability::new(vec![Variant::new(
-                    "linux-desktop",
-                    vec![Predicate::LiveSession(true)],
-                )]),
+                applicability: Applicability::new(vec![Variant::new("linux", vec![])]),
                 desired: disabled(),
                 reversibility: Reversibility::Exact,
                 maturity: Maturity::Automated,
@@ -662,6 +681,142 @@ pub fn controls() -> Vec<Control> {
             apply: None,
             rollback: None,
         },
+        Control {
+            spec: ControlSpec {
+                id: "networkmanager.connectivity.check".to_owned(),
+                title: "Network connectivity check".to_owned(),
+                section: "networkmanager".to_owned(),
+                dimension: PostureDimension::NetworkExposure,
+                friction: FrictionTier::Tier1Cosmetic,
+                applicability: Applicability::new(vec![Variant::new("linux", vec![])]),
+                desired: disabled(),
+                reversibility: Reversibility::Exact,
+                maturity: Maturity::Automated,
+                verified_through: None,
+                remediation: Remediation::AuditOnly,
+                remediation_reason: None,
+                min_profile: Profile::Baseline,
+                requires_elevation: false,
+            },
+            title: "Network connectivity check",
+            summary: "NetworkManager can request a web page to decide whether a connection reaches the internet.",
+            rationale: "An enabled connectivity URI is requested on network changes and reveals this machine's address and activity times to that server.",
+            tradeoff: Some(
+                "Captive-portal helpers and per-device route penalties lose NetworkManager's connectivity signal.",
+            ),
+            mitigation: Some(
+                "Open a browser to the network sign-in page, or set connectivity.uri to a server you operate.",
+            ),
+            sources: &[Source {
+                url: NETWORKMANAGER_CONF_URL,
+                claim: "Documents connectivity.enabled, connectivity.uri, and conf.d precedence: /usr/lib, then /run, then NetworkManager.conf, then /etc/NetworkManager/conf.d, with same-name files shadowed by the higher directory. NetworkManager-intern.conf is read last.",
+                reviewed: "2026-10-12",
+            }],
+            probe: probe_networkmanager_connectivity,
+            apply: None,
+            rollback: None,
+        },
+        Control {
+            spec: ControlSpec {
+                id: "avahi.mdns.publishing".to_owned(),
+                title: "mDNS address publishing".to_owned(),
+                section: "avahi".to_owned(),
+                dimension: PostureDimension::NetworkExposure,
+                friction: FrictionTier::Tier2WorkflowAltering,
+                applicability: Applicability::new(vec![Variant::new("linux", vec![])]),
+                desired: disabled(),
+                reversibility: Reversibility::Exact,
+                maturity: Maturity::Automated,
+                verified_through: None,
+                remediation: Remediation::AuditOnly,
+                remediation_reason: None,
+                min_profile: Profile::Strict,
+                requires_elevation: false,
+            },
+            title: "mDNS address publishing",
+            summary: "avahi-daemon can announce this machine's hostname and addresses to the local network.",
+            rationale: "Published mDNS records expose the hostname and addresses to every device on the link, including shared wireless networks.",
+            tradeoff: Some(
+                "Local service discovery and address records from this host stop being announced.",
+            ),
+            mitigation: Some(
+                "Browse services from a client that already knows the host, or keep publishing limited to a trusted interface.",
+            ),
+            sources: &[Source {
+                url: AVAHI_CONF_URL,
+                claim: "Documents disable-publishing, publish-addresses, publish-hinfo, and publish-workstation in avahi-daemon.conf. Drop-ins under avahi-daemon.conf.d use the same /usr/lib, /run, then /etc shadowing order.",
+                reviewed: "2026-10-12",
+            }],
+            probe: probe_avahi_publishing,
+            apply: None,
+            rollback: None,
+        },
+        Control {
+            spec: ControlSpec {
+                id: "systemd.resolved.llmnr".to_owned(),
+                title: "LLMNR name resolution".to_owned(),
+                section: "systemd".to_owned(),
+                dimension: PostureDimension::NetworkExposure,
+                friction: FrictionTier::Tier0Transparent,
+                applicability: Applicability::new(vec![Variant::new("linux", vec![])]),
+                desired: disabled(),
+                reversibility: Reversibility::Exact,
+                maturity: Maturity::Automated,
+                verified_through: None,
+                remediation: Remediation::AuditOnly,
+                remediation_reason: None,
+                min_profile: Profile::Baseline,
+                requires_elevation: false,
+            },
+            title: "LLMNR name resolution",
+            summary: "systemd-resolved can send and answer Link-Local Multicast Name Resolution on each link.",
+            rationale: "LLMNR queries and responses broadcast names on the local network and can be answered by any peer.",
+            tradeoff: Some("Single-label names that depend on LLMNR stop resolving."),
+            mitigation: Some("Use DNS or an explicit host entry for names that must resolve."),
+            sources: &[Source {
+                url: RESOLVED_DBUS_URL,
+                claim: "Documents the org.freedesktop.resolve1 Manager and Link LLMNR properties read from the system bus.",
+                reviewed: "2026-10-12",
+            }],
+            probe: probe_resolved_llmnr,
+            apply: None,
+            rollback: None,
+        },
+        Control {
+            spec: ControlSpec {
+                id: "systemd.resolved.mdns".to_owned(),
+                title: "Multicast DNS resolution".to_owned(),
+                section: "systemd".to_owned(),
+                dimension: PostureDimension::NetworkExposure,
+                friction: FrictionTier::Tier0Transparent,
+                applicability: Applicability::new(vec![Variant::new("linux", vec![])]),
+                desired: disabled(),
+                reversibility: Reversibility::Exact,
+                maturity: Maturity::Automated,
+                verified_through: None,
+                remediation: Remediation::AuditOnly,
+                remediation_reason: None,
+                min_profile: Profile::Baseline,
+                requires_elevation: false,
+            },
+            title: "Multicast DNS resolution",
+            summary: "systemd-resolved can resolve and answer multicast DNS on each link.",
+            rationale: "mDNS queries leave the machine and responses identify it to other devices on the link.",
+            tradeoff: Some(
+                ".local names that depend on systemd-resolved multicast DNS stop resolving.",
+            ),
+            mitigation: Some(
+                "Use unicast DNS, or a separate mDNS client whose publishing is reviewed on its own.",
+            ),
+            sources: &[Source {
+                url: RESOLVED_DBUS_URL,
+                claim: "Documents the org.freedesktop.resolve1 Manager and Link MulticastDNS properties read from the system bus.",
+                reviewed: "2026-10-12",
+            }],
+            probe: probe_resolved_mdns,
+            apply: None,
+            rollback: None,
+        },
     ];
 
     controls.sort_by(|a, b| {
@@ -698,7 +853,26 @@ mod tests {
         );
         let context = crate::test_context::context(&host, &reader);
         let controls = controls();
-        assert_eq!(controls.len(), 13);
+        assert_eq!(controls.len(), 17);
+        for (id, citation) in [
+            ("networkmanager.connectivity.check", "networkmanager.dev"),
+            ("avahi.mdns.publishing", "avahi-daemon.conf"),
+            ("systemd.resolved.llmnr", "org.freedesktop.resolve1"),
+            ("systemd.resolved.mdns", "org.freedesktop.resolve1"),
+            ("freedesktop.thumbnails.caching", "thumbnail-spec"),
+        ] {
+            let control = controls
+                .iter()
+                .find(|control| control.spec.id == id)
+                .unwrap();
+            assert!(
+                control
+                    .sources
+                    .iter()
+                    .any(|source| source.url.contains(citation)),
+                "{id}"
+            );
+        }
         let coredump = controls
             .iter()
             .find(|control| control.spec.id == "systemd.coredump.storage")

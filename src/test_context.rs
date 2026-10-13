@@ -62,6 +62,13 @@ pub fn configuration_reader(family: ConfigurationFamily, bytes: &[u8]) -> Reader
     )
 }
 
+pub fn reader_with_exposure(
+    entries: impl IntoIterator<Item = (Target, Evidence)>,
+    exposure: crate::platform::linux::exposure::ExposureRecords,
+) -> Reader {
+    Reader::recorded_with_exposure(entries.into_iter().collect(), BTreeMap::new(), exposure)
+}
+
 pub fn context<'a>(host: &'a HostFacts, reader: &'a Reader) -> Context<'a> {
     Context {
         host,

@@ -130,9 +130,12 @@ Linux and macOS probes (block 0.3.0 and 0.4.0), each a false-pass risk:
   masks and lexical ordering. Both file-only controls remain Unknown, including
   desired and adverse settings; loaded version, generation and higher-precedence
   inputs are unverified. See [the evidence contract](docs/SYSTEMD_EVIDENCE.md).
-- [ ] macOS analytics searches the raw text of a property list for a key and a
-  `false` value anywhere in the file. The 0.3.0 requirements forbid parsing
-  preference files directly.
+- [ ] macOS analytics now returns Unknown with an unknown management source
+  without reading diagnostic history. This removes the false-pass path where
+  `AutoSubmit` and an unrelated `false` appeared anywhere in a property list.
+  Authoritative supported preference and forced-value APIs, versioned fixtures,
+  and native macOS evidence naming the OS/build and effective API are still
+  required before any determined result. The control remains audit-only.
 - [ ] Ubuntu Report and Ubuntu Insights report `disabled` when a file is
   absent. Absence of a file is not evidence that submission is off.
 - [ ] Fedora ABRT reads `abrt-action-save-package-data.conf` for the

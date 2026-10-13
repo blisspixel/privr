@@ -20,6 +20,9 @@ designed to be driven by an agent harness as readily as by a person.
 - **Windows `check`, `explain`, `list`, `doctor`, `recommend`, `simulate`, `plan`, `apply`, `history`, and `rollback` are implemented**, with posture dimensions, rollback journaling, interactive terminal action prompts (`[y] apply safe fixes, [d] preview diff, [e] explain score, [q] quit`), scoring model and critical controls walkthroughs, convenient CLI aliases (`status`, `scan`, `diff`, `fix`, `harden`, `undo`, `log`), and native UAC elevation handling. Release blockers remain in the roadmap.
 - **Defensive and adaptive application**: `plan` and `apply` accept `--workload` (`general`, `developer`, `creative`, `mobile`, `high-assurance`) and `--max-friction`. When run unprivileged, batch operations apply eligible user-scope controls and report deferred machine-scope controls without failure.
 - **Linux and macOS `check` are experimental** with typed elevation metadata, tested in CI across multiple platforms.
+- **Mac analytics sharing remains Unknown**. Diagnostic history cannot establish
+  its effective preference or management source. A supported preference reader
+  and native macOS validation remain required; the control is audit-only.
 - **Systemd storage files describe configured intent only**. Bounded main-file
   and drop-in reads explain that intent; coredump and journald storage remain
   Unknown until loaded state can be attested. See [the evidence limits](docs/SYSTEMD_EVIDENCE.md).

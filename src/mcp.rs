@@ -1312,7 +1312,7 @@ mod tests {
         }
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     fn recorded_check(arguments: Value, context: &crate::catalog::Context) -> (Value, Value) {
         let request = json!({"jsonrpc":"2.0","id":42,"method":"tools/call", "params":{"name":"privr_check","arguments":arguments}});
         let input = format!("{request}\n");
@@ -1336,6 +1336,27 @@ mod tests {
             serde_json::from_str(response["result"]["content"][0]["text"].as_str().unwrap())
                 .unwrap();
         (response, report)
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_analytics_mcp_retains_unknown_and_incomplete_scope() {
+        let host = crate::model::host::HostFacts::unknown(crate::model::host::Platform::Macos);
+        let context = crate::catalog::Context { host: &host };
+        let (_, report) = recorded_check(
+            json!({"control":"macos.analytics.share-mac", "all":true}),
+            &context,
+        );
+        assert_eq!(report["complete"], false);
+        assert_eq!(report["summary"]["unknown"], 1);
+        assert_eq!(report["summary"]["pass"], 0);
+        assert_eq!(report["results"][0]["source"], "unknown");
+        assert!(
+            report["results"][0]["note"]
+                .as_str()
+                .unwrap()
+                .contains("unverified")
+        );
     }
 
     #[cfg(target_os = "linux")]

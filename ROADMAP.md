@@ -21,7 +21,7 @@ The decisions that constrain every milestone are recorded in
 
 ## Current state
 
-Reviewed 2026-10-12 against source and tests. This section is the single statement of
+Reviewed 2026-10-20 against source and tests. This section is the single statement of
 what exists; other documents link here rather than repeating counts.
 
 Terms: **implemented** means the code exists; **tested** means automated tests
@@ -31,8 +31,8 @@ milestone and its results should not be trusted.
 
 | Area | State |
 |---|---|
-| Windows `check`, `explain`, `list` | Implemented and tested with recorded evidence. 28 controls across 5 posture dimensions. Validated on Windows 11 Pro 25H2. `privr explain` includes scoring walkthrough and critical controls. |
-| Windows `plan`, `apply`, `rollback` | Implemented and tested. 25 controls carry live, verified apply and rollback routines with pre/postimage validation. Native in-place elevation (-e, --elevate) invokes UAC/sudo with typed CLI argument serialization; interactive plan review and approval prompts run in terminals; noninteractive mode defaults safely to daily-driver with --yes. |
+| Windows `check`, `explain`, `list` | Implemented and tested with recorded evidence. 28 controls across 5 posture dimensions. Validated on Windows 11 Pro 25H2. Check reports are schema 2 and keep reduced observations plus compiled source refs. Text leads with what could not be checked. `explain` is a fresh read and says so. |
+| Windows `plan`, `apply`, `rollback` | Implemented and tested. 25 controls carry live, verified apply and rollback routines with pre/postimage validation. Native in-place elevation (-e, --elevate) invokes UAC/sudo with typed CLI argument serialization. Interactive approval defaults to no and one answer covers the selection; per-section prompts are not built. A verified apply prints a static verified line. Noninteractive mode requires `--yes` after a plan review. No-argument apply stays within Tier 0 and Tier 1. |
 | Posture vectors and personas | Implemented and tested. 5 posture dimensions, 4 friction tiers, 5 workload personas across `check`, `recommend`, `simulate`, `plan`, and `apply`. |
 | Linux `check` | Experimental. Discovery and 17 controls (GNOME, Ubuntu, Debian, Fedora, KDE, FreeDesktop, systemd, NetworkManager, Avahi, systemd-resolved) with elevation metadata. Typed recorded Context tests exercise the file probes, the shared drop-in merge, the resolved property parser, and thumbnail presence. Desktop-environment controls remain unchecked against a full session. |
 | macOS `check` | Experimental. Discovery and 6 controls with elevation metadata. Compiled and tested in CI; never checked against a real Mac. |

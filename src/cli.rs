@@ -13,7 +13,7 @@ pub struct Cli {
     /// Output format for commands that produce reports.
     #[arg(long, global = true, value_enum, default_value_t = OutputFormat::Text)]
     pub format: OutputFormat,
-    /// When to colorize output. An explicit choice overrides NO_COLOR.
+    /// When to colour output. An explicit choice overrides NO_COLOR.
     #[arg(long, global = true, value_enum, default_value_t = ColorWhen::Auto)]
     pub color: ColorWhen,
     #[command(subcommand)]
@@ -26,11 +26,7 @@ pub use crate::model::profile::Profile;
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// Check the current machine without changing it.
-    #[command(
-        visible_alias = "status",
-        visible_alias = "audit",
-        visible_alias = "scan"
-    )]
+    #[command(alias = "status", alias = "audit", alias = "scan")]
     Check {
         /// Privacy policy profile to evaluate.
         #[arg(long, value_enum, conflicts_with = "workload")]
@@ -47,12 +43,12 @@ pub enum Command {
         /// Check only controls in a specific section. Repeatable.
         #[arg(long = "section")]
         sections: Vec<String>,
-        /// Include passing controls in text output.
+        /// List passing, not applicable, and not selected controls in text output.
         #[arg(long)]
         all: bool,
     },
     /// Show the exact supported changes without applying them.
-    #[command(visible_alias = "diff")]
+    #[command(alias = "diff")]
     Plan {
         /// Privacy policy profile to evaluate.
         #[arg(long, value_enum, conflicts_with = "workload")]
@@ -74,7 +70,7 @@ pub enum Command {
         sections: Vec<String>,
     },
     /// Recompute, confirm, apply, and verify supported changes.
-    #[command(visible_alias = "fix", visible_alias = "harden")]
+    #[command(alias = "fix", alias = "harden")]
     Apply {
         /// Privacy policy profile to apply.
         #[arg(long, value_enum, conflicts_with = "workload")]
@@ -108,7 +104,7 @@ pub enum Command {
         elevated_output: Option<PathBuf>,
     },
     /// Roll back a transaction recorded by `privr apply`.
-    #[command(visible_alias = "restore", visible_alias = "undo")]
+    #[command(alias = "restore", alias = "undo")]
     Rollback {
         /// Internal transaction ID shown by `privr history` (defaults to most recent transaction).
         transaction_id: Option<String>,
@@ -123,7 +119,7 @@ pub enum Command {
         elevated_output: Option<PathBuf>,
     },
     /// Show transaction history of applied changes.
-    #[command(visible_alias = "log")]
+    #[command(alias = "log")]
     History,
 
     /// Recommend confirmed drift changes across profiles, filtered by workload and friction.

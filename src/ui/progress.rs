@@ -25,6 +25,14 @@ const ASCII_FRAMES: [&str; 4] = ["|", "/", "-", "\\"];
 const INTERVAL: Duration = Duration::from_millis(80);
 const MIN_DISPLAY_DURATION: Duration = Duration::from_millis(200);
 
+/// Whether a spinner may draw.
+///
+/// Motion is limited to a colour-capable terminal. `TERM=dumb`, a pipe, and
+/// JSON produce no frames and no escape sequences.
+pub fn motion_allowed(is_terminal: bool, term: Option<&str>) -> bool {
+    is_terminal && term != Some("dumb")
+}
+
 /// A running spinner. Stops and clears when dropped.
 pub struct Spinner {
     running: Arc<AtomicBool>,
@@ -35,8 +43,12 @@ pub struct Spinner {
 
 impl Spinner {
     /// Start a spinner, or return an inert one when output is not a terminal.
+    ///
+    /// `TERM=dumb` draws nothing. A dumb terminal ignores the clear sequence,
+    /// so the next line would overprint the spinner text.
     pub fn start(message: &str, unicode: bool) -> Self {
-        if !std::io::stderr().is_terminal() {
+        let term = std::env::var("TERM").ok();
+        if !motion_allowed(std::io::stderr().is_terminal(), term.as_deref()) {
             return Self::inert();
         }
 
@@ -240,6 +252,14 @@ mod tests {
         );
         assert!(spinner.is_active());
         drop(spinner);
+    }
+
+    #[test]
+    fn a_dumb_terminal_allows_no_spinner_motion() {
+        assert!(!motion_allowed(true, Some("dumb")));
+        assert!(!motion_allowed(false, Some("xterm-256color")));
+        assert!(motion_allowed(true, Some("xterm-256color")));
+        assert!(motion_allowed(true, None));
     }
 
     #[test]

@@ -67,6 +67,134 @@ fn explicit_elevation_required(
             .any(|id| control.spec.id == *id || control.spec.id.starts_with(id))
 }
 
+/// One answer covers every selected section. Per-section approval is not built.
+const APPROVAL_SCOPE: &str =
+    "(all sections; per-section approval isn't available yet; use --section to limit)";
+
+/// Wording reserved for a future per-section stop. Not a live apply path.
+#[cfg(test)]
+fn section_stop_line(applied: usize, deferred: usize) -> String {
+    format!("stopped {applied} sections applied, {deferred} deferred")
+}
+
+/// `Ok(true)` proceeds. `Ok(false)` cancels, including an empty entry.
+/// `Err(2)` is a confirmation read failure.
+fn interpret_confirmation(read: std::io::Result<String>) -> Result<bool, i32> {
+    let input = read.map_err(|_| 2)?;
+    let trimmed = input.trim();
+    Ok(trimmed.eq_ignore_ascii_case("y") || trimmed.eq_ignore_ascii_case("yes"))
+}
+
+fn uncertainty_word(reason: crate::engine::evaluate::Uncertainty) -> &'static str {
+    match reason {
+        crate::engine::evaluate::Uncertainty::Denied => "denied",
+        crate::engine::evaluate::Uncertainty::Malformed => "malformed",
+        crate::engine::evaluate::Uncertainty::Unsupported => "unsupported",
+        crate::engine::evaluate::Uncertainty::Undetermined => "undetermined",
+        crate::engine::evaluate::Uncertainty::EnforcementMechanismOnly => {
+            "enforcement mechanism only"
+        }
+    }
+}
+
+/// Narrate concealed rows already stored on a check. This does not probe again.
+fn narrate_concealed(report: &crate::report::Report, ui: &crate::ui::Ui) -> String {
+    let mut out = String::from("What couldn't be checked:\n");
+    for result in report
+        .results
+        .iter()
+        .filter(|result| result.outcome.conceals_state())
+    {
+        out.push_str(&format!(
+            "  {}  {}\n    {}\n",
+            result.outcome.as_str(),
+            result.title,
+            result.id
+        ));
+        if let Some(note) = &result.note {
+            out.push_str(&ui.wrap(note, 4));
+            out.push('\n');
+        }
+        if let Some(reason) = result.observation_reason {
+            out.push_str(&format!("    reason: {}\n", uncertainty_word(reason)));
+        }
+    }
+    out.push_str("Unknown means privr could not tell. It is never counted as passing.\n");
+    out
+}
+
+fn render_verified_block(
+    ui: &crate::ui::Ui,
+    verified: usize,
+    total: usize,
+    platform: &str,
+    transaction_id: &str,
+    unverified: &[String],
+) -> String {
+    if verified == 0 {
+        return String::new();
+    }
+    let name = crate::ui::platform_name(platform);
+    let summary = format!("{verified} of {total} changes on {name}, transaction {transaction_id}");
+    let hang = "verified  ".chars().count();
+    let mut out = String::new();
+    out.push_str(&ui.paint(
+        crate::ui::style::outcome_style(crate::model::outcome::Outcome::Pass),
+        "verified",
+    ));
+    out.push_str("  ");
+    out.push_str(&ui.wrap_after(&summary, hang));
+    out.push('\n');
+    for id in unverified {
+        let detail = format!("{id} did not verify");
+        out.push_str(&" ".repeat(hang));
+        out.push_str(&ui.paint(
+            crate::ui::style::outcome_style(crate::model::outcome::Outcome::Drift),
+            "drift",
+        ));
+        out.push_str("  ");
+        out.push_str(&ui.wrap_after(&detail, hang + "drift  ".chars().count()));
+        out.push('\n');
+    }
+    let command = format!("privr rollback {transaction_id}");
+    out.push_str(&" ".repeat(hang));
+    out.push_str(&ui.paint(crate::ui::style::MUTED, "undo: "));
+    out.push_str(&ui.paint(crate::ui::style::INFO, &command));
+    out.push('\n');
+    out
+}
+
+fn verified_block_for(
+    ui: &crate::ui::Ui,
+    journal: &crate::journal::TransactionJournal,
+    failed: Option<&str>,
+) -> String {
+    let verified = journal
+        .operations
+        .iter()
+        .filter(|operation| operation.verified)
+        .count();
+    let mut unverified: Vec<String> = journal
+        .operations
+        .iter()
+        .filter(|operation| !operation.verified)
+        .map(|operation| operation.control_id.clone())
+        .collect();
+    let mut total = journal.operations.len();
+    if let Some(id) = failed {
+        unverified.push(id.to_owned());
+        total += 1;
+    }
+    render_verified_block(
+        ui,
+        verified,
+        total,
+        &journal.platform,
+        &journal.transaction_id,
+        &unverified,
+    )
+}
+
 fn run_with_journal_dir(
     cli: Cli,
     out: &mut impl Write,
@@ -169,121 +297,147 @@ fn run_with_check_context(
                     let _ = write!(out, "{}", report.to_text(&ui, all));
                     let _ = out.flush();
 
-                    // Modern 2026 CLI: In interactive terminal sessions, running default 'privr'
-                    // provides an actionable prompt to preview or fix detected drift in-place
-                    // without forcing users to re-type one-off commands manually.
+                    // A terminal session can choose a next step. Drift keeps the
+                    // preview-or-apply prompt. An incomplete check with no drift
+                    // offers the saved concealed rows instead of a second probe.
                     if is_default_entry
-                        && report.summary.drift > 0
                         && std::io::stdin().is_terminal()
                         && std::io::stdout().is_terminal()
                     {
-                        let prompt_text = "Action? [y] apply safe fixes, [d] preview diff, [e] explain score & critical items, [q] quit (default: q): ";
-                        let _ = write!(out, "{}", ui.paint(crate::ui::style::HEADING, prompt_text));
-                        let _ = out.flush();
+                        if report.summary.drift > 0 {
+                            let prompt_text = "Action? [y] apply safe fixes, [d] preview diff, [e] explain score & critical items, [q] quit (default: q): ";
+                            let _ =
+                                write!(out, "{}", ui.paint(crate::ui::style::HEADING, prompt_text));
+                            let _ = out.flush();
 
-                        let mut input = String::new();
-                        if std::io::stdin().read_line(&mut input).is_ok() {
-                            let mut trimmed = input.trim().to_lowercase();
-                            if trimmed == "e" || trimmed == "explain" {
-                                let overview = crate::explain::render_overview(&ui);
-                                let _ = write!(out, "\n{overview}\n");
-                                let _ = out.flush();
-                                let next_prompt = "Next action? [y] apply safe fixes, [d] preview diff, [q] quit (default: q): ";
-                                let _ = write!(
-                                    out,
-                                    "{}",
-                                    ui.paint(crate::ui::style::HEADING, next_prompt)
-                                );
-                                let _ = out.flush();
-                                input.clear();
-                                if std::io::stdin().read_line(&mut input).is_ok() {
-                                    trimmed = input.trim().to_lowercase();
-                                }
-                            }
-                            if trimmed == "y"
-                                || trimmed == "yes"
-                                || trimmed == "a"
-                                || trimmed == "apply"
-                            {
-                                return run_with_journal_dir(
-                                    Cli {
-                                        format,
-                                        color: cli.color,
-                                        command: Some(Command::Apply {
-                                            profile,
-                                            policy: None,
-                                            workload,
-                                            max_friction: None,
-                                            dry_run: false,
-                                            yes: false,
-                                            controls,
-                                            sections,
-                                            elevate: false,
-                                            elevated_output: None,
-                                        }),
-                                    },
-                                    out,
-                                    err,
-                                    journal_dir,
-                                );
-                            } else if trimmed == "d"
-                                || trimmed == "diff"
-                                || trimmed == "p"
-                                || trimmed == "plan"
-                            {
-                                let plan_code = run_with_journal_dir(
-                                    Cli {
-                                        format,
-                                        color: cli.color,
-                                        command: Some(Command::Plan {
-                                            profile,
-                                            policy: None,
-                                            workload,
-                                            max_friction: None,
-                                            controls: controls.clone(),
-                                            sections: sections.clone(),
-                                        }),
-                                    },
-                                    out,
-                                    err,
-                                    journal_dir,
-                                );
-                                if plan_code == 0 {
-                                    let apply_prompt =
-                                        "Apply these changes now? [y/N] (default: N): ";
+                            let mut input = String::new();
+                            if std::io::stdin().read_line(&mut input).is_ok() {
+                                let mut trimmed = input.trim().to_lowercase();
+                                if trimmed == "e" || trimmed == "explain" {
+                                    let overview = crate::explain::render_overview(&ui);
+                                    let _ = write!(out, "\n{overview}\n");
+                                    let _ = out.flush();
+                                    let next_prompt = "Next action? [y] apply safe fixes, [d] preview diff, [q] quit (default: q): ";
                                     let _ = write!(
                                         out,
                                         "{}",
-                                        ui.paint(crate::ui::style::HEADING, apply_prompt)
+                                        ui.paint(crate::ui::style::HEADING, next_prompt)
                                     );
                                     let _ = out.flush();
-                                    let mut plan_input = String::new();
-                                    if std::io::stdin().read_line(&mut plan_input).is_ok() {
-                                        let plan_trimmed = plan_input.trim().to_lowercase();
-                                        if plan_trimmed == "y" || plan_trimmed == "yes" {
-                                            return run_with_journal_dir(
-                                                Cli {
-                                                    format,
-                                                    color: cli.color,
-                                                    command: Some(Command::Apply {
-                                                        profile,
-                                                        policy: None,
-                                                        workload,
-                                                        max_friction: None,
-                                                        dry_run: false,
-                                                        yes: false,
-                                                        controls,
-                                                        sections,
-                                                        elevate: false,
-                                                        elevated_output: None,
-                                                    }),
-                                                },
-                                                out,
-                                                err,
-                                                journal_dir,
-                                            );
+                                    input.clear();
+                                    if std::io::stdin().read_line(&mut input).is_ok() {
+                                        trimmed = input.trim().to_lowercase();
+                                    }
+                                }
+                                if trimmed == "y"
+                                    || trimmed == "yes"
+                                    || trimmed == "a"
+                                    || trimmed == "apply"
+                                {
+                                    return run_with_journal_dir(
+                                        Cli {
+                                            format,
+                                            color: cli.color,
+                                            command: Some(Command::Apply {
+                                                profile,
+                                                policy: None,
+                                                workload,
+                                                max_friction: None,
+                                                dry_run: false,
+                                                yes: false,
+                                                controls,
+                                                sections,
+                                                elevate: false,
+                                                elevated_output: None,
+                                            }),
+                                        },
+                                        out,
+                                        err,
+                                        journal_dir,
+                                    );
+                                } else if trimmed == "d"
+                                    || trimmed == "diff"
+                                    || trimmed == "p"
+                                    || trimmed == "plan"
+                                {
+                                    let plan_code = run_with_journal_dir(
+                                        Cli {
+                                            format,
+                                            color: cli.color,
+                                            command: Some(Command::Plan {
+                                                profile,
+                                                policy: None,
+                                                workload,
+                                                max_friction: None,
+                                                controls: controls.clone(),
+                                                sections: sections.clone(),
+                                            }),
+                                        },
+                                        out,
+                                        err,
+                                        journal_dir,
+                                    );
+                                    if plan_code == 0 {
+                                        let apply_prompt = format!(
+                                            "Apply these changes now? [y/N] {APPROVAL_SCOPE}: "
+                                        );
+                                        let _ = write!(
+                                            out,
+                                            "{}",
+                                            ui.paint(crate::ui::style::HEADING, &apply_prompt)
+                                        );
+                                        let _ = out.flush();
+                                        let mut plan_input = String::new();
+                                        let read = std::io::stdin()
+                                            .read_line(&mut plan_input)
+                                            .map(|_| plan_input.clone());
+                                        match interpret_confirmation(read) {
+                                            Ok(true) => {
+                                                return run_with_journal_dir(
+                                                    Cli {
+                                                        format,
+                                                        color: cli.color,
+                                                        command: Some(Command::Apply {
+                                                            profile,
+                                                            policy: None,
+                                                            workload,
+                                                            max_friction: None,
+                                                            dry_run: false,
+                                                            yes: true,
+                                                            controls,
+                                                            sections,
+                                                            elevate: false,
+                                                            elevated_output: None,
+                                                        }),
+                                                    },
+                                                    out,
+                                                    err,
+                                                    journal_dir,
+                                                );
+                                            }
+                                            Ok(false) => {}
+                                            Err(code) => {
+                                                let _ = writeln!(
+                                                    err,
+                                                    "privr: failed to read confirmation input"
+                                                );
+                                                return code;
+                                            }
                                         }
                                     }
+                                }
+                            }
+                        } else if !report.complete {
+                            let prompt_text = "Action? [e] what couldn't be checked and why, [q] quit (default: q): ";
+                            let _ =
+                                write!(out, "{}", ui.paint(crate::ui::style::HEADING, prompt_text));
+                            let _ = out.flush();
+                            let mut input = String::new();
+                            if std::io::stdin().read_line(&mut input).is_ok() {
+                                let trimmed = input.trim().to_lowercase();
+                                if trimmed == "e" || trimmed == "explain" {
+                                    let _ = write!(out, "\n{}", narrate_concealed(&report, &ui));
+                                    let _ = out.flush();
                                 }
                             }
                         }
@@ -435,12 +589,21 @@ fn run_with_check_context(
 
             match format {
                 OutputFormat::Text => {
+                    let labels = ["Workload", "Profile", "Platform", "Planned changes"];
+                    let width = crate::ui::Ui::label_width(&labels);
                     if let Some(w) = workload {
-                        let _ = writeln!(out, "Workload {}", w.as_str());
+                        let _ = write!(out, "{} ", ui.field("Workload", width));
+                        let _ = writeln!(out, "{}", ui.wrap_after(w.as_str(), width + 1));
                     } else {
-                        let _ = writeln!(out, "Profile  {}", plan_report.profile);
+                        let _ = write!(out, "{} ", ui.field("Profile", width));
+                        let _ = writeln!(out, "{}", ui.wrap_after(&plan_report.profile, width + 1));
                     }
-                    let _ = writeln!(out, "Platform {}", plan_report.platform);
+                    let _ = write!(out, "{} ", ui.field("Platform", width));
+                    let _ = writeln!(
+                        out,
+                        "{}",
+                        ui.wrap_after(crate::ui::platform_name(&plan_report.platform), width + 1)
+                    );
                     if plan_report.planned_changes == 0 {
                         if plan_report.unautomated_drift > 0 {
                             let _ = writeln!(
@@ -512,10 +675,11 @@ fn run_with_check_context(
                                 ui.paint(crate::ui::style::MUTED, item.friction.display_name())
                             );
                             if let Some(details) = &item.details {
+                                let wrapped = ui.wrap_after(details, 14);
                                 let _ = writeln!(
                                     out,
                                     "    Details:  {}",
-                                    ui.paint(crate::ui::style::MUTED, details)
+                                    ui.paint_lines(crate::ui::style::MUTED, &wrapped)
                                 );
                             }
                         }
@@ -628,7 +792,7 @@ fn run_with_check_context(
                     eval_progress.finish();
                     let _ = writeln!(
                         err,
-                        "privr: interactive approval is not implemented; pass --yes"
+                        "privr: no terminal for approval; review with privr plan, then run privr apply --yes [--section <name>]"
                     );
                     return 2;
                 }
@@ -715,13 +879,27 @@ fn run_with_check_context(
                     return 0;
                 }
 
+                let labels = ["Workload", "Profile", "Platform", "Planned changes"];
+                let width = crate::ui::Ui::label_width(&labels);
                 if let Some(w) = workload {
-                    let _ = writeln!(out, "Workload {}", w.as_str());
+                    let _ = write!(out, "{} ", ui.field("Workload", width));
+                    let _ = writeln!(out, "{}", ui.wrap_after(w.as_str(), width + 1));
                 } else {
-                    let _ = writeln!(out, "Profile  {}", profile_val.as_str());
+                    let _ = write!(out, "{} ", ui.field("Profile", width));
+                    let _ = writeln!(out, "{}", ui.wrap_after(profile_val.as_str(), width + 1));
                 }
-                let _ = writeln!(out, "Platform {}", host.platform.as_str());
-                let _ = writeln!(out, "Planned changes: {}\n", planned_items.len());
+                let _ = write!(out, "{} ", ui.field("Platform", width));
+                let _ = writeln!(
+                    out,
+                    "{}",
+                    ui.wrap_after(crate::ui::platform_name(host.platform.as_str()), width + 1)
+                );
+                let _ = write!(out, "{} ", ui.field("Planned changes", width));
+                let _ = writeln!(
+                    out,
+                    "{}\n",
+                    ui.wrap_after(&planned_items.len().to_string(), width + 1)
+                );
 
                 let mut last_section = "";
                 for item in &planned_items {
@@ -774,10 +952,11 @@ fn run_with_check_context(
                         ui.paint(crate::ui::style::MUTED, item.friction.display_name())
                     );
                     if let Some(details) = &item.details {
+                        let wrapped = ui.wrap_after(details, 14);
                         let _ = writeln!(
                             out,
                             "    Details:  {}",
-                            ui.paint(crate::ui::style::MUTED, details)
+                            ui.paint_lines(crate::ui::style::MUTED, &wrapped)
                         );
                     }
                 }
@@ -795,24 +974,27 @@ fn run_with_check_context(
                 }
 
                 let prompt_msg = format!(
-                    "\nApply these {} change(s)? [Y/n] (Press Enter to confirm): ",
+                    "\nApply these {} change(s)? [y/N] {APPROVAL_SCOPE}: ",
                     planned_items.len()
                 );
                 let _ = write!(out, "{prompt_msg}");
                 let _ = out.flush();
 
                 let mut input = String::new();
-                if std::io::stdin().read_line(&mut input).is_err() {
-                    let _ = writeln!(err, "privr: failed to read confirmation input");
-                    return 1;
-                }
-                let trimmed = input.trim();
-                if !trimmed.is_empty()
-                    && !trimmed.eq_ignore_ascii_case("y")
-                    && !trimmed.eq_ignore_ascii_case("yes")
-                {
-                    let _ = writeln!(out, "privr: apply cancelled by user.");
-                    return 0;
+                match interpret_confirmation(
+                    std::io::stdin()
+                        .read_line(&mut input)
+                        .map(|_| input.clone()),
+                ) {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        let _ = writeln!(out, "privr: apply cancelled by user.");
+                        return 0;
+                    }
+                    Err(code) => {
+                        let _ = writeln!(err, "privr: failed to read confirmation input");
+                        return code;
+                    }
                 }
             }
             eval_progress.finish();
@@ -1077,20 +1259,26 @@ fn run_with_check_context(
                                 if let Err(e) =
                                     crate::journal::save_transaction_in(journal_dir, &journal)
                                 {
+                                    let _ =
+                                        write!(out, "{}", verified_block_for(&ui, &journal, None));
                                     let _ = writeln!(
                                         err,
-                                        "privr: fatal error writing transaction journal: {e}. Applied {} change(s) (transaction {}). Halting apply.",
-                                        journal.operations.len(),
-                                        tx_id
+                                        "privr: fatal error writing transaction journal: {e}. Applied {} change(s) (transaction {tx_id}). Halting apply.",
+                                        journal.operations.len()
                                     );
                                     return 4;
                                 }
                             }
                             Some(Err(e)) => {
                                 if !journal.operations.is_empty() {
+                                    let _ = write!(
+                                        out,
+                                        "{}",
+                                        verified_block_for(&ui, &journal, Some(&c.spec.id))
+                                    );
                                     let _ = writeln!(
                                         err,
-                                        "privr: failed to apply {}: {e}. Applied {} prior change(s) (transaction {}). To rollback: privr rollback {} --yes",
+                                        "privr: failed to apply {}: {e}. Applied {} prior change(s) (transaction {}). To rollback: privr rollback {}",
                                         c.spec.id,
                                         journal.operations.len(),
                                         tx_id,
@@ -1175,16 +1363,7 @@ fn run_with_check_context(
 
             match format {
                 OutputFormat::Text => {
-                    let _ = writeln!(
-                        out,
-                        "Applied {} changes (transaction {}).",
-                        apply_report.applied_changes, apply_report.transaction_id
-                    );
-                    let _ = writeln!(
-                        out,
-                        "All changes verified. To reverse, run: privr rollback {} --yes",
-                        apply_report.transaction_id
-                    );
+                    let _ = write!(out, "{}", verified_block_for(&ui, &journal, None));
                     if requires_elevation_drift_applied > 0 {
                         let _ = writeln!(
                             out,
@@ -1225,27 +1404,30 @@ fn run_with_check_context(
                 if !is_interactive {
                     let _ = writeln!(
                         err,
-                        "privr: interactive approval is not implemented; pass --yes to confirm rollback"
+                        "privr: no terminal for approval; review with privr history, then run privr rollback {transaction_id} --yes"
                     );
                     return 2;
                 }
                 let _ = write!(
                     out,
-                    "Rollback transaction '{transaction_id}'? [Y/n] (Press Enter to confirm): "
+                    "Rollback transaction '{transaction_id}'? [y/N] (Press Enter to cancel): "
                 );
                 let _ = out.flush();
                 let mut input = String::new();
-                if std::io::stdin().read_line(&mut input).is_err() {
-                    let _ = writeln!(err, "privr: failed to read confirmation input");
-                    return 1;
-                }
-                let trimmed = input.trim();
-                if !trimmed.is_empty()
-                    && !trimmed.eq_ignore_ascii_case("y")
-                    && !trimmed.eq_ignore_ascii_case("yes")
-                {
-                    let _ = writeln!(out, "privr: rollback cancelled by user.");
-                    return 0;
+                match interpret_confirmation(
+                    std::io::stdin()
+                        .read_line(&mut input)
+                        .map(|_| input.clone()),
+                ) {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        let _ = writeln!(out, "privr: rollback cancelled by user.");
+                        return 0;
+                    }
+                    Err(code) => {
+                        let _ = writeln!(err, "privr: failed to read confirmation input");
+                        return code;
+                    }
                 }
             }
 
@@ -1436,19 +1618,25 @@ fn run_with_check_context(
                     } else {
                         let _ = writeln!(out, "Transaction History ({} recorded):\n", txs.len());
                         for tx in txs.iter().rev() {
+                            let block = verified_block_for(&ui, tx, None);
+                            if block.is_empty() {
+                                let _ = writeln!(
+                                    out,
+                                    "{}  no verified changes",
+                                    ui.paint(crate::ui::style::IDENT, &tx.transaction_id)
+                                );
+                            } else {
+                                let _ = write!(out, "{block}");
+                            }
+                            let meta = format!("{}  profile: {}", tx.timestamp, tx.profile);
                             let _ = writeln!(
                                 out,
-                                "  {}  [{}]  {} change(s)  profile: {}",
-                                ui.paint(crate::ui::style::IDENT, &tx.transaction_id),
-                                tx.timestamp,
-                                tx.operations.len(),
-                                tx.profile
+                                "{}{}\n",
+                                " ".repeat(10),
+                                ui.paint(crate::ui::style::MUTED, &meta)
                             );
                         }
-                        let _ = writeln!(
-                            out,
-                            "\nTo reverse the most recent changes: privr undo (or privr rollback)"
-                        );
+                        let _ = writeln!(out, "To reverse the most recent changes: privr rollback");
                     }
                 }
                 OutputFormat::Json => {
@@ -1572,25 +1760,42 @@ Run privr explain without arguments for the posture overview, or privr list to s
 
             match format {
                 OutputFormat::Text => {
-                    let field =
-                        |name: &str| ui.paint(crate::ui::style::MUTED, &format!("{name:<16}"));
-                    let _ = writeln!(out, "{}privr recommend", field("Command"));
-                    let _ = writeln!(out, "{}recommendation report", field("Status"));
+                    let labels = [
+                        "Command",
+                        "Status",
+                        "Scope",
+                        "Workload",
+                        "Max Friction",
+                        "Dimension",
+                        "Recommendations",
+                    ];
+                    let width = crate::ui::Ui::label_width(&labels);
+                    let row = |label: &str, value: &str| {
+                        format!(
+                            "{} {}",
+                            ui.field(label, width),
+                            ui.wrap_after(value, width + 1)
+                        )
+                    };
+                    let _ = writeln!(out, "{}", row("Command", "privr recommend"));
+                    let _ = writeln!(out, "{}", row("Status", "recommendation report"));
                     let _ = writeln!(
                         out,
-                        "{}full compiled catalogue across profiles; workload and filters apply",
-                        field("Scope")
+                        "{}",
+                        row(
+                            "Scope",
+                            "full compiled catalogue across profiles; workload and filters apply"
+                        )
                     );
-                    let _ = writeln!(out, "{}{}", field("Workload"), workload.as_str());
+                    let _ = writeln!(out, "{}", row("Workload", workload.as_str()));
                     let friction_label = max_friction.map(|f| f.as_str()).unwrap_or("unlimited");
-                    let _ = writeln!(out, "{}{}", field("Max Friction"), friction_label);
+                    let _ = writeln!(out, "{}", row("Max Friction", friction_label));
                     let dim_label = dimension.map(|d| d.as_str()).unwrap_or("all");
-                    let _ = writeln!(out, "{}{}", field("Dimension"), dim_label);
+                    let _ = writeln!(out, "{}", row("Dimension", dim_label));
                     let _ = writeln!(
                         out,
-                        "{}{}\n",
-                        field("Recommendations"),
-                        recommendations.len()
+                        "{}\n",
+                        row("Recommendations", &recommendations.len().to_string())
                     );
 
                     if recommendations.is_empty() {
@@ -1598,6 +1803,12 @@ Run privr explain without arguments for the posture overview, or privr list to s
                             out,
                             "No confirmed drift recommendations matched the workload and filters."
                         );
+                        let _ = writeln!(
+                            out,
+                            "An empty recommendation list is not a compliance result."
+                        );
+                        let _ =
+                            writeln!(out, "Run privr check to see what couldn't be established.");
                     } else {
                         for rec in &recommendations {
                             let friction_badge = ui.paint(
@@ -1629,9 +1840,17 @@ Run privr explain without arguments for the posture overview, or privr list to s
                                 "    State:      current: {}, desired: {}",
                                 rec.current_state, rec.desired_state
                             );
-                            let _ = writeln!(out, "    Rationale:  {}", rec.rationale);
+                            let _ = writeln!(
+                                out,
+                                "    Rationale:  {}",
+                                ui.wrap_after(&rec.rationale, 16)
+                            );
                             if let Some(tradeoff) = &rec.tradeoff {
-                                let _ = writeln!(out, "    Trade-off:  {}", tradeoff);
+                                let _ = writeln!(
+                                    out,
+                                    "    Trade-off:  {}",
+                                    ui.wrap_after(tradeoff, 16)
+                                );
                             }
                             let _ = writeln!(out);
                         }
@@ -2133,7 +2352,8 @@ mod tests {
         }));
         assert_eq!(code, 2);
         assert!(stdout.is_empty());
-        assert!(stderr.contains("pass --yes"));
+        assert!(stderr.contains("no terminal for approval"));
+        assert!(stderr.contains("privr apply --yes"));
     }
 
     #[test]
@@ -2285,7 +2505,8 @@ mod tests {
         }));
         assert_eq!(code, 2);
         assert!(stdout.is_empty());
-        assert!(stderr.contains("confirm rollback"));
+        assert!(stderr.contains("no terminal for approval"));
+        assert!(stderr.contains("privr rollback tx-123 --yes"));
     }
 
     #[test]
@@ -2560,7 +2781,7 @@ mod tests {
             sections: Vec::new(),
         }));
         assert_eq!(code, 0, "stderr: {stderr}");
-        assert!(stdout.contains("Workload developer"));
+        assert!(flatten(&stdout).contains("Workload developer"));
         assert!(stdout.contains("Platform"));
     }
 
@@ -2579,7 +2800,7 @@ mod tests {
             elevated_output: None,
         }));
         assert_eq!(code, 0, "stderr: {stderr}");
-        assert!(stdout.contains("Workload developer"));
+        assert!(flatten(&stdout).contains("Workload developer"));
     }
 
     #[test]
@@ -2598,7 +2819,7 @@ mod tests {
         }));
         assert_eq!(code, 0, "stderr: {stderr}");
         assert!(stdout.contains("Planned changes"));
-        assert!(stdout.contains("Workload developer"));
+        assert!(flatten(&stdout).contains("Workload developer"));
     }
 
     #[test]
@@ -2684,5 +2905,118 @@ mod tests {
             );
             assert_eq!(std::fs::read(&path).expect("preserved journal"), bytes);
         }
+    }
+
+    #[test]
+    fn confirmation_defaults_to_cancel_and_read_failure_is_usage() {
+        assert!(!interpret_confirmation(Ok("\n".to_owned())).expect("empty"));
+        assert!(interpret_confirmation(Ok("y\n".to_owned())).expect("yes"));
+        assert!(interpret_confirmation(Ok("YES".to_owned())).expect("YES"));
+        assert!(!interpret_confirmation(Ok("n".to_owned())).expect("no"));
+        assert_eq!(
+            interpret_confirmation(Err(std::io::Error::other("closed"))),
+            Err(2)
+        );
+        assert_eq!(
+            section_stop_line(2, 1),
+            "stopped 2 sections applied, 1 deferred"
+        );
+    }
+
+    #[test]
+    fn verified_line_names_the_journal_and_omits_yes() {
+        let journal = crate::journal::TransactionJournal {
+            schema: crate::journal::JOURNAL_SCHEMA,
+            transaction_id: "tx-10-1".to_owned(),
+            timestamp: "2026-10-20T00:00:00Z".to_owned(),
+            platform: "linux".to_owned(),
+            profile: "baseline".to_owned(),
+            operations: vec![
+                crate::journal::OperationJournal {
+                    control_id: "debian.popularity-contest.participation".to_owned(),
+                    target_key: "/etc/popularity-contest.conf".to_owned(),
+                    preimage: None,
+                    postimage: crate::model::evidence::RawValue::new(
+                        crate::model::evidence::ValueKind::String,
+                        b"PARTICIPATE=\"no\"\n".to_vec(),
+                    ),
+                    verified: true,
+                },
+                crate::journal::OperationJournal {
+                    control_id: "second.control".to_owned(),
+                    target_key: "secret-path".to_owned(),
+                    preimage: None,
+                    postimage: crate::model::evidence::RawValue::new(
+                        crate::model::evidence::ValueKind::String,
+                        b"/home/secret-user".to_vec(),
+                    ),
+                    verified: true,
+                },
+            ],
+        };
+        let plain = verified_block_for(&crate::ui::Ui::plain(), &journal, None);
+        assert!(plain.contains("verified  2 of 2 changes on Linux, transaction tx-10-1"));
+        assert!(plain.contains("undo: privr rollback tx-10-1"));
+        assert!(!plain.contains("--yes"));
+        assert!(!plain.contains("/home/secret-user"));
+        assert!(!plain.contains("secret-path"));
+        assert!(!plain.contains('\u{2014}'));
+
+        let partial = verified_block_for(
+            &crate::ui::Ui::plain(),
+            &journal,
+            Some("windows.advertising.id"),
+        );
+        assert!(partial.contains("verified  2 of 3 changes on Linux"));
+        assert!(partial.contains("drift  windows.advertising.id did not verify"));
+
+        let coloured = verified_block_for(&crate::ui::Ui::render(true, false, 60), &journal, None);
+        assert!(coloured.contains('\u{1b}'));
+        assert!(coloured.contains("privr rollback tx-10-1"));
+        assert!(!coloured.contains("--yes"));
+    }
+
+    #[test]
+    fn history_leads_with_the_verified_line_and_hides_journal_bytes() {
+        let directory = crate::journal::TestDirectory::new();
+        let transaction = crate::journal::TransactionJournal {
+            schema: crate::journal::JOURNAL_SCHEMA,
+            transaction_id: "tx-10-2".to_owned(),
+            timestamp: "2026-10-20T00:00:00Z".to_owned(),
+            platform: "windows".to_owned(),
+            profile: "baseline".to_owned(),
+            operations: vec![crate::journal::OperationJournal {
+                control_id: "windows.advertising.id".to_owned(),
+                target_key: "HKCU|Software\\SecretUser|Value".to_owned(),
+                preimage: None,
+                postimage: crate::model::evidence::RawValue::new(
+                    crate::model::evidence::ValueKind::U32,
+                    vec![0, 0, 0, 0],
+                ),
+                verified: true,
+            }],
+        };
+        crate::journal::save_transaction_in(&directory.0, &transaction).expect("save");
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        let code = run_with_journal_dir(
+            Cli {
+                color: crate::cli::ColorWhen::Never,
+                format: OutputFormat::Text,
+                command: Some(Command::History),
+            },
+            &mut out,
+            &mut err,
+            &directory.0,
+        );
+        assert_eq!(code, 0);
+        let stdout = String::from_utf8(out).expect("utf-8");
+        assert!(stdout.contains("Transaction History"));
+        assert!(stdout.contains("verified  1 of 1 changes on Windows, transaction tx-10-2"));
+        assert!(stdout.contains("undo: privr rollback tx-10-2"));
+        assert!(stdout.contains("2026-10-20T00:00:00Z  profile: baseline"));
+        assert!(!stdout.contains("SecretUser"));
+        assert!(!stdout.contains("HKCU"));
+        assert!(!stdout.contains("--yes"));
     }
 }

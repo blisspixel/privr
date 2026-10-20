@@ -111,17 +111,17 @@ cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 cargo clippy --locked --target x86_64-unknown-linux-gnu --all-targets --all-features -- -D warnings
 cargo clippy --locked --target aarch64-apple-darwin --all-targets --all-features -- -D warnings
 cargo test --locked --workspace --all-features
-cargo +1.95.0 check --workspace --all-targets --all-features --locked
+cargo check --workspace --all-targets --all-features --locked
 cargo llvm-cov --locked --workspace --all-features --fail-under-lines 80
 cargo deny check
 ```
 
 Platform code is compiled out on other hosts, so the cross-target Clippy runs
-(`rustup target add` if missing) are the only local check of it. CI lints with
-the latest stable toolchain, and new Clippy lints arrive with each release, so
-run `rustup update stable` first and use `cargo +stable` if your default
-toolchain differs. CI runs these jobs on Windows, macOS, and Linux and remains
-the authority.
+(`rustup target add` if missing) are the only local check of it. `rust-toolchain.toml`
+pins the local toolchain to 1.99.1, which is the supported Rust version.
+CI lints with the latest stable toolchain, and new Clippy lints arrive with
+each release, so run `rustup update stable` first when that pin moves. CI runs
+these jobs on Windows, macOS, and Linux and remains the authority.
 
 - Never make a check pass by weakening it: no new `allow` attributes, ignored
   tests, lowered thresholds, or loosened `deny.toml` without a stated reason.

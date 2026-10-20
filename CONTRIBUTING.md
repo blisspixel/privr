@@ -80,15 +80,15 @@ git push -u origin topic/short-description
 gh pr create --fill
 ```
 
-Merging requires every check to pass on all three platforms: formatting, lints,
-tests, minimum supported Rust, dependency policy, and coverage. History is
-linear, force pushes are refused, and the branch must be up to date with `main`
-before it merges.
+Merging requires every check to pass: formatting and lints on all three
+platforms, tests on all three platforms, dependency policy, and coverage.
+History is linear, force pushes are refused, and the branch must be up to date
+with `main` before it merges.
 
-The lint and minimum-supported-Rust jobs run on Linux, Windows, and macOS
-deliberately. Platform-gated code is compiled out elsewhere, so a
-single-platform job cannot see an unused import or a dead branch behind a `cfg`
-it did not enable. That has already caught failures in both directions.
+The lint jobs run on Linux, Windows, and macOS deliberately. Platform-gated
+code is compiled out elsewhere, so a single-platform job cannot see an unused
+import or a dead branch behind a `cfg` it did not enable. That has already
+caught failures in both directions.
 
 Run the checks locally before pushing, but do not rely on local results alone:
 the toolchain and the host both differ from CI.
@@ -105,8 +105,10 @@ cargo llvm-cov --workspace --all-features --fail-under-lines 80
 cargo deny check
 ```
 
-Changes that affect the minimum supported Rust version must also pass the MSRV
-job documented in CI.
+The supported Rust version is the stable release pinned in `rust-toolchain.toml`
+(1.99.1) and declared as `1.99` in `Cargo.toml`. CI's stable jobs are that
+check. There is no separate older-toolchain job. If Cargo says a newer compiler
+is required, run `rustup update stable`.
 
 ## Pull request expectations
 

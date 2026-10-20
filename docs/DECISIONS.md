@@ -24,9 +24,10 @@ The minimum supported Rust version tracks what the platform crates require
 rather than a conservative floor. `privr` is an end-user binary, not a library,
 so a low MSRV buys little and currently blocks the correct registry crate.
 
-Consequences: MSRV rises when a required platform crate requires it. The MSRV
-job pins the declared version and fails when the manifest and the toolchain
-disagree.
+Consequences: the declared `rust-version` tracks current stable, because this
+is an end-user binary. `rust-toolchain.toml` pins the local compiler. CI runs
+that stable toolchain on every platform. There is no separate older-toolchain
+job.
 
 ## 2. No asynchronous runtime
 

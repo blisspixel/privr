@@ -90,55 +90,76 @@ impl DoctorReport {
     /// Render human-readable diagnostics with semantic ANSI styling.
     pub fn to_text(&self, ui: &Ui) -> String {
         let mut out = String::new();
+        let label_width = Ui::label_width(&[
+            "Operating System",
+            "Edition",
+            "Architecture",
+            "Privilege",
+            "Elevation Path",
+            "Management",
+            "Transaction Root",
+            "Directory Access",
+            "Reparse Point Check",
+            "Active Controls",
+            "Source Staleness",
+            "Schema Versions",
+        ]);
+        let platform = crate::ui::platform_name(&self.platform);
+        let row = |out: &mut String, label: &str, value: String| {
+            out.push_str("  ");
+            out.push_str(&ui.field(label, label_width));
+            out.push(' ');
+            out.push_str(&value);
+            out.push('\n');
+        };
 
         out.push_str(&format!(
             "{}\n\n",
-            ui.paint(style::HEADING, &format!("privr doctor [{}]", self.platform))
+            ui.paint(style::HEADING, &format!("privr doctor [{platform}]"))
         ));
 
         out.push_str(&format!("{}\n", ui.paint(style::HEADING, "Platform")));
-        out.push_str(&format!(
-            "  {:20} {}\n",
-            ui.paint(style::MUTED, "Operating System"),
-            ui.paint(
-                style::VALUE,
-                &format!("{} {}", self.platform, self.os.version)
-            )
-        ));
-        out.push_str(&format!(
-            "  {:20} {}\n",
-            ui.paint(style::MUTED, "Edition"),
-            ui.paint(style::VALUE, &self.os.edition)
-        ));
-        out.push_str(&format!(
-            "  {:20} {}\n",
-            ui.paint(style::MUTED, "Architecture"),
-            ui.paint(style::VALUE, &self.os.architecture)
-        ));
-        out.push_str(&format!(
-            "  {:20} {}\n",
-            ui.paint(style::MUTED, "Privilege"),
-            ui.paint(style::VALUE, &self.privilege.level)
-        ));
-        out.push_str(&format!(
-            "  {:20} {}\n",
-            ui.paint(style::MUTED, "Elevation Path"),
-            ui.paint(style::VALUE, &self.privilege.elevation_path)
-        ));
-        out.push_str(&format!(
-            "  {:20} {}\n\n",
-            ui.paint(style::MUTED, "Management"),
-            ui.paint(style::VALUE, &self.management.details)
-        ));
+        row(
+            &mut out,
+            "Operating System",
+            ui.paint(style::VALUE, &format!("{platform} {}", self.os.version)),
+        );
+        row(
+            &mut out,
+            "Edition",
+            ui.paint(style::VALUE, &self.os.edition),
+        );
+        row(
+            &mut out,
+            "Architecture",
+            ui.paint(style::VALUE, &self.os.architecture),
+        );
+        row(
+            &mut out,
+            "Privilege",
+            ui.paint(style::VALUE, &self.privilege.level),
+        );
+        row(
+            &mut out,
+            "Elevation Path",
+            ui.paint(style::VALUE, &self.privilege.elevation_path),
+        );
+        row(
+            &mut out,
+            "Management",
+            ui.paint(style::VALUE, &self.management.details),
+        );
+        out.push('\n');
 
         out.push_str(&format!(
             "{}\n",
             ui.paint(style::HEADING, "Compiled Platform Adapters")
         ));
         for adapter in &self.adapters {
+            let padded = format!("{adapter:<label_width$}");
             out.push_str(&format!(
-                "  {:20} {}\n",
-                ui.paint(style::IDENT, adapter),
+                "  {} {}\n",
+                ui.paint(style::IDENT, &padded),
                 ui.paint(style::VALUE, "compiled (live capability unverified)")
             ));
         }
@@ -148,62 +169,69 @@ impl DoctorReport {
             "{}\n",
             ui.paint(style::HEADING, "Storage and State")
         ));
-        out.push_str(&format!(
-            "  {:20} {}\n",
-            ui.paint(style::MUTED, "Transaction Root"),
-            ui.paint(style::VALUE, &self.storage.root)
-        ));
+        row(
+            &mut out,
+            "Transaction Root",
+            ui.paint(style::VALUE, &self.storage.root),
+        );
         let write_label = if self.storage.writable {
             "accessible (writable)"
         } else {
             "unwritable (restricted)"
         };
-        out.push_str(&format!(
-            "  {:20} {}\n",
-            ui.paint(style::MUTED, "Directory Access"),
-            ui.paint(style::VALUE, write_label)
-        ));
+        row(
+            &mut out,
+            "Directory Access",
+            ui.paint(style::VALUE, write_label),
+        );
         let reparse_label = if self.storage.reparse_point {
             "warning: reparse point or junction detected"
         } else {
             "passed (no junction or symlink detected)"
         };
-        out.push_str(&format!(
-            "  {:20} {}\n\n",
-            ui.paint(style::MUTED, "Reparse Point Check"),
+        row(
+            &mut out,
+            "Reparse Point Check",
             ui.paint(
                 if self.storage.reparse_point {
                     style::CAVEAT
                 } else {
                     style::VALUE
                 },
-                reparse_label
-            )
-        ));
+                reparse_label,
+            ),
+        );
+        out.push('\n');
 
         out.push_str(&format!(
             "{}\n",
             ui.paint(style::HEADING, "Catalogue and Schemas")
         ));
-        out.push_str(&format!(
-            "  {:20} {} controls\n",
-            ui.paint(style::MUTED, "Active Controls"),
-            self.catalog.total_controls
-        ));
-        out.push_str(&format!(
-            "  {:20} {} stale sources (reviewed {})\n",
-            ui.paint(style::MUTED, "Source Staleness"),
-            self.catalog.stale_sources,
-            self.catalog.last_reviewed
-        ));
-        out.push_str(&format!(
-            "  {:20} catalogue v{}, policy v{}, report v{}, journal v{}\n\n",
-            ui.paint(style::MUTED, "Schema Versions"),
-            self.schemas.catalog,
-            self.schemas.policy,
-            self.schemas.report,
-            self.schemas.journal
-        ));
+        row(
+            &mut out,
+            "Active Controls",
+            format!("{} controls", self.catalog.total_controls),
+        );
+        row(
+            &mut out,
+            "Source Staleness",
+            format!(
+                "{} stale sources (reviewed {})",
+                self.catalog.stale_sources, self.catalog.last_reviewed
+            ),
+        );
+        row(
+            &mut out,
+            "Schema Versions",
+            format!(
+                "catalogue v{}, policy v{}, report v{}, journal v{}",
+                self.schemas.catalog,
+                self.schemas.policy,
+                self.schemas.report,
+                self.schemas.journal
+            ),
+        );
+        out.push('\n');
 
         if self.healthy {
             out.push_str(&format!(
@@ -654,11 +682,40 @@ mod tests {
         assert_eq!(host.version, Fact::Unknown);
         assert_eq!(host.edition, Fact::NotPresent);
         let text = report.to_text(&Ui::plain());
-        assert!(text.contains("linux omarchy (version unknown)"));
+        assert!(text.contains("Linux omarchy (version unknown)"));
+        assert_eq!(report.platform, "linux");
         for unsupported in ["systemd_dbus", "gsettings", "sysfs", "pkexec"] {
             assert!(!text.contains(unsupported), "{unsupported}");
         }
         assert!(text.contains("compiled (live capability unverified)"));
+    }
+
+    #[test]
+    fn coloured_doctor_alignment_matches_plain_text() {
+        let host = HostFacts::unknown(Platform::current());
+        let report = diagnose_test_host(&host);
+        let plain = report.to_text(&Ui::plain());
+        let coloured = report.to_text(&Ui::render(true, false, 80));
+        assert_ne!(plain, coloured);
+        assert_eq!(strip_sgr(&coloured), plain);
+    }
+
+    fn strip_sgr(text: &str) -> String {
+        let mut out = String::new();
+        let mut chars = text.chars().peekable();
+        while let Some(ch) = chars.next() {
+            if ch == '\u{1b}' && chars.peek() == Some(&'[') {
+                chars.next();
+                for next in chars.by_ref() {
+                    if next.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            } else {
+                out.push(ch);
+            }
+        }
+        out
     }
 
     #[test]

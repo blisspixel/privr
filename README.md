@@ -17,7 +17,7 @@ designed to be driven by an agent harness as readily as by a person.
 
 ## Status
 
-- **Windows `check`, `explain`, `list`, `doctor`, `recommend`, `simulate`, `plan`, `apply`, `history`, and `rollback` are implemented**, with posture dimensions, rollback journaling, interactive terminal action prompts (`[y] apply safe fixes, [d] preview diff, [e] explain score, [q] quit`), scoring model and critical controls walkthroughs, convenient CLI aliases (`status`, `scan`, `diff`, `fix`, `harden`, `undo`, `log`), and native UAC elevation handling. Release blockers remain in the roadmap.
+- **Windows `check`, `explain`, `list`, `doctor`, `recommend`, `simulate`, `plan`, `apply`, `history`, and `rollback` are implemented**, with posture dimensions, rollback journaling, and native UAC elevation handling. When drift is present, a terminal offers `[y] apply safe fixes, [d] preview diff, [e] explain score & critical items, [q] quit`. An incomplete check with no drift asks what could not be checked. CLI aliases (`status`, `scan`, `diff`, `fix`, `harden`, `undo`, `log`) still work. Release blockers remain in the roadmap.
 - **Defensive and adaptive application**: `plan` and `apply` accept `--workload` (`general`, `developer`, `creative`, `mobile`, `high-assurance`) and `--max-friction`. When run unprivileged, batch operations apply eligible user-scope controls and report deferred machine-scope controls without failure.
 - **Linux and macOS `check` are experimental** with typed elevation metadata, tested in CI across multiple platforms.
 - **Mac analytics sharing remains Unknown**. Diagnostic history cannot establish
@@ -27,11 +27,17 @@ designed to be driven by an agent harness as readily as by a person.
   and drop-in reads explain that intent; coredump and journald storage remain
   Unknown until loaded state can be attested. See [the evidence limits](docs/SYSTEMD_EVIDENCE.md).
 - **Check completeness follows the selected scope**. Zero evaluated controls are incomplete (exit 3), even when every result is not applicable or not selected. CLI and MCP selectors share the compiled report builder; hiding passing rows does not change summary counts. See [report semantics](docs/RESULTS.md#completeness).
-- **First-run output keeps uncertainty visible**. The headline includes unknown
-  and other outcome counts; a percentage covers evaluated controls only.
+- **First-run output keeps uncertainty visible**. The headline leads with
+  unknown, unchecked, and error counts, then how many evaluated controls pass.
+  It is not a score. A dimension percentage covers evaluated controls only.
   Recommendations examine the eligible catalogue across profiles, while
   `check` defaults to baseline. An empty recommendation list is not a compliance
   result. Overview examples come from the platform's compiled catalogue.
+- **Check reports are schema 2**. A saved check keeps the reduced observation
+  (policy mode, desired state, observed state or a typed reason, basis, and
+  confidence) and the compiled source table. It does not keep raw evidence.
+  `explain` is a fresh read and says so. Plan, apply, rollback, recommend,
+  simulate, and journal records stay schema 1.
 - **File-based probe replay has started** for Windows advertising ID and diagnostic data. Advertising policy distinguishes enforcement from user choice. Synthetic observations exercise the compiled probes and evaluator; native captures and full per-control coverage remain release blockers.
 - **Agent integration (`privr mcp`) is implemented**, providing a stdio Model Context Protocol (MCP) server exposing `privr_check`, `privr_plan`, `privr_apply`, `privr_recommend`, `privr_simulate`, `privr_explain`, and `privr_doctor` with Agent Plugins v1.0.0 packaging.
 
@@ -120,7 +126,8 @@ cited, version-aware, and honest about what it does not know.
 
 ## Install
 
-Building from source is currently the only path. Rust 1.95 or later:
+Building from source is currently the only path. Rust 1.99 or later. If Cargo
+says a newer compiler is required, run `rustup update stable`.
 
 ```bash
 git clone https://github.com/blisspixel/privr
@@ -187,7 +194,7 @@ privr undo (or privr rollback)
   evidence and excluded controls cannot establish compliance.
 - `simulate` performs a dry-run counterfactual posture vector projection without mutating host state, reporting transition deltas, friction counts, and reboot or signout requirements.
 - `plan` (alias: `diff`) is read-only and shows the exact eligible change set. Running `privr plan` without arguments defaults to the daily-driver general persona and cosmetic friction ceiling.
-- `apply` (aliases: `fix`, `harden`) executes safe, verified remediation with transaction journaling, interactive plan review, and native in-place elevation (`-e, --elevate`). Running `privr apply` without arguments applies recommended daily-driver controls with zero workflow disruption.
+- `apply` (aliases: `fix`, `harden`) executes safe, verified remediation with transaction journaling, interactive plan review, and native in-place elevation (`-e, --elevate`). Running `privr apply` without arguments is limited to Tier 0 and Tier 1 (transparent and cosmetic) daily-driver controls. Confirmation defaults to no, and one answer covers the whole selection. Per-section approval is not available yet; use `--section` to limit the set. A non-interactive shell must pass `--yes` after `privr plan`.
 - `history` (alias: `log`) lists previous transactions, timestamps, applied control counts, and profiles.
 - `rollback` (aliases: `restore`, `undo`) restores exact prior values. Running `privr undo` without arguments automatically targets the most recent transaction recorded on disk.
 

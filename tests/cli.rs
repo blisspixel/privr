@@ -48,7 +48,7 @@ fn check_emits_a_versioned_json_report() {
     command
         .args(["check", "--format", "json"])
         .assert()
-        .stdout(predicate::str::contains("\"schema\": 1"))
+        .stdout(predicate::str::contains("\"schema\": 2"))
         .stdout(predicate::str::contains("\"profile\": \"baseline\""))
         .stdout(predicate::str::contains("\"summary\""))
         .stdout(predicate::str::contains("\"results\""));
@@ -84,7 +84,8 @@ fn apply_without_confirmation_fails_closed() {
         .arg("apply")
         .assert()
         .code(2)
-        .stderr(predicate::str::contains("pass --yes"));
+        .stderr(predicate::str::contains("no terminal for approval"))
+        .stderr(predicate::str::contains("privr apply --yes"));
 }
 
 #[test]
@@ -274,7 +275,7 @@ fn check_cli_with_section_filter() {
             "--all",
         ])
         .assert()
-        .stdout(predicate::str::contains("\"schema\": 1"));
+        .stdout(predicate::str::contains("\"schema\": 2"));
 }
 
 #[test]

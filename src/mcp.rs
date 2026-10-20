@@ -509,6 +509,9 @@ fn handle_tools_call_with_check_context(
                         "tradeoff": control.tradeoff,
                         "mitigation": control.mitigation,
                         "state": resolution.state.map(|s| s.0),
+                        "evidence": "fresh",
+                        "reconstructed_check": false,
+                        "note": "This is a fresh reading of the machine. It does not reconstruct an earlier check.",
                         "sources": control.sources.iter().map(|s| json!({
                             "url": s.url,
                             "claim": s.claim,
@@ -1437,6 +1440,36 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn mcp_check_matches_the_shared_report_for_the_same_recording() {
+        use crate::platform::linux::evidence::Target;
+        let host = crate::test_context::host("debian", "hyprland");
+        let reader = crate::test_context::reader([(
+            Target::DebianPopcon,
+            crate::test_context::text(b"PARTICIPATE=\"no\"\n"),
+        )]);
+        let context = crate::test_context::context(&host, &reader);
+        let report = crate::report::Report::build_with_context(
+            &context,
+            Some("baseline"),
+            None,
+            &["debian".to_owned()],
+            &[],
+        );
+        let (_, mcp) = recorded_check(json!({"control": "debian", "all": true}), &context);
+        let cli: Value = serde_json::from_str(&serde_json::to_string(&report).unwrap()).unwrap();
+        assert_eq!(mcp, cli);
+        assert_eq!(mcp["schema"], 2);
+        assert_eq!(mcp["complete"], true);
+        assert_eq!(mcp["results"][0]["observed"], "disabled");
+        assert_eq!(mcp["results"][0]["policy_mode"], "enforce");
+        assert!(mcp["results"][0]["confident"].as_bool().unwrap());
+        let rendered = mcp.to_string();
+        assert!(!rendered.contains("/home/"));
+        assert!(!rendered.contains("PARTICIPATE"));
+    }
+
     #[test]
     fn initialize_returns_protocol_version_and_tools_capability() {
         let req = json!({
@@ -1563,6 +1596,38 @@ mod tests {
         assert_eq!(resp["id"], 3);
         let text = resp["result"]["content"][0]["text"].as_str().expect("text");
         assert!(text.contains("results"));
+    }
+
+    #[test]
+    fn privr_explain_is_a_fresh_read() {
+        let id = if cfg!(windows) {
+            "windows.advertising.id"
+        } else if cfg!(target_os = "macos") {
+            "macos.analytics.share-mac"
+        } else {
+            "debian.popularity-contest.participation"
+        };
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 7,
+            "method": "tools/call",
+            "params": {
+                "name": "privr_explain",
+                "arguments": { "id": id }
+            }
+        });
+        let mut err = Vec::new();
+        let resp = handle_message(&req, false, &mut err).expect("response");
+        let text = resp["result"]["content"][0]["text"].as_str().expect("text");
+        let value: Value = serde_json::from_str(text).expect("explain json");
+        assert_eq!(value["evidence"], "fresh");
+        assert_eq!(value["reconstructed_check"], false);
+        assert!(
+            value["note"]
+                .as_str()
+                .unwrap()
+                .contains("does not reconstruct an earlier check")
+        );
     }
 
     #[test]

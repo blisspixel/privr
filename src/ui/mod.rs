@@ -67,10 +67,17 @@ impl Ui {
             }
         };
 
+        let measured = if stream_is_terminal {
+            terminal_size::terminal_size().map(|(width, _)| width.0 as usize)
+        } else {
+            None
+        };
+        let columns = std::env::var("COLUMNS").ok();
+
         Self {
             color,
             unicode: detect_unicode(),
-            width: detect_width(),
+            width: choose_width(columns.as_deref(), measured),
         }
     }
 
@@ -85,6 +92,22 @@ impl Ui {
             color: false,
             unicode: false,
             width: 80,
+        }
+    }
+
+    /// Fixed settings for rendering tests. Width is clamped to the same 40-100
+    /// range live detection uses.
+    pub const fn render(color: bool, unicode: bool, width: usize) -> Self {
+        Self {
+            color,
+            unicode,
+            width: if width < 40 {
+                40
+            } else if width > 100 {
+                100
+            } else {
+                width
+            },
         }
     }
 
@@ -123,6 +146,35 @@ impl Ui {
         }
     }
 
+    /// Pad `label` to `width` as plain text, then paint it.
+    ///
+    /// Padding before painting keeps the columns aligned when colour is on.
+    /// Escape sequences are not part of the width.
+    pub fn field(&self, label: &str, width: usize) -> String {
+        self.paint(style::MUTED, &format!("{label:<width$}"))
+    }
+
+    /// Width of the longest label in a block, in characters.
+    pub fn label_width(labels: &[&str]) -> usize {
+        labels
+            .iter()
+            .map(|label| label.chars().count())
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// Paint each line on its own, so every line carries its own reset.
+    pub fn paint_lines(&self, style: Style, text: &str) -> String {
+        let mut painted = String::new();
+        for (index, line) in text.split('\n').enumerate() {
+            if index > 0 {
+                painted.push('\n');
+            }
+            painted.push_str(&self.paint(style, line));
+        }
+        painted
+    }
+
     /// Wrap prose to the usable width at whitespace, indenting continuations.
     ///
     /// Explanations are sentences, and a sentence that runs off the edge of a
@@ -155,6 +207,61 @@ impl Ui {
             .collect::<Vec<_>>()
             .join("\n")
     }
+
+    /// Wrap `text` so the first line follows an already-printed label.
+    ///
+    /// Continuation lines use a hanging indent of `used` columns.
+    pub fn wrap_after(&self, text: &str, used: usize) -> String {
+        let limit = self.width.saturating_sub(used).max(16);
+        let mut lines = Vec::new();
+        let mut current = String::new();
+        for word in text.split_whitespace() {
+            if current.is_empty() {
+                current.push_str(word);
+            } else if current.chars().count() + 1 + word.chars().count() <= limit {
+                current.push(' ');
+                current.push_str(word);
+            } else {
+                lines.push(std::mem::take(&mut current));
+                current.push_str(word);
+            }
+        }
+        if !current.is_empty() {
+            lines.push(current);
+        }
+        let hang = " ".repeat(used);
+        lines
+            .iter()
+            .enumerate()
+            .map(|(index, line)| {
+                if index == 0 {
+                    line.clone()
+                } else {
+                    format!("{hang}{line}")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+}
+
+/// Display name for a platform identifier. JSON keeps the lowercase identifier.
+pub fn platform_name(id: &str) -> &str {
+    match id {
+        "linux" => "Linux",
+        "windows" => "Windows",
+        "macos" => "macOS",
+        other => other,
+    }
+}
+
+/// Resolve a width from `COLUMNS`, then a measured terminal, then 88.
+///
+/// The result is clamped to 40-100. `COLUMNS` is an override, including when
+/// it asks for a wider layout than the fallback.
+pub fn choose_width(columns: Option<&str>, measured: Option<usize>) -> usize {
+    let override_width = columns.and_then(|value| value.parse::<usize>().ok());
+    override_width.or(measured).unwrap_or(88).clamp(40, 100)
 }
 
 /// Whether the terminal can be trusted with characters outside ASCII.
@@ -168,19 +275,6 @@ fn detect_unicode() -> bool {
             || std::env::var("TERM").is_ok_and(|term| term != "dumb");
     }
     !matches!(std::env::var("TERM").as_deref(), Ok("dumb"))
-}
-
-/// The usable output width.
-///
-/// Terminal size is not queried, which would need platform calls in a crate
-/// that otherwise needs none. `COLUMNS` covers the case that matters, and the
-/// fallback is a width that reads well everywhere.
-fn detect_width() -> usize {
-    std::env::var("COLUMNS")
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok())
-        .filter(|width| *width >= 40)
-        .map_or(88, |width| width.min(100))
 }
 
 /// Translate our preference into the choice `anstream` understands.
@@ -273,8 +367,52 @@ mod tests {
     }
 
     #[test]
-    fn width_detection_stays_within_readable_bounds() {
-        let width = detect_width();
-        assert!((40..=100).contains(&width), "unreasonable width {width}");
+    fn width_uses_columns_then_the_terminal_then_the_fallback() {
+        assert_eq!(choose_width(Some("120"), Some(60)), 100);
+        assert_eq!(choose_width(Some("60"), Some(80)), 60);
+        assert_eq!(choose_width(Some("10"), None), 40);
+        assert_eq!(choose_width(None, Some(72)), 72);
+        assert_eq!(choose_width(None, None), 88);
+        assert_eq!(choose_width(Some("nope"), None), 88);
+    }
+
+    #[test]
+    fn field_padding_ignores_colour_sequences() {
+        let plain = Ui::plain();
+        let colored = Ui::render(true, false, 80);
+        let plain_field = plain.field("Operating System", 20);
+        let colored_field = colored.field("Operating System", 20);
+        assert_eq!(plain_field, "Operating System    ");
+        assert!(colored_field.contains("Operating System    "));
+        assert!(colored_field.ends_with("\u{1b}[0m"));
+        let stripped = strip_sgr(&colored_field);
+        assert_eq!(stripped, plain_field);
+    }
+
+    #[test]
+    fn painted_lines_each_carry_their_own_reset() {
+        let ui = Ui::render(true, false, 80);
+        let painted = ui.paint_lines(style::CAVEAT, "one\ntwo");
+        for line in painted.lines() {
+            assert!(line.contains('\u{1b}'), "{line}");
+            assert!(line.contains("\u{1b}[0m"), "{line}");
+        }
+    }
+
+    fn strip_sgr(text: &str) -> String {
+        let mut out = String::new();
+        let mut chars = text.chars().peekable();
+        while let Some(ch) = chars.next() {
+            if ch == '\u{1b}' {
+                for next in chars.by_ref() {
+                    if next == 'm' {
+                        break;
+                    }
+                }
+            } else {
+                out.push(ch);
+            }
+        }
+        out
     }
 }

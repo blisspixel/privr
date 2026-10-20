@@ -46,4 +46,4 @@ compiled popcon pass/drift/denied/malformed controls, drift with unknown,
 selector and visibility parity, CLI aliases, and actual MCP dispatch. Tests
 must prove that the repair neither disables successful probes nor promotes a
 failed observation to pass. Native CI and the existing formatting, Clippy,
-MSRV, coverage and dependency gates remain required.
+coverage, and dependency gates remain required.

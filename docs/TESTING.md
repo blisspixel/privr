@@ -7,8 +7,9 @@ needs pure evaluator tests, captured fixtures, native integration tests, and
 compatibility evidence.
 
 The repository requires clean formatting, Clippy warnings denied, dependency
-policy checks, the minimum supported Rust version, and Windows, macOS, and Linux
-CI.
+policy checks, coverage, and Windows, macOS, and Linux CI. The supported
+compiler is current stable, pinned for local builds in `rust-toolchain.toml`.
+There is no separate older-toolchain job.
 
 ### On coverage specifically
 

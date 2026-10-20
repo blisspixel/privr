@@ -221,6 +221,43 @@ than being inlined into every result.
 Tier selection changes how much of each result is emitted. It never changes
 which controls are included, and it never changes an outcome.
 
+## Check report schema 2
+
+The check report `schema` field is 2. Schema 1 consumers must not parse a
+schema 2 document as schema 1. This release does not emit both.
+
+Schema 2 adds a shared `sources` table and, on each result, the facts needed
+to explain that result without probing again:
+
+| Field | Meaning |
+|---|---|
+| `sources` | Compiled public `{url, claim, reviewed}` rows in first-seen catalogue order. Claims are whitespace-collapsed public text. |
+| `policy_mode` | `enforce`, `review`, or `ignore`. |
+| `desired` | Compiled preference. Not a claim about the host. |
+| `observed` | Effective semantic state when a probe established one, or a beyond-support reading. Absent otherwise. |
+| `observation_reason` | `denied`, `malformed`, `unsupported`, `undetermined`, or `enforcement_mechanism_only` when a probe was inconclusive. |
+| `observation_basis` | `established`, `inconclusive`, `not_selected`, `not_applicable`, `applicability_undetermined`, or `beyond_reviewed_support`. |
+| `confident` | False for a concealed outcome and for a beyond-support reading. A pass requires true. |
+| `source_refs` | Indexes into `sources`. Empty on a result detached from a report. |
+
+Not-selected, not-applicable, and undetermined-applicability results do not
+run a probe and do not carry an observed value or a failed-observation reason.
+An omitted consulted source stays `undetermined`. It is not recorded as absent.
+
+The report does not include raw observations, registry contents, file bytes,
+paths, command output, or local identifiers. Ordering is deterministic.
+
+`explain` and MCP `privr_explain` take a fresh reading. They state that they
+do not reconstruct an earlier check. Terminal check output stays a short view
+of the same report.
+
+Journal records stay schema 1. Plan, apply, rollback, recommend, simulate, and
+the doctor envelope stay schema 1. The doctor's nested `schemas.report` follows
+the check schema.
+
+Not in this schema, and not built: a second evidence database, a comparison
+command, verbosity tiers, and per-section apply approval.
+
 ## JSON envelope
 
 A machine-readable report includes:
@@ -274,5 +311,6 @@ requirement, not a side effect.
 }
 ```
 
-Values, digests, and versions above are illustrative, not current support
-claims.
+Values, digests, and versions above are illustrative, not the live check
+schema. The live check contract is schema 2, described above. Plan, apply,
+rollback, recommend, simulate, and journal documents remain schema 1.

@@ -14,9 +14,11 @@ use crate::model::applicability::{Applicability, Applies};
 use crate::model::evidence::Observation;
 use crate::model::host::{HostFacts, ManagementSource, OsVersion};
 use crate::model::outcome::{
-    ControlResult, Effect, Exception, Ineffective, Maturity, Outcome, Remediation,
-    RemediationReason, Reversibility, Support,
+    ControlResult, Effect, Exception, Ineffective, Maturity, ObservationBasis, Outcome,
+    Remediation, RemediationReason, Reversibility, Support,
 };
+
+pub use crate::model::outcome::{Mode, Uncertainty};
 use crate::model::posture::{FrictionTier, PostureDimension};
 use crate::model::profile::Profile;
 
@@ -31,26 +33,6 @@ impl SemanticState {
     pub fn new(name: impl Into<String>) -> Self {
         Self(name.into())
     }
-}
-
-/// Why an effective state could not be determined.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Uncertainty {
-    /// A source refused access.
-    Denied,
-    /// A value was present but of an unexpected type.
-    Malformed,
-    /// The reading interface is absent on this host.
-    Unsupported,
-    /// The probe could not conclude.
-    Undetermined,
-    /// Only the enforcement mechanism was readable, not the setting itself.
-    ///
-    /// Checking that a policy object or management payload exists is not
-    /// checking the setting. Treating the two as equivalent fails a correctly
-    /// configured unmanaged machine.
-    EnforcementMechanismOnly,
 }
 
 /// What an adapter concluded from an observation.
@@ -78,6 +60,16 @@ pub struct Resolution {
     /// is not the value the platform acts on. The tool supplies the sentence
     /// rather than relying on a caller to notice and add a caveat.
     pub note: Option<String>,
+    /// Whether an adapter produced this resolution.
+    ///
+    /// False for the placeholder used when the profile or applicability check
+    /// skips the probe. That placeholder is not a failed observation.
+    #[serde(default = "probe_ran", skip_serializing)]
+    pub probed: bool,
+}
+
+fn probe_ran() -> bool {
+    true
 }
 
 impl Resolution {
@@ -90,6 +82,7 @@ impl Resolution {
             effect: Effect::Active,
             note: None,
             ineffective: None,
+            probed: true,
         }
     }
 
@@ -117,6 +110,24 @@ impl Resolution {
             effect: Effect::Active,
             note: None,
             ineffective: None,
+            probed: true,
+        }
+    }
+
+    /// Placeholder used when the caller did not run the probe.
+    ///
+    /// The uncertainty here is not an observation. Callers must not copy it
+    /// onto a result.
+    pub fn skipped() -> Self {
+        Self {
+            state: None,
+            source: ManagementSource::Unknown,
+            uncertainty: Some(Uncertainty::Undetermined),
+            honored: true,
+            effect: Effect::Active,
+            note: None,
+            ineffective: None,
+            probed: false,
         }
     }
 
@@ -130,6 +141,7 @@ impl Resolution {
             effect: Effect::Active,
             note: None,
             ineffective: None,
+            probed: true,
         }
     }
 
@@ -165,6 +177,7 @@ impl Resolution {
                         effect: Effect::Active,
                         note: None,
                         ineffective: None,
+                        probed: true,
                     },
                     // A value we cannot interpret is malformed evidence, never
                     // a fallback to the documented default.
@@ -178,6 +191,7 @@ impl Resolution {
                     effect: Effect::Active,
                     note: None,
                     ineffective: None,
+                    probed: true,
                 },
                 Evidence::Denied { source, .. } => Self::uncertain(Uncertainty::Denied, *source),
                 Evidence::Malformed { source, .. } => {
@@ -199,18 +213,6 @@ impl Resolution {
 
         Self::uncertain(Uncertainty::Undetermined, ManagementSource::Unknown)
     }
-}
-
-/// What the policy asks of a control.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Mode {
-    /// Compare against the desired value and report drift.
-    Enforce,
-    /// Report current state and tradeoffs without treating the choice as drift.
-    Review,
-    /// Do not evaluate unless explicitly selected.
-    Ignore,
 }
 
 /// The subset of a control definition the evaluator needs.
@@ -248,8 +250,28 @@ pub fn evaluate(
     host: &HostFacts,
     exception: Exception,
 ) -> ControlResult {
-    let build =
-        |outcome: Outcome, support: Support, remediation: Remediation, reason| ControlResult {
+    let build = |outcome: Outcome,
+                 support: Support,
+                 remediation: Remediation,
+                 reason,
+                 basis: ObservationBasis,
+                 confident: bool| {
+        let observed = match basis {
+            ObservationBasis::Established | ObservationBasis::BeyondReviewedSupport => {
+                resolution.state.as_ref().map(|state| state.0.clone())
+            }
+            ObservationBasis::Inconclusive
+            | ObservationBasis::NotSelected
+            | ObservationBasis::NotApplicable
+            | ObservationBasis::ApplicabilityUndetermined => None,
+        };
+        let observation_reason = match basis {
+            ObservationBasis::Inconclusive => {
+                Some(resolution.uncertainty.unwrap_or(Uncertainty::Undetermined))
+            }
+            _ => None,
+        };
+        ControlResult {
             id: spec.id.clone(),
             title: spec.title.clone(),
             section: spec.section.clone(),
@@ -266,16 +288,27 @@ pub fn evaluate(
             exception,
             note: resolution.note.clone(),
             ineffective: resolution.ineffective,
-        };
+            policy_mode: mode,
+            desired: spec.desired.0.clone(),
+            observed,
+            observation_reason,
+            observation_basis: basis,
+            confident,
+            source_refs: Vec::new(),
+        }
+    };
 
     // A control the profile does not select is reported, not omitted. Silence
     // and exclusion are different facts, and only one of them is honest.
+    // The resolution is ignored: not-selected does not acquire an observation.
     if mode == Mode::Ignore {
         return build(
             Outcome::NotSelected,
             Support::Verified,
             Remediation::None,
             Some(RemediationReason::ExcludedByPolicy),
+            ObservationBasis::NotSelected,
+            false,
         );
     }
 
@@ -286,16 +319,21 @@ pub fn evaluate(
                 Support::Unsupported,
                 Remediation::None,
                 Some(RemediationReason::PlatformLimitation),
+                ObservationBasis::NotApplicable,
+                false,
             );
         }
         // Undetermined applicability is never not-applicable. The operator
-        // would believe the control had been checked.
+        // would believe the control had been checked. The skipped-probe
+        // placeholder is not a failed observation.
         Applies::Undetermined => {
             return build(
                 Outcome::Unknown,
                 Support::Unverified,
                 Remediation::AuditOnly,
                 None,
+                ObservationBasis::ApplicabilityUndetermined,
+                false,
             );
         }
         Applies::Yes => {}
@@ -314,11 +352,20 @@ pub fn evaluate(
     // written, and the platform does not act on it. Reporting this as
     // compliant is the most common false pass in this category.
     if !resolution.honored {
+        let basis = if resolution.probed && resolution.state.is_some() {
+            ObservationBasis::Established
+        } else if resolution.probed {
+            ObservationBasis::Inconclusive
+        } else {
+            ObservationBasis::NotApplicable
+        };
         return build(
             Outcome::NotApplicable,
             Support::Unsupported,
             Remediation::None,
             Some(RemediationReason::PlatformLimitation),
+            basis,
+            false,
         );
     }
 
@@ -331,17 +378,52 @@ pub fn evaluate(
     // Anything short of a determined state is unknown. It is never a pass, and
     // it is never silently treated as the documented default.
     let Some(state) = resolution.state.as_ref() else {
-        return build(Outcome::Unknown, support, Remediation::AuditOnly, None);
+        let basis = if resolution.probed {
+            ObservationBasis::Inconclusive
+        } else {
+            ObservationBasis::ApplicabilityUndetermined
+        };
+        return build(
+            Outcome::Unknown,
+            support,
+            Remediation::AuditOnly,
+            None,
+            basis,
+            false,
+        );
     };
+
+    let reading = if stale {
+        ObservationBasis::BeyondReviewedSupport
+    } else {
+        ObservationBasis::Established
+    };
+    // A reading outside the reviewed range is kept for explanation and is not
+    // a confident observation, so it cannot become a pass below.
+    let confident = !stale;
 
     // A manual control cannot produce a machine-derived finding, so it reports
     // for review regardless of what was observed.
     if spec.maturity == Maturity::Manual {
-        return build(Outcome::Review, support, Remediation::Guided, None);
+        return build(
+            Outcome::Review,
+            support,
+            Remediation::Guided,
+            None,
+            reading,
+            confident,
+        );
     }
 
     if mode == Mode::Review {
-        return build(Outcome::Review, support, Remediation::Guided, None);
+        return build(
+            Outcome::Review,
+            support,
+            Remediation::Guided,
+            None,
+            reading,
+            confident,
+        );
     }
 
     // An external authority governs this value. `privr` reports whether its
@@ -373,8 +455,9 @@ pub fn evaluate(
     } else {
         outcome
     };
+    let confident = confident && !outcome.conceals_state();
 
-    build(outcome, support, remediation, reason)
+    build(outcome, support, remediation, reason, reading, confident)
 }
 
 #[cfg(test)]

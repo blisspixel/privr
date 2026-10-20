@@ -167,6 +167,18 @@ impl Reader {
         }
     }
 
+    /// Replace one recorded observation. Tests use this to prove a finished
+    /// report does not read again.
+    #[cfg(test)]
+    pub(crate) fn rewrite(&mut self, target: Target, evidence: Evidence) {
+        match self {
+            Self::Recorded(recording) => {
+                recording.entries.insert(target, evidence);
+            }
+            Self::Live => panic!("rewrite requires a recording"),
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn requested(&self) -> Vec<Target> {
         match self {

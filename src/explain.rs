@@ -102,13 +102,17 @@ pub fn render(control: &Control, host: &HostFacts, ui: &Ui) -> String {
     );
 
     let mut out = String::new();
-    let field = |name: &str| ui.paint(style::MUTED, &format!("{name:<12}"));
+    let field_width = Ui::label_width(&["Finding", "Current", "Desired", "Set by", "Change"]);
+    let field = |name: &str| ui.field(name, field_width);
 
     out.push_str(&format!(
-        "{}\n{}\n\n",
+        "{}\n{}\n",
         ui.paint(style::HEADING, control.title),
         ui.paint(style::MUTED, &control.spec.id)
     ));
+    out.push_str(
+        "This is a fresh reading of the machine. It does not reconstruct an earlier check.\n\n",
+    );
 
     out.push_str(&ui.wrap(control.summary, 0));
     out.push_str("\n\n");
@@ -118,30 +122,33 @@ pub fn render(control: &Control, host: &HostFacts, ui: &Ui) -> String {
         style::outcome_style(result.outcome),
         style::outcome_label(result.outcome).trim(),
     );
-    out.push_str(&format!("{}{label}\n", field("Finding")));
+    out.push_str(&format!("{} {label}\n", field("Finding")));
     out.push_str(&format!(
-        "{}{}\n",
+        "{} {}\n",
         field("Current"),
         current_state(&resolution)
     ));
-    out.push_str(&format!("{}{}\n", field("Desired"), control.spec.desired.0));
     out.push_str(&format!(
-        "{}{}\n",
+        "{} {}\n",
+        field("Desired"),
+        control.spec.desired.0
+    ));
+    out.push_str(&format!(
+        "{} {}\n",
         field("Set by"),
         source_label(result.management_source)
     ));
 
     if result.support != Support::Verified {
-        out.push_str(&ui.paint(
-            style::CAVEAT,
-            &format!(
-                "{}not verified on this platform version, so it cannot report a pass\n",
-                " ".repeat(12)
-            ),
-        ));
+        let caveat = ui.wrap_after(
+            "not verified on this platform version, so it cannot report a pass",
+            field_width,
+        );
+        out.push_str(&ui.paint_lines(style::CAVEAT, &caveat));
+        out.push('\n');
     }
     out.push_str(&format!(
-        "{}{}\n",
+        "{} {}\n",
         field("Change"),
         remediation_label(&result)
     ));
@@ -151,7 +158,7 @@ pub fn render(control: &Control, host: &HostFacts, ui: &Ui) -> String {
     // is precisely a finding that looks fine and is not what was configured.
     if let Some(note) = &result.note {
         out.push('\n');
-        out.push_str(&ui.paint(style::CAVEAT, &ui.wrap(note, 0)));
+        out.push_str(&ui.paint_lines(style::CAVEAT, &ui.wrap(note, 0)));
         out.push('\n');
     }
     out.push('\n');
@@ -214,7 +221,7 @@ fn render_overview_for(controls: &[Control], ui: &Ui) -> String {
         "    {}\n\n",
         ui.paint(
             style::MUTED,
-            "Posture = Compliant Controls / Evaluated Controls (e.g. 5 of 10 passing = 50% Hardened)"
+            "Posture = passing controls / evaluated controls (for example, 5 of 10 passing)"
         )
     ));
     out.push_str(&ui.wrap(

@@ -32,6 +32,6 @@ pub use host::{
     SessionFacts, WriteModel,
 };
 pub use outcome::{
-    ControlResult, Effect, Exception, Maturity, Outcome, Remediation, RemediationReason, Summary,
-    Support,
+    ControlResult, Effect, Exception, Maturity, Mode, ObservationBasis, Outcome, Remediation,
+    RemediationReason, Summary, Support, Uncertainty,
 };

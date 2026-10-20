@@ -114,9 +114,13 @@ originates from a terminal on the machine being changed. A caller therefore
 cannot approve on the operator's behalf, regardless of what it is told or what
 it decides.
 
-Approval is per section and per named control for anything carrying a security
-tradeoff, destructive effect, or major functionality change. There is no blanket
-approval reachable through the agent interface.
+The intended rule is approval per section and per named control for anything
+carrying a security tradeoff, destructive effect, or major functionality
+change. That per-section prompt is not built. The current CLI asks once for
+the whole selection, defaults to no, and exits 2 when the answer cannot be
+read. `--section` is how an operator limits the set. There is no blanket
+approval reachable through the agent interface. A non-interactive caller must
+pass `--yes` after reviewing `privr plan` or `privr history`.
 
 ## Token budget
 
@@ -133,7 +137,16 @@ For `privr_check`, `all: false` hides `Pass` rows only. Summary counts and
 compiled catalogue count, not the number of visible or selected rows. Zero
 evaluated controls means `complete: false`; an incomplete check is a successful
 tool response with `isError: false`, not a protocol error. Review results count
-as evaluated but do not establish a policy match. See [RESULTS.md](RESULTS.md).
+as evaluated but do not establish a policy match. CLI JSON and `privr_check`
+are the same report. See [RESULTS.md](RESULTS.md).
+
+Check reports are schema 2. Each result carries policy mode, desired state,
+an observed semantic state or a typed inconclusive reason, an observation
+basis, a confidence flag, and indexes into the report's compiled source table.
+Raw observations are not included. `privr_explain` is a fresh read
+(`evidence` is `fresh`, `reconstructed_check` is false). It does not rebuild
+an earlier check. Plan, apply, recommend, simulate, and rollback tool payloads
+stay schema 1.
 
 The following token-budget mechanisms are design requirements, not a claim
 that verbosity tiers or pagination already exist.

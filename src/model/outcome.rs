@@ -157,6 +157,62 @@ pub enum Exception {
     Expired,
 }
 
+/// What the policy asks of a control.
+///
+/// Kept with the result so a saved check can show the preference separately
+/// from what the platform was doing.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Mode {
+    /// Compare against the desired value and report drift.
+    Enforce,
+    /// Report current state and tradeoffs without treating the choice as drift.
+    Review,
+    /// Do not evaluate unless explicitly selected.
+    Ignore,
+}
+
+/// Why an effective state could not be determined.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Uncertainty {
+    /// A source refused access.
+    Denied,
+    /// A value was present but of an unexpected type.
+    Malformed,
+    /// The reading interface is absent on this host.
+    Unsupported,
+    /// The probe could not conclude, including when a consulted source was omitted.
+    Undetermined,
+    /// Only the enforcement mechanism was readable, not the setting itself.
+    ///
+    /// Checking that a policy object or management payload exists is not
+    /// checking the setting. Treating the two as equivalent fails a correctly
+    /// configured unmanaged machine.
+    EnforcementMechanismOnly,
+}
+
+/// Why a result does or does not carry an observed semantic state.
+///
+/// Not-selected, not-applicable, and undetermined applicability are not failed
+/// probes. A skipped probe must not be labelled as one.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ObservationBasis {
+    /// The probe established a semantic state.
+    Established,
+    /// The probe ran and could not conclude.
+    Inconclusive,
+    /// The profile did not select this control. No probe ran.
+    NotSelected,
+    /// The control does not apply on this host. No probe ran.
+    NotApplicable,
+    /// Applicability could not be decided. No probe ran.
+    ApplicabilityUndetermined,
+    /// A reading exists outside the reviewed support range and is not confident.
+    BeyondReviewedSupport,
+}
+
 /// Why a configured value is not the value the platform acts on.
 ///
 /// The gap between "I turned this off" and "it stopped" is the product. A tool
@@ -235,6 +291,30 @@ pub struct ControlResult {
     /// rather than parse a sentence.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ineffective: Option<Ineffective>,
+    /// Policy mode that produced this result. Separate from observed state.
+    pub policy_mode: Mode,
+    /// Compiled policy preference. Not a claim about the host.
+    pub desired: String,
+    /// Effective semantic state when a probe established one.
+    ///
+    /// Absent for not-selected, not-applicable, undetermined applicability, and
+    /// an inconclusive probe. Never filled from a skipped-probe placeholder.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub observed: Option<String>,
+    /// Typed reason when a probe ran and did not establish a state.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub observation_reason: Option<Uncertainty>,
+    /// How `observed` and `observation_reason` should be read.
+    pub observation_basis: ObservationBasis,
+    /// Whether `observed` may be treated as a confident fact.
+    ///
+    /// A reading outside the reviewed support range stays in `observed` for
+    /// explanation and is never confident, and it cannot be a pass.
+    pub confident: bool,
+    /// Indexes into the report source table. Empty when the result is detached
+    /// from a report.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub source_refs: Vec<u32>,
 }
 
 impl ControlResult {
@@ -272,6 +352,35 @@ impl ControlResult {
             && matches!(self.outcome, Outcome::Pass | Outcome::Drift)
         {
             return false;
+        }
+        // A pass is a confident observation. A concealed outcome is not.
+        if self.outcome == Outcome::Pass && !self.confident {
+            return false;
+        }
+        if self.outcome.conceals_state() && self.confident {
+            return false;
+        }
+        if self.observation_basis == ObservationBasis::BeyondReviewedSupport && self.confident {
+            return false;
+        }
+        match self.observation_basis {
+            ObservationBasis::Established | ObservationBasis::BeyondReviewedSupport => {
+                if self.observed.is_none() || self.observation_reason.is_some() {
+                    return false;
+                }
+            }
+            ObservationBasis::Inconclusive => {
+                if self.observed.is_some() || self.observation_reason.is_none() {
+                    return false;
+                }
+            }
+            ObservationBasis::NotSelected
+            | ObservationBasis::NotApplicable
+            | ObservationBasis::ApplicabilityUndetermined => {
+                if self.observed.is_some() || self.observation_reason.is_some() {
+                    return false;
+                }
+            }
         }
         true
     }
@@ -351,6 +460,13 @@ mod tests {
             exception: Exception::None,
             note: None,
             ineffective: None,
+            policy_mode: Mode::Enforce,
+            desired: "disabled".to_owned(),
+            observed: Some("disabled".to_owned()),
+            observation_reason: None,
+            observation_basis: ObservationBasis::Established,
+            confident: true,
+            source_refs: Vec::new(),
         }
     }
 

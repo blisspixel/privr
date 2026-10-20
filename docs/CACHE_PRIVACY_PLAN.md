@@ -361,7 +361,7 @@ Create small reviewable changes in this order: documentation reconciliation,
 target research and fixtures, read-only observations, purge preview, then one
 proven vendor operation. Complete existing release blockers before promoting
 new capabilities. Each behavior change needs the required lint, native tests,
-cross-target Clippy, MSRV, dependency checks, at least 80 percent line coverage,
+cross-target Clippy, dependency checks, at least 80 percent line coverage,
 and all platform CI jobs.
 
 ## Exclusions and unresolved scope

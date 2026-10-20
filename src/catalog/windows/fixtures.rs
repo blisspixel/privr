@@ -407,6 +407,65 @@ fn replay(control: Control, files: &[(&str, &str)], setting: Target, policy: Tar
         );
         assert_eq!(result.note, resolution.note, "{name}: result explanation");
         assert!(result.is_coherent(), "{name}: incoherent result");
+        assert_eq!(result.policy_mode, Mode::Enforce, "{name}: policy mode");
+        assert_eq!(result.desired, control.spec.desired.0, "{name}: desired");
+        assert!(
+            result.source_refs.is_empty(),
+            "{name}: detached source refs"
+        );
+        if expected.uncertainty.is_some() {
+            assert_eq!(
+                result.observation_basis,
+                crate::model::outcome::ObservationBasis::Inconclusive,
+                "{name}: basis"
+            );
+            assert!(result.observed.is_none(), "{name}: invented observation");
+            assert_eq!(
+                result.observation_reason, expected.uncertainty,
+                "{name}: observation reason"
+            );
+            assert!(!result.confident, "{name}: uncertain result was confident");
+        } else if expected.state.is_some() {
+            assert_eq!(
+                result.observation_basis,
+                crate::model::outcome::ObservationBasis::Established,
+                "{name}: basis"
+            );
+            assert_eq!(
+                result.observed.as_deref(),
+                expected.state.as_ref().map(|state| state.0.as_str()),
+                "{name}: observed"
+            );
+            assert!(result.observation_reason.is_none(), "{name}: extra reason");
+            assert_eq!(
+                result.confident,
+                !result.outcome.conceals_state(),
+                "{name}: confidence"
+            );
+        }
+        let rendered = serde_json::to_string(&result).expect("result json");
+        assert!(!rendered.contains("\"bytes\""), "{name}: raw bytes");
+        if *name == "zero-professional" || *name == "policy-zero-professional" {
+            assert_eq!(result.observed.as_deref(), Some("required"), "{name}");
+            assert_eq!(result.outcome, Outcome::Pass, "{name}");
+            assert_eq!(
+                result.ineffective,
+                Some(crate::model::outcome::Ineffective::EditionGated),
+                "{name}"
+            );
+            let note = result.note.as_deref().unwrap_or("");
+            let flat_note = note.split_whitespace().collect::<Vec<_>>().join(" ");
+            assert!(
+                flat_note.contains("required diagnostic data"),
+                "{name}: {flat_note}"
+            );
+            assert!(
+                !flat_note
+                    .to_ascii_lowercase()
+                    .contains("transmission is off"),
+                "{name}: {flat_note}"
+            );
+        }
 
         if expected.uncertainty.is_some() {
             assert_ne!(result.outcome, Outcome::Pass, "{name}: false pass");

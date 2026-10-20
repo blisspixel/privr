@@ -39,7 +39,7 @@ pub const INFO: Style = Style::new().fg_color(Some(Color::Ansi(AnsiColor::Cyan))
 /// - green: nothing to do;
 /// - yellow: a difference from the selected policy;
 /// - cyan: a decision that is genuinely the operator's;
-/// - magenta: the tool could not tell, which is never a pass;
+/// - blue: the tool could not tell, which is never a pass;
 /// - dim: outside scope on this host;
 /// - red: the tool itself failed.
 pub const fn outcome_style(outcome: Outcome) -> Style {
@@ -47,9 +47,9 @@ pub const fn outcome_style(outcome: Outcome) -> Style {
         Outcome::Pass => AnsiColor::Green,
         Outcome::Drift => AnsiColor::Yellow,
         Outcome::Review => AnsiColor::Cyan,
-        Outcome::Unknown => AnsiColor::Magenta,
+        Outcome::Unknown => AnsiColor::Blue,
         Outcome::NotApplicable | Outcome::NotSelected => AnsiColor::BrightBlack,
-        Outcome::NotChecked => AnsiColor::Magenta,
+        Outcome::NotChecked => AnsiColor::Blue,
         Outcome::Error => AnsiColor::Red,
     };
     Style::new().fg_color(Some(Color::Ansi(color))).bold()
@@ -124,6 +124,19 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn unknown_uses_blue_rather_than_the_drift_warning() {
+        let unknown = outcome_style(Outcome::Unknown).get_fg_color();
+        let unchecked = outcome_style(Outcome::NotChecked).get_fg_color();
+        assert_eq!(unknown, unchecked);
+        assert_ne!(unknown, outcome_style(Outcome::Drift).get_fg_color());
+        assert_ne!(unknown, outcome_style(Outcome::Pass).get_fg_color());
+        assert_ne!(
+            outcome_style(Outcome::NotApplicable).get_fg_color(),
+            outcome_style(Outcome::Drift).get_fg_color()
+        );
     }
 
     #[test]

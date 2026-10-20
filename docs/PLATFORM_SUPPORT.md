@@ -220,8 +220,8 @@ GSettings writes run as the logged-in desktop user. Running through ordinary
 
 | Control ID | Desired behavior | Capability | Constraints | Primary source |
 |---|---|---|---|---|
-| `ubuntu.insights.consent` | System opt-out where supported | check, apply | Ubuntu 25.10 transition and 26.04 interface detection required | [Ubuntu Insights](https://github.com/ubuntu/ubuntu-insights/blob/main/insights/README.md) |
-| `ubuntu.report.consent` | Opt out | check, apply | Legacy component may coexist during transition | [Ubuntu Report](https://github.com/ubuntu/ubuntu-report) |
+| `ubuntu.insights.consent` | System opt-out where supported | check, apply | The opt-in file is not the consent state. Presence and absence stay unknown until interface detection exists. | [Ubuntu Insights](https://github.com/ubuntu/ubuntu-insights/blob/main/insights/README.md) |
+| `ubuntu.report.consent` | Opt out | check, apply | A metrics cache is not the opt-out. Presence and absence stay unknown. | [Ubuntu Report](https://github.com/ubuntu/ubuntu-report) |
 | `ubuntu.apport.capture` | Observe separately from upload | check, audit-only | Version-specific; local collection is not vendor submission | [Ubuntu Apport](https://documentation.ubuntu.com/project/contributors/debugging/apport/) |
 | `ubuntu.whoopsie.upload` | Automatic upload off | check, audit-only | Service behavior varies by release | [Ubuntu Apport](https://documentation.ubuntu.com/project/contributors/debugging/apport/) |
 
@@ -232,7 +232,7 @@ disclose this difference from a strict zero-egress configuration.
 
 | Control ID | Desired behavior | Capability | Notes | Primary source |
 |---|---|---|---|---|
-| `fedora.abrt.auto-reporting` | Disabled, user-triggered reports retained | check, apply | Use packaged `abrt-auto-reporting` interface | [ABRT configuration](https://github.com/abrt/doc/blob/master/conf.rst) |
+| `fedora.abrt.auto-reporting` | Disabled, user-triggered reports retained | check, apply | Only an explicit `AutoreportingEnabled=yes` in `abrt.conf` is determined. `no`, a missing key, and a missing file stay unknown. | [ABRT configuration](https://abrt.readthedocs.io/en/latest/conf.html) |
 | `debian.popularity-contest.participation` | `PARTICIPATE=no` | check, apply | Only when package is installed; preserve file metadata and comments | [popularity-contest manual](https://manpages.debian.org/testing/popularity-contest/popularity-contest.8.en.html) |
 | `kde.user-feedback.global` | Disabled | check, apply | Atomically preserve unrelated configuration | [KDE Kiosk policy](https://develop.kde.org/docs/administration/kiosk/keys/) |
 

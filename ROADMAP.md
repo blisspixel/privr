@@ -34,7 +34,7 @@ milestone and its results should not be trusted.
 | Windows `check`, `explain`, `list` | Implemented and tested with recorded evidence. 28 controls across 5 posture dimensions. Validated on Windows 11 Pro 25H2. Check reports are schema 2 and keep reduced observations plus compiled source refs. Text leads with what could not be checked. `explain` is a fresh read and says so. |
 | Windows `plan`, `apply`, `rollback` | Implemented and tested. 25 controls carry live, verified apply and rollback routines with pre/postimage validation. Native in-place elevation (-e, --elevate) invokes UAC/sudo with typed CLI argument serialization. Interactive approval defaults to no and one answer covers the selection; per-section prompts are not built. A verified apply prints a static verified line. Noninteractive mode requires `--yes` after a plan review. No-argument apply stays within Tier 0 and Tier 1. |
 | Posture vectors and personas | Implemented and tested. 5 posture dimensions, 4 friction tiers, 5 workload personas across `check`, `recommend`, `simulate`, `plan`, and `apply`. |
-| Linux `check` | Experimental. Discovery and 17 controls (GNOME, Ubuntu, Debian, Fedora, KDE, FreeDesktop, systemd, NetworkManager, Avahi, systemd-resolved) with elevation metadata. Typed recorded Context tests exercise the file probes, the shared drop-in merge, the resolved property parser, and thumbnail presence. Desktop-environment controls remain unchecked against a full session. |
+| Linux `check` | Experimental. Discovery and 17 controls (GNOME, Ubuntu, Debian, Fedora, KDE, FreeDesktop, systemd, NetworkManager, Avahi, systemd-resolved) with elevation metadata. Typed recorded Context tests exercise the file probes, the shared drop-in merge, the resolved property parser, and thumbnail presence. Ubuntu Insights, Ubuntu Report, and Fedora ABRT do not treat a missing file as opted out. Desktop-environment controls remain unchecked against a full session. |
 | macOS `check` | Experimental. Discovery and 6 controls with elevation metadata. Compiled and tested in CI; never checked against a real Mac. |
 | Agent server (`mcp`) | Implemented and tested. Synchronous stdio server with read-only tools and gated mutation. Conforms to Model Context Protocol and Agent Plugins v1.0.0. Supports workload personas and friction budgets. |
 | `doctor` | Implemented and tested. Reports non-identifying OS facts, authoritative Linux effective privilege, compiled adapters with live capability unverified, storage integrity, reparse-point verification, and schema versions. Rolling-distribution IDs remain visible without inventing a numeric version or Windows edition. |
@@ -118,9 +118,11 @@ Reporting (blocks 0.1.0):
   read as denied, hiding malformed, unsupported, and missing evidence.
   (Fixed: preserve the typed uncertainty and block lower-priority fallback;
   synthetic fixture replay asserts the reason and unknown outcome.)
-- [ ] The `security` section (LLMNR, WPAD, NCSI active probing) is closer to
-  generic hardening, a stated non-goal, than to optional data sharing. Decide
-  whether it belongs in the catalogue.
+- [x] The `security` section (LLMNR, WPAD, NCSI active probing) stays.
+  Decision 25 makes network exposure its own posture dimension: plaintext
+  name queries, proxy discovery, and active connectivity probes. These are
+  optional disclosures. They are not a generic hardening checklist, and they
+  are not removed.
 
 Linux and macOS probes (block 0.3.0 and 0.4.0), each a false-pass risk:
 
@@ -136,11 +138,16 @@ Linux and macOS probes (block 0.3.0 and 0.4.0), each a false-pass risk:
   Authoritative supported preference and forced-value APIs, versioned fixtures,
   and native macOS evidence naming the OS/build and effective API are still
   required before any determined result. The control remains audit-only.
-- [ ] Ubuntu Report and Ubuntu Insights report `disabled` when a file is
-  absent. Absence of a file is not evidence that submission is off.
-- [ ] Fedora ABRT reads `abrt-action-save-package-data.conf` for the
-  auto-reporting setting. The governing file has not been verified against
-  primary sources.
+- [x] Ubuntu Report and Ubuntu Insights report `disabled` when a file is
+  absent. (Fixed: neither file is the documented consent or opt-out state.
+  Presence and absence stay unknown, including a denied or malformed read's
+  own reason. A missing file is not a pass.)
+- [x] Fedora ABRT reads `abrt-action-save-package-data.conf` for the
+  auto-reporting setting. (Fixed: the probe reads `AutoreportingEnabled` in
+  `/etc/abrt/abrt.conf`, as documented by the ABRT configuration manual.
+  Only an explicit `yes` is enabled. `no`, a missing key, a comment, and a
+  missing file stay unknown, because the desktop session setting is separate
+  and the package-data file does not govern upload.)
 - [ ] Linux controls run without the ordered environment detection, dconf lock,
   and live-session checks that 0.4.0 requires first.
 

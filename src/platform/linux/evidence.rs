@@ -31,7 +31,7 @@ impl Target {
     fn path(self) -> Option<PathBuf> {
         Some(match self {
             Self::DebianPopcon => "/etc/popularity-contest.conf".into(),
-            Self::FedoraAbrt => "/etc/abrt/abrt-action-save-package-data.conf".into(),
+            Self::FedoraAbrt => "/etc/abrt/abrt.conf".into(),
             Self::UbuntuInsights => "/etc/ubuntu-insights/opt-in".into(),
             Self::UbuntuReport => {
                 PathBuf::from(std::env::var_os("HOME")?).join(".cache/ubuntu-report/metrics.json")
@@ -244,10 +244,9 @@ impl Reader {
 fn uncertainty(evidence: &Evidence) -> Uncertainty {
     match evidence {
         Evidence::Denied { .. } => Uncertainty::Denied,
-        Evidence::Present { .. } | Evidence::Malformed { .. } => Uncertainty::Malformed,
-        Evidence::Unsupported { .. } | Evidence::Undetermined { .. } | Evidence::Absent { .. } => {
-            Uncertainty::Undetermined
-        }
+        Evidence::Malformed { .. } | Evidence::Present { .. } => Uncertainty::Malformed,
+        Evidence::Unsupported { .. } => Uncertainty::Unsupported,
+        Evidence::Undetermined { .. } | Evidence::Absent { .. } => Uncertainty::Undetermined,
     }
 }
 

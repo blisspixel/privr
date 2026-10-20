@@ -26,7 +26,7 @@ const UBUNTU_REPORT_URL: &str = "https://github.com/ubuntu/ubuntu-report";
 const UBUNTU_INSIGHTS_URL: &str = "https://github.com/ubuntu/ubuntu-insights";
 const DEBIAN_POPCON_URL: &str =
     "https://manpages.debian.org/testing/popularity-contest/popularity-contest.8.en.html";
-const FEDORA_ABRT_URL: &str = "https://github.com/abrt/doc/blob/master/conf.rst";
+const FEDORA_ABRT_URL: &str = "https://abrt.readthedocs.io/en/latest/conf.html";
 const KDE_USERFEEDBACK_URL: &str = "https://develop.kde.org/docs/administration/kiosk/keys/";
 const SYSTEMD_COREDUMP_URL: &str =
     "https://github.com/systemd/systemd/blob/v262/man/coredump.conf.xml";
@@ -67,39 +67,87 @@ fn probe_debian_popcon(ctx: &Context) -> Resolution {
     }
 }
 
-/// Probe Ubuntu Insights opt-in status.
+/// The opt-in file is not the documented consent state.
 fn probe_ubuntu_insights(ctx: &Context) -> Resolution {
-    match ctx.linux.exists(Target::UbuntuInsights) {
-        Ok(true) => Resolution::determined(enabled(), ManagementSource::User),
-        Ok(false) => Resolution::determined(disabled(), ManagementSource::Default),
-        Err(reason) => Resolution::uncertain(reason, ManagementSource::User),
-    }
+    file_presence_is_not_consent(
+        ctx.linux.exists(Target::UbuntuInsights),
+        "The opt-in file is not the Ubuntu Insights consent state. Its absence is not an opt-out.",
+    )
 }
 
-/// Probe Ubuntu Report telemetry status.
+/// A metrics cache is not the documented opt-out.
 fn probe_ubuntu_report(ctx: &Context) -> Resolution {
-    match ctx.linux.exists(Target::UbuntuReport) {
-        Ok(true) => Resolution::determined(enabled(), ManagementSource::User),
-        Ok(false) => Resolution::determined(disabled(), ManagementSource::Default),
+    file_presence_is_not_consent(
+        ctx.linux.exists(Target::UbuntuReport),
+        "A metrics cache file is not the Ubuntu Report opt-out. Its absence is not evidence that submission is off.",
+    )
+}
+
+fn file_presence_is_not_consent(read: Result<bool, Uncertainty>, note: &str) -> Resolution {
+    match read {
+        Ok(_) => {
+            let mut resolution =
+                Resolution::uncertain(Uncertainty::Undetermined, ManagementSource::Unknown);
+            resolution.note = Some(note.to_owned());
+            resolution
+        }
         Err(reason) => Resolution::uncertain(reason, ManagementSource::User),
     }
 }
 
-/// Probe Fedora ABRT automated reporting status.
+/// System autoreporting is `AutoreportingEnabled` in `/etc/abrt/abrt.conf`.
+///
+/// An explicit `yes` is upload enabled. `no`, a missing key, and a missing
+/// file do not establish that upload is off: the desktop session has its own
+/// setting, and the package-data file does not govern this switch.
 fn probe_fedora_abrt(ctx: &Context) -> Resolution {
     match ctx.linux.text(Target::FedoraAbrt) {
-        Ok(None) => Resolution::determined(disabled(), ManagementSource::Default),
-        Ok(Some(content)) => {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if trimmed.starts_with("AutoreportingEvent") && trimmed.contains("none") {
-                    return Resolution::determined(disabled(), ManagementSource::LocalPolicy);
-                }
-            }
-            Resolution::determined(enabled(), ManagementSource::LocalPolicy)
-        }
+        Ok(Some(content)) => match autoreporting_enabled(&content) {
+            Some(true) => Resolution::determined(enabled(), ManagementSource::LocalPolicy),
+            Some(false) => abrt_not_established(
+                "System AutoreportingEnabled is no. The desktop session setting was not read, so this does not establish that upload is off.",
+            ),
+            None => abrt_not_established(
+                "abrt.conf does not set AutoreportingEnabled to yes. That is not evidence that crash upload is off.",
+            ),
+        },
+        Ok(None) => abrt_not_established(
+            "abrt.conf is absent. That is not evidence that crash upload is off.",
+        ),
         Err(reason) => Resolution::uncertain(reason, ManagementSource::LocalPolicy),
     }
+}
+
+fn abrt_not_established(note: &str) -> Resolution {
+    let mut resolution =
+        Resolution::uncertain(Uncertainty::Undetermined, ManagementSource::LocalPolicy);
+    resolution.note = Some(note.to_owned());
+    resolution
+}
+
+/// `Some(true)` is an explicit yes. `Some(false)` is an explicit no.
+/// `None` means the setting was not present.
+fn autoreporting_enabled(content: &str) -> Option<bool> {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('#') {
+            continue;
+        }
+        let lower = trimmed.to_ascii_lowercase();
+        let Some(rest) = lower.strip_prefix("autoreportingenabled") else {
+            continue;
+        };
+        let rest = rest.trim_start();
+        let rest = rest.strip_prefix('=').unwrap_or(rest).trim();
+        let token = rest.split_whitespace().next().unwrap_or("");
+        if token == "yes" {
+            return Some(true);
+        }
+        if token == "no" {
+            return Some(false);
+        }
+    }
+    None
 }
 
 /// Probe GNOME desktop settings.
@@ -262,8 +310,8 @@ pub fn controls() -> Vec<Control> {
             ),
             sources: &[Source {
                 url: FEDORA_ABRT_URL,
-                claim: "Documents ABRT automated crash reporting configuration.",
-                reviewed: "2026-09-21",
+                claim: "System autoreporting is AutoreportingEnabled in abrt.conf. The desktop session setting is separate, and abrt-action-save-package-data.conf does not govern upload.",
+                reviewed: "2026-10-20",
             }],
             probe: probe_fedora_abrt,
             apply: None,
@@ -635,8 +683,8 @@ pub fn controls() -> Vec<Control> {
             ),
             sources: &[Source {
                 url: UBUNTU_INSIGHTS_URL,
-                claim: "Documents Ubuntu Insights opt-in mechanism.",
-                reviewed: "2026-09-21",
+                claim: "Consent lives in the insights consent state and system opt-out, not in a single opt-in file.",
+                reviewed: "2026-10-20",
             }],
             probe: probe_ubuntu_insights,
             apply: None,
@@ -674,8 +722,8 @@ pub fn controls() -> Vec<Control> {
             ),
             sources: &[Source {
                 url: UBUNTU_REPORT_URL,
-                claim: "Documents Ubuntu Report opt-out mechanism.",
-                reviewed: "2026-09-21",
+                claim: "Documents Ubuntu Report. A metrics cache file is not the opt-out control.",
+                reviewed: "2026-10-20",
             }],
             probe: probe_ubuntu_report,
             apply: None,

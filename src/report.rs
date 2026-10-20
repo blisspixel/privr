@@ -1097,9 +1097,9 @@ mod tests {
                 "fedora",
                 vec![(
                     Target::FedoraAbrt,
-                    crate::test_context::text(b"AutoreportingEvent=none\n"),
+                    crate::test_context::text(b"AutoreportingEnabled = yes\n"),
                 )],
-                Outcome::Pass,
+                Outcome::Drift,
                 vec![Target::FedoraAbrt],
             ),
             (
@@ -1124,22 +1124,6 @@ mod tests {
                 ],
                 Outcome::Pass,
                 vec![Target::FstrimAdmin, Target::FstrimLib, Target::FstrimVendor],
-            ),
-            (
-                "ubuntu",
-                "hyprland",
-                "ubuntu.insights",
-                vec![(Target::UbuntuInsights, present.clone())],
-                Outcome::Drift,
-                vec![Target::UbuntuInsights],
-            ),
-            (
-                "ubuntu",
-                "hyprland",
-                "ubuntu.report",
-                vec![(Target::UbuntuReport, present)],
-                Outcome::Drift,
-                vec![Target::UbuntuReport],
             ),
         ] {
             let host = crate::test_context::host(distribution, desktop);
@@ -1169,6 +1153,79 @@ mod tests {
             assert_eq!(report.results[0].outcome, Outcome::Unknown, "{selector}");
             assert_eq!(report.exit_code(), 3);
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn ubuntu_and_abrt_files_do_not_turn_absence_into_a_pass() {
+        use crate::model::evidence::{Evidence, RawValue, ValueKind};
+        use crate::model::host::ManagementSource;
+        use crate::platform::linux::evidence::Target;
+
+        let source = ManagementSource::Unknown;
+        let present = Evidence::Present {
+            source,
+            value: RawValue::new(ValueKind::Bool, vec![1]),
+        };
+        let absent = Evidence::Absent { source };
+        let host = crate::test_context::host("ubuntu", "hyprland");
+        for (selector, target, evidence) in [
+            ("ubuntu.insights", Target::UbuntuInsights, present.clone()),
+            ("ubuntu.insights", Target::UbuntuInsights, absent.clone()),
+            ("ubuntu.report", Target::UbuntuReport, present),
+            ("ubuntu.report", Target::UbuntuReport, absent.clone()),
+        ] {
+            let reader = crate::test_context::reader([(target, evidence)]);
+            let context = crate::test_context::context(&host, &reader);
+            let report = Report::build_with_context(
+                &context,
+                Some("baseline"),
+                None,
+                &[selector.to_owned()],
+                &[],
+            );
+            assert_eq!(report.results[0].outcome, Outcome::Unknown, "{selector}");
+            assert_eq!(report.summary.pass, 0, "{selector}");
+            assert!(!report.complete, "{selector}");
+            assert!(report.results[0].observed.is_none(), "{selector}");
+            assert_eq!(reader.requested(), vec![target]);
+        }
+
+        let host = crate::test_context::host("fedora", "hyprland");
+        for bytes in [
+            b"AutoreportingEvent=none\n".as_slice(),
+            b"AutoreportingEnabled = no\n".as_slice(),
+            b"AutoreportingEnabled no\n".as_slice(),
+            b"# AutoreportingEnabled = yes\n".as_slice(),
+            b"".as_slice(),
+        ] {
+            let reader = crate::test_context::reader([(
+                Target::FedoraAbrt,
+                crate::test_context::text(bytes),
+            )]);
+            let context = crate::test_context::context(&host, &reader);
+            let report = Report::build_with_context(
+                &context,
+                Some("baseline"),
+                None,
+                &["fedora".to_owned()],
+                &[],
+            );
+            assert_eq!(report.results[0].outcome, Outcome::Unknown);
+            assert_eq!(report.summary.pass, 0);
+            assert!(!report.complete);
+        }
+        let reader = crate::test_context::reader([(Target::FedoraAbrt, absent)]);
+        let context = crate::test_context::context(&host, &reader);
+        let report = Report::build_with_context(
+            &context,
+            Some("baseline"),
+            None,
+            &["fedora".to_owned()],
+            &[],
+        );
+        assert_eq!(report.results[0].outcome, Outcome::Unknown);
+        assert_eq!(report.summary.pass, 0);
     }
 
     fn empty_report() -> Report {

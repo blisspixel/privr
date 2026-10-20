@@ -346,9 +346,12 @@ setting that hides crash prompts is not proof that capture or upload is disabled
 
 ### Fedora, Debian, and KDE
 
-- Fedora ABRT automatic reporting should use the packaged
-  `abrt-auto-reporting` interface where installed:
-  [ABRT configuration](https://github.com/abrt/doc/blob/master/conf.rst).
+- Fedora ABRT system autoreporting is `AutoreportingEnabled` in
+  `/etc/abrt/abrt.conf`. An explicit `yes` means upload is enabled. `no`, a
+  missing key, and a missing file do not establish that upload is off, because
+  the desktop session setting is separate. The package-data file does not
+  govern this switch:
+  [ABRT configuration](https://abrt.readthedocs.io/en/latest/conf.html).
 - Debian `popularity-contest` is optional and explicit opt-in, but participation
   is privacy-relevant when installed:
   [Debian privacy policy](https://www.debian.org/legal/privacy) and

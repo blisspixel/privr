@@ -171,6 +171,8 @@ to your shell configuration.
 One-line installers and package manager entries ship with the first signed
 release. The installer will place an unprivileged binary and nothing else;
 `privr` requests elevation only at apply time, after showing you the plan.
+GitHub source tags are maintenance snapshots of `main`. They are not the
+0.1.0 Windows release, and they are not signed binaries.
 
 ## Workflow
 

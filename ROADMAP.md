@@ -21,8 +21,10 @@ The decisions that constrain every milestone are recorded in
 
 ## Current state
 
-Reviewed 2026-10-20 against source and tests. This section is the single statement of
-what exists; other documents link here rather than repeating counts.
+Reviewed 2026-10-21 against source and tests. This section is the single statement of
+what exists; other documents link here rather than repeating counts. Source
+maintenance tags follow `main`. They are not the 0.1.0 Windows release, they
+publish no signed binaries, and the crate is not published.
 
 Terms: **implemented** means the code exists; **tested** means automated tests
 cover it; **validated** means it was run and checked on a real machine;
@@ -43,7 +45,7 @@ milestone and its results should not be trusted.
 | PowerShell session-only history | Planned research and guided configuration. No PSReadLine history or prediction control is implemented. See [the proposal](#powershell-session-only-history-planned). |
 | Privacy-cache inspection and clearing | Proposed research and guided workflows, with aggressive purge selection by default and a polite option. `purge` is not implemented. See [candidate priorities, sources, and safety gates](docs/CACHE_PRIVACY_PLAN.md); automated clearing remains in 0.5.0. |
 | Fixture files | Initial file replay for 2 Windows controls (advertising ID and diagnostic data), covering 55 synthetic observation states. The compiled probes and evaluator run against exact typed bytes through recorded Context. Native captures, remaining controls, and mutation fixtures are still owed. |
-| Staleness, signed releases | In progress. |
+| Staleness, signed releases | In progress. Review staleness and signed binaries are still open. A source tag records a green `main` commit only. |
 
 ### Known issues
 

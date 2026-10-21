@@ -26,6 +26,10 @@ designed to be driven by an agent harness as readily as by a person.
 - **Systemd storage files describe configured intent only**. Bounded main-file
   and drop-in reads explain that intent; coredump and journald storage remain
   Unknown until loaded state can be attested. See [the evidence limits](docs/SYSTEMD_EVIDENCE.md).
+- **A missing thumbnail cache and the legacy KDE feedback file do not pass**.
+  The FreeDesktop directory stores generated previews. Plasma stores
+  `FeedbackLevel` in `PlasmaUserFeedback`, and the administrator force-off
+  file is separate. Neither reading is treated as caching or telemetry off.
 - **Check completeness follows the selected scope**. Zero evaluated controls are incomplete (exit 3), even when every result is not applicable or not selected. CLI and MCP selectors share the compiled report builder; hiding passing rows does not change summary counts. See [report semantics](docs/RESULTS.md#completeness).
 - **First-run output keeps uncertainty visible**. The headline leads with
   unknown, unchecked, and error counts, then how many evaluated controls pass.

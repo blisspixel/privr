@@ -28,6 +28,7 @@ const DEBIAN_POPCON_URL: &str =
     "https://manpages.debian.org/testing/popularity-contest/popularity-contest.8.en.html";
 const FEDORA_ABRT_URL: &str = "https://abrt.readthedocs.io/en/latest/conf.html";
 const KDE_USERFEEDBACK_URL: &str = "https://develop.kde.org/docs/administration/kiosk/keys/";
+const PLASMA_FEEDBACK_KCFG_URL: &str = "https://invent.kde.org/plasma/plasma-workspace/-/blob/master/kcms/feedback/feedbacksettings.kcfg";
 const SYSTEMD_COREDUMP_URL: &str =
     "https://github.com/systemd/systemd/blob/v262/man/coredump.conf.xml";
 const FREEDESKTOP_THUMBNAIL_URL: &str =
@@ -167,22 +168,24 @@ fn probe_gnome_desktop_setting(ctx: &Context) -> Resolution {
     Resolution::uncertain(Uncertainty::Undetermined, ManagementSource::User)
 }
 
-/// Probe KDE UserFeedback telemetry level.
+/// Plasma's feedback level and the administrator force-off are different files.
+///
+/// The file this target names is neither `PlasmaUserFeedback` nor
+/// `/etc/xdg/KDE/UserFeedback.conf`. A missing file, and `FeedbackLevel=0` in
+/// the wrong file, used to pass. Telemetry is off by default, and a user can
+/// still enable it inside applications, so this reading stays unknown.
 fn probe_kde_feedback(ctx: &Context) -> Resolution {
+    // Keep the typed read so a denied or malformed access stays that reason.
+    // The bytes are not a consent state, including an explicit level of 0.
     match ctx.linux.text(Target::KdeFeedback) {
-        Ok(content) => {
-            if let Some(content) = content {
-                for line in content.lines() {
-                    let trimmed = line.trim();
-                    if let Some(level) = trimmed.strip_prefix("FeedbackLevel=") {
-                        return Resolution::determined(
-                            if level == "0" { disabled() } else { enabled() },
-                            ManagementSource::User,
-                        );
-                    }
-                }
-            }
-            Resolution::determined(disabled(), ManagementSource::Default)
+        Ok(_) => {
+            let mut resolution =
+                Resolution::uncertain(Uncertainty::Undetermined, ManagementSource::Unknown);
+            resolution.note = Some(
+                "This file is not PlasmaUserFeedback, and it is not the administrator force-off. Neither setting was read, so this does not establish that telemetry is off."
+                    .to_owned(),
+            );
+            resolution
         }
         Err(reason) => Resolution::uncertain(reason, ManagementSource::User),
     }
@@ -345,8 +348,8 @@ pub fn controls() -> Vec<Control> {
             ),
             sources: &[Source {
                 url: FREEDESKTOP_THUMBNAIL_URL,
-                claim: "Documents FreeDesktop Thumbnail Management Standard.",
-                reviewed: "2026-10-01",
+                claim: "Generated previews are stored in the XDG cache thumbnails directory. That directory is storage, not a switch that turns generation off.",
+                reviewed: "2026-10-20",
             }],
             probe: probe_freedesktop_thumbnails,
             apply: None,
@@ -538,11 +541,18 @@ pub fn controls() -> Vec<Control> {
             mitigation: Some(
                 "KDE Plasma desktop and applications function identically without feedback.",
             ),
-            sources: &[Source {
-                url: KDE_USERFEEDBACK_URL,
-                claim: "Documents KDE UserFeedback configuration keys.",
-                reviewed: "2026-09-21",
-            }],
+            sources: &[
+                Source {
+                    url: KDE_USERFEEDBACK_URL,
+                    claim: "Telemetry is disabled by default, but a user can enable it in applications. Global force-off is Enabled=false in the administrator UserFeedback file, which this control does not read.",
+                    reviewed: "2026-10-20",
+                },
+                Source {
+                    url: PLASMA_FEEDBACK_KCFG_URL,
+                    claim: "Plasma stores FeedbackLevel in PlasmaUserFeedback, group Global, default NoTelemetry.",
+                    reviewed: "2026-10-20",
+                },
+            ],
             probe: probe_kde_feedback,
             apply: None,
             rollback: None,

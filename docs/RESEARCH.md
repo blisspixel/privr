@@ -356,8 +356,15 @@ setting that hides crash prompts is not proof that capture or upload is disabled
   is privacy-relevant when installed:
   [Debian privacy policy](https://www.debian.org/legal/privacy) and
   [popularity-contest manual](https://manpages.debian.org/testing/popularity-contest/popularity-contest.8.en.html).
-- KDE provides a documented global user-feedback policy:
-  [KDE Kiosk telemetry policy](https://develop.kde.org/docs/administration/kiosk/keys/).
+- KDE telemetry is disabled by default, and a user can enable it inside
+  applications. The administrator force-off is `Enabled=false` in
+  `/etc/xdg/KDE/UserFeedback.conf`. Plasma stores `FeedbackLevel` in
+  `PlasmaUserFeedback` (group `Global`, default `NoTelemetry`). The file
+  `~/.config/KDE/UserFeedback.conf` is neither of those, so the control stays
+  unknown:
+  [KDE Kiosk telemetry policy](https://develop.kde.org/docs/administration/kiosk/keys/)
+  and
+  [Plasma feedback settings](https://invent.kde.org/plasma/plasma-workspace/-/blob/master/kcms/feedback/feedbacksettings.kcfg).
 
 ### Local diagnostics are not automatically telemetry
 

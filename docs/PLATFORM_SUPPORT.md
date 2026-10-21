@@ -235,6 +235,7 @@ disclose this difference from a strict zero-egress configuration.
 | `fedora.abrt.auto-reporting` | Disabled, user-triggered reports retained | check, apply | Only an explicit `AutoreportingEnabled=yes` in `abrt.conf` is determined. `no`, a missing key, and a missing file stay unknown. | [ABRT configuration](https://abrt.readthedocs.io/en/latest/conf.html) |
 | `debian.popularity-contest.participation` | Disabled | check, audit-only | The 1.79 daily job merges the package default, the etc file, and `popularity-contest.d` drop-ins. This check reads only the etc file, so yes, no, a missing key, and a missing file stay unknown. | [popularity-contest manual](https://manpages.debian.org/testing/popularity-contest/popularity-contest.8.en.html) |
 | `kde.user-feedback.global` | Disabled | check, apply | The legacy user file is not the setting. `PlasmaUserFeedback` and the administrator force-off file are unread, so every successful read stays unknown. | [KDE Kiosk policy](https://develop.kde.org/docs/administration/kiosk/keys/) |
+| `avahi.mdns.publishing` | Disabled | check, audit-only | `disable-publishing` defaults to no and `publish-addresses` defaults to yes. `systemctl is-active` reports the process state. A stopped, failed, or stopping daemon stays unknown unless the merged publish settings turn announcements off. | [avahi-daemon.conf](https://manpages.debian.org/testing/avahi-daemon/avahi-daemon.conf.5.en.html) |
 
 ## Linux audit-only expansion
 

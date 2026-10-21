@@ -879,11 +879,18 @@ pub fn controls() -> Vec<Control> {
             mitigation: Some(
                 "Browse services from a client that already knows the host, or keep publishing limited to a trusted interface.",
             ),
-            sources: &[Source {
-                url: AVAHI_CONF_URL,
-                claim: "Documents disable-publishing, publish-addresses, publish-hinfo, and publish-workstation in avahi-daemon.conf. Drop-ins under avahi-daemon.conf.d use the same /usr/lib, /run, then /etc shadowing order.",
-                reviewed: "2026-10-12",
-            }],
+            sources: &[
+                Source {
+                    url: AVAHI_CONF_URL,
+                    claim: "Documents disable-publishing (default no), publish-addresses (default yes), publish-hinfo (default no), and publish-workstation (default no). Drop-ins under avahi-daemon.conf.d use the same /usr/lib, /run, then /etc shadowing order.",
+                    reviewed: "2026-10-20",
+                },
+                Source {
+                    url: SYSTEMD_SYSTEMCTL_URL,
+                    claim: "is-active prints whether the unit is running. inactive means stopped, and failed means the unit failed. Neither state is the publishing configuration.",
+                    reviewed: "2026-10-20",
+                },
+            ],
             probe: probe_avahi_publishing,
             apply: None,
             rollback: None,

@@ -373,6 +373,20 @@ setting that hides crash prompts is not proof that capture or upload is disabled
   and
   [Plasma feedback settings](https://invent.kde.org/plasma/plasma-workspace/-/blob/master/kcms/feedback/feedbacksettings.kcfg).
 
+### mDNS publishing
+
+`avahi-daemon` publishes address records unless `disable-publishing` is yes,
+or `publish-addresses`, `publish-hinfo`, and `publish-workstation` are all no.
+The documented defaults are `disable-publishing=no` and `publish-addresses=yes`.
+`systemctl is-active` prints whether the unit is running: `inactive` means
+stopped, and `failed` means the unit failed. A stopped daemon is not
+publishing-off. The check stays unknown unless the merged publish settings
+turn announcements off, or the daemon is active and those settings leave
+announcements on:
+[avahi-daemon.conf](https://manpages.debian.org/testing/avahi-daemon/avahi-daemon.conf.5.en.html)
+and
+[systemctl](https://www.freedesktop.org/software/systemd/man/latest/systemctl.html).
+
 ### Local diagnostics are not automatically telemetry
 
 systemd journals and core dumps are normally local data. Remote forwarding and

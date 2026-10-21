@@ -211,6 +211,9 @@ Local privacy residue presents four distinct threat vectors:
   mapping to the original file path, persisting after file deletion.
 - **Clearing candidate:** Research a named desktop's documented cache-clear
   interface. A storage layout specification does not establish a purge API.
+- **Check:** A missing directory, and a directory with no preview files, stay
+  unknown. Preview bytes are residue and remain drift. Absence is not evidence
+  that generation is off.
 - **Primary source:** [FreeDesktop Thumbnail Management Standard](https://specifications.freedesktop.org/thumbnail-spec/thumbnail-spec-latest.html).
 
 #### Systemd core dumps

@@ -118,9 +118,13 @@ pub fn resolved_mdns(reader: &Reader) -> Resolution {
 pub fn thumbnails(reader: &Reader) -> Resolution {
     match reader.thumbnails() {
         None => uncertain(Uncertainty::Undetermined),
-        Some(ThumbnailRecord::Absent) => noted(
-            Resolution::determined(disabled(), ManagementSource::User),
-            "FreeDesktop thumbnail directory is absent.",
+        Some(ThumbnailRecord::Absent) => thumbnail_not_established(
+            "The thumbnail directory is absent. The standard stores generated previews there. Absence is not evidence that generation is off.",
+        ),
+        // An empty directory has no preview files. Creating it, or clearing it,
+        // does not disable the thumbnailer that will write the next preview.
+        Some(ThumbnailRecord::Present(0)) => thumbnail_not_established(
+            "The thumbnail directory holds no preview files. That is not evidence that generation is off.",
         ),
         Some(ThumbnailRecord::Present(bytes)) => noted(
             Resolution::determined(enabled(), ManagementSource::User),
@@ -128,6 +132,13 @@ pub fn thumbnails(reader: &Reader) -> Resolution {
         ),
         Some(ThumbnailRecord::Unreadable(reason)) => uncertain(reason),
     }
+}
+
+fn thumbnail_not_established(note: &str) -> Resolution {
+    noted(
+        Resolution::uncertain(Uncertainty::Undetermined, ManagementSource::Unknown),
+        note,
+    )
 }
 
 fn resolved(reader: &Reader, llmnr: bool) -> Resolution {
@@ -1318,8 +1329,24 @@ mod tests {
                 ..ExposureRecords::default()
             },
         );
-        assert_eq!(absent, Outcome::Pass);
-        assert!(note.unwrap().contains("absent"));
+        assert_eq!(absent, Outcome::Unknown);
+        assert_ne!(absent, Outcome::Pass);
+        let absent_note = note.unwrap();
+        assert!(absent_note.contains("not evidence"));
+        assert!(!absent_note.contains('/'));
+        let (empty, note) = checked(
+            "freedesktop.thumbnails.caching",
+            "strict",
+            ExposureRecords {
+                thumbnails: Some(ThumbnailRecord::Present(0)),
+                ..ExposureRecords::default()
+            },
+        );
+        assert_eq!(empty, Outcome::Unknown);
+        assert_ne!(empty, Outcome::Pass);
+        let empty_note = note.unwrap();
+        assert!(empty_note.contains("no preview files"));
+        assert!(!empty_note.contains('/'));
         let (present, note) = checked(
             "freedesktop.thumbnails.caching",
             "strict",
@@ -1329,6 +1356,7 @@ mod tests {
             },
         );
         assert_eq!(present, Outcome::Drift);
+        assert_ne!(present, Outcome::Pass);
         assert!(note.unwrap().contains("42"));
         let (unknown, _) = checked(
             "freedesktop.thumbnails.caching",

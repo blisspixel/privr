@@ -1104,17 +1104,6 @@ mod tests {
             ),
             (
                 "arch",
-                "kde",
-                "kde",
-                vec![(
-                    Target::KdeFeedback,
-                    crate::test_context::text(b"FeedbackLevel=0\n"),
-                )],
-                Outcome::Pass,
-                vec![Target::KdeFeedback],
-            ),
-            (
-                "arch",
                 "hyprland",
                 "systemd.fstrim",
                 vec![
@@ -1226,6 +1215,82 @@ mod tests {
         );
         assert_eq!(report.results[0].outcome, Outcome::Unknown);
         assert_eq!(report.summary.pass, 0);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn kde_userfeedback_file_does_not_establish_telemetry_is_off() {
+        use crate::engine::evaluate::Uncertainty;
+        use crate::model::evidence::{DenialReason, Evidence};
+        use crate::model::host::ManagementSource;
+        use crate::model::outcome::ObservationBasis;
+        use crate::platform::linux::evidence::Target;
+
+        let host = crate::test_context::host("arch", "kde");
+        for bytes in [
+            b"FeedbackLevel=0\n# CANARY-SECRET-USER\n".as_slice(),
+            b"FeedbackLevel=100\n".as_slice(),
+            b"# FeedbackLevel=0\n".as_slice(),
+            b"".as_slice(),
+        ] {
+            let reader = crate::test_context::reader([(
+                Target::KdeFeedback,
+                crate::test_context::text(bytes),
+            )]);
+            let context = crate::test_context::context(&host, &reader);
+            let report = Report::build_with_context(
+                &context,
+                Some("baseline"),
+                None,
+                &["kde".to_owned()],
+                &[],
+            );
+            let result = &report.results[0];
+            assert_eq!(result.outcome, Outcome::Unknown);
+            assert_ne!(result.outcome, Outcome::Pass);
+            assert_eq!(report.summary.pass, 0);
+            assert!(!report.complete);
+            assert!(result.observed.is_none());
+            assert!(!result.confident);
+            assert_eq!(result.observation_basis, ObservationBasis::Inconclusive);
+            assert_eq!(result.observation_reason, Some(Uncertainty::Undetermined));
+            let note = result.note.as_deref().unwrap();
+            assert!(note.contains("does not establish"));
+            assert!(!note.contains('/'));
+            assert!(!note.contains("CANARY-SECRET-USER"));
+            let json = serde_json::to_string(&report).expect("json");
+            assert!(!json.contains("CANARY-SECRET-USER"));
+            assert_eq!(reader.requested(), vec![Target::KdeFeedback]);
+        }
+
+        let reader = crate::test_context::reader([(
+            Target::KdeFeedback,
+            Evidence::Absent {
+                source: ManagementSource::Unknown,
+            },
+        )]);
+        let context = crate::test_context::context(&host, &reader);
+        let report =
+            Report::build_with_context(&context, Some("baseline"), None, &["kde".to_owned()], &[]);
+        assert_eq!(report.results[0].outcome, Outcome::Unknown);
+        assert_eq!(report.summary.pass, 0);
+        assert!(!report.complete);
+
+        let reader = crate::test_context::reader([(
+            Target::KdeFeedback,
+            Evidence::Denied {
+                source: ManagementSource::User,
+                reason: DenialReason::Permission,
+            },
+        )]);
+        let context = crate::test_context::context(&host, &reader);
+        let report =
+            Report::build_with_context(&context, Some("baseline"), None, &["kde".to_owned()], &[]);
+        let result = &report.results[0];
+        assert_eq!(result.outcome, Outcome::Unknown);
+        assert_ne!(result.outcome, Outcome::Pass);
+        assert_eq!(result.observation_reason, Some(Uncertainty::Denied));
+        assert!(result.note.is_none());
     }
 
     fn empty_report() -> Report {

@@ -34,7 +34,7 @@ milestone and its results should not be trusted.
 | Windows `check`, `explain`, `list` | Implemented and tested with recorded evidence. 28 controls across 5 posture dimensions. Validated on Windows 11 Pro 25H2. Check reports are schema 2 and keep reduced observations plus compiled source refs. Text leads with what could not be checked. `explain` is a fresh read and says so. |
 | Windows `plan`, `apply`, `rollback` | Implemented and tested. 25 controls carry live, verified apply and rollback routines with pre/postimage validation. Native in-place elevation (-e, --elevate) invokes UAC/sudo with typed CLI argument serialization. Interactive approval defaults to no and one answer covers the selection; per-section prompts are not built. A verified apply prints a static verified line. Noninteractive mode requires `--yes` after a plan review. No-argument apply stays within Tier 0 and Tier 1. |
 | Posture vectors and personas | Implemented and tested. 5 posture dimensions, 4 friction tiers, 5 workload personas across `check`, `recommend`, `simulate`, `plan`, and `apply`. |
-| Linux `check` | Experimental. Discovery and 17 controls (GNOME, Ubuntu, Debian, Fedora, KDE, FreeDesktop, systemd, NetworkManager, Avahi, systemd-resolved) with elevation metadata. Typed recorded Context tests exercise the file probes, the shared drop-in merge, the resolved property parser, and thumbnail presence. Ubuntu Insights, Ubuntu Report, and Fedora ABRT do not treat a missing file as opted out. A missing FreeDesktop thumbnail directory, an empty thumbnail directory, and the legacy KDE UserFeedback file do not pass. Desktop-environment controls remain unchecked against a full session. |
+| Linux `check` | Experimental. Discovery and 17 controls (GNOME, Ubuntu, Debian, Fedora, KDE, FreeDesktop, systemd, NetworkManager, Avahi, systemd-resolved) with elevation metadata. Typed recorded Context tests exercise the file probes, the shared drop-in merge, the resolved property parser, and thumbnail presence. Ubuntu Insights, Ubuntu Report, and Fedora ABRT do not treat a missing file as opted out. A missing FreeDesktop thumbnail directory, an empty thumbnail directory, and the legacy KDE UserFeedback file do not pass. One popularity-contest file does not establish participation, because the daily job also reads the package default and drop-ins. An fstrim wants symlink does not pass when the unit file systemd would load is empty. Desktop-environment controls remain unchecked against a full session. |
 | macOS `check` | Experimental. Discovery and 6 controls with elevation metadata. Compiled and tested in CI; never checked against a real Mac. |
 | Agent server (`mcp`) | Implemented and tested. Synchronous stdio server with read-only tools and gated mutation. Conforms to Model Context Protocol and Agent Plugins v1.0.0. Supports workload personas and friction budgets. |
 | `doctor` | Implemented and tested. Reports non-identifying OS facts, authoritative Linux effective privilege, compiled adapters with live capability unverified, storage integrity, reparse-point verification, and schema versions. Rolling-distribution IDs remain visible without inventing a numeric version or Windows edition. |
@@ -158,6 +158,21 @@ Linux and macOS probes (block 0.3.0 and 0.4.0), each a false-pass risk:
   any other level, and a missing file stay unknown. A denied read keeps its
   own reason. The documented default is off, and a user can still enable
   telemetry in applications, so absence is not a pass.)
+- [x] Debian popularity-contest treats a missing
+  `/etc/popularity-contest.conf`, a missing participation key, or
+  `PARTICIPATE=no` as opted out. (Fixed: popularity-contest 1.79 exits when
+  its command is absent. Otherwise the daily job unsets participation,
+  sources the package default, then that etc file, then each
+  `popularity-contest.d` drop-in, and submits unless the merged value is
+  `no` or empty. The probe reads only the etc file, so yes, no, a missing
+  key, and a missing file stay unknown. A denied, malformed, or unsupported
+  read keeps its own reason.)
+- [x] `systemd.fstrim.timer` treats any `timers.target.wants` symlink as the
+  timer running. (Fixed: systemd treats an empty unit file, including a
+  link to `/dev/null`, as masked, and a masked unit cannot start. The probe
+  reads the unit search path before the wants symlinks. An empty winning
+  file is drift. A non-empty unit with a wants symlink can still pass. An
+  unread unit path stays unknown.)
 - [ ] Linux controls run without the ordered environment detection, dconf lock,
   and live-session checks that 0.4.0 requires first.
 

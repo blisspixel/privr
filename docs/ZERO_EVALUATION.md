@@ -21,8 +21,8 @@ explanations.
 
 The report builder accepts the existing typed Context internally. Live entry
 points still discover the host and construct a live Context. Compiled tests
-use synthetic HostFacts and a closed Linux Live/Recorded reader for only the
-ten existing file targets. Recordings contain exact bytes or typed read
+use synthetic HostFacts and a closed Linux Live/Recorded reader for the
+compiled file targets. Recordings contain exact bytes or typed read
 failures, never outcomes or a pre-labelled Report. Missing observations are
 unknown, not absent, and a recorded read never falls back to the machine.
 Fixtures cannot choose paths, commands or environment keys. No public fixture
@@ -40,10 +40,16 @@ loaded daemon state. No new parser, resolver, service query, control, privilege,
 remediation or distribution channel belongs to this change. Those known risks
 remain in the roadmap.
 
-Acceptance includes the reported Arch/Hyprland baseline (7 not applicable,
-6 not selected, no evaluated controls), empty and excluded scopes, raw-byte
-compiled popcon pass/drift/denied/malformed controls, drift with unknown,
-selector and visibility parity, CLI aliases, and actual MCP dispatch. Tests
-must prove that the repair neither disables successful probes nor promotes a
-failed observation to pass. Native CI and the existing formatting, Clippy,
-coverage, and dependency gates remain required.
+Acceptance of that repair included the reported Arch/Hyprland baseline (7 not
+applicable, 6 not selected, no evaluated controls), empty and excluded scopes,
+raw-byte compiled controls for pass, drift, denied, and malformed readings,
+drift with unknown, selector and visibility parity, CLI aliases, and actual
+MCP dispatch. The popularity-contest file was the compiled pass and drift
+example. A later change stops that one file from passing or drifting: the
+daily job also reads the package default and the drop-in directory, so the
+single file does not establish participation. Pass, drift, and review stay
+distinct on controls whose recorded evidence is complete, including a loadable
+unmasked fstrim unit. Tests must prove that the repair neither disables
+successful probes nor promotes a failed observation to pass. Native CI and
+the existing formatting, Clippy, coverage, and dependency gates remain
+required.

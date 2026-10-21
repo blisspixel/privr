@@ -248,13 +248,17 @@ Local privacy residue presents four distinct threat vectors:
   not evidence that existing dumps were cleared.
 
 #### Periodic solid-state TRIM timer
-- **Artifact:** `/etc/systemd/system/timers.target.wants/fstrim.timer`
+- **Artifact:** `timers.target.wants/fstrim.timer`
 - **Mechanism:** systemd periodic timer issuing TRIM/discard ioctls to SSD storage.
 - **Privacy risk:** Storage controllers retain deallocated file sectors in flash
   cells until discard requests are executed.
-- **Prevention policy:** Enabling `fstrim.timer`.
+- **Prevention policy:** Enabling `fstrim.timer`. A wants symlink is not enough
+  when the unit file systemd would load is empty. An empty file, including a
+  link to `/dev/null`, is masked and cannot start.
 - **Documented vendor mechanism:** `systemctl enable --now fstrim.timer` and `fstrim -av`.
-- **Primary source:** [fstrim manual](https://manpages.debian.org/testing/util-linux/fstrim.8.en.html).
+- **Primary source:** [fstrim manual](https://manpages.debian.org/testing/util-linux/fstrim.8.en.html),
+  [systemd.unit](https://www.freedesktop.org/software/systemd/man/latest/systemd.unit.html),
+  and [systemctl](https://www.freedesktop.org/software/systemd/man/latest/systemctl.html).
 
 #### Systemd journal volatile memory storage
 - **Artifact:** `/var/log/journal/*`

@@ -30,6 +30,12 @@ designed to be driven by an agent harness as readily as by a person.
   The FreeDesktop directory stores generated previews. Plasma stores
   `FeedbackLevel` in `PlasmaUserFeedback`, and the administrator force-off
   file is separate. Neither reading is treated as caching or telemetry off.
+- **One popularity-contest file does not pass**. The daily job also reads
+  the package default and the drop-in directory. `PARTICIPATE=no`, a missing
+  key, and a missing file stay unknown.
+- **A masked fstrim unit does not pass**. A wants symlink is enablement only
+  when the unit file systemd would load is non-empty. An empty unit file,
+  including a link to the null device, stays drift.
 - **Check completeness follows the selected scope**. Zero evaluated controls are incomplete (exit 3), even when every result is not applicable or not selected. CLI and MCP selectors share the compiled report builder; hiding passing rows does not change summary counts. See [report semantics](docs/RESULTS.md#completeness).
 - **First-run output keeps uncertainty visible**. The headline leads with
   unknown, unchecked, and error counts, then how many evaluated controls pass.

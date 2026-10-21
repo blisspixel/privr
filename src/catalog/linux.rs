@@ -26,6 +26,12 @@ const UBUNTU_REPORT_URL: &str = "https://github.com/ubuntu/ubuntu-report";
 const UBUNTU_INSIGHTS_URL: &str = "https://github.com/ubuntu/ubuntu-insights";
 const DEBIAN_POPCON_URL: &str =
     "https://manpages.debian.org/testing/popularity-contest/popularity-contest.8.en.html";
+const DEBIAN_POPCON_CRON_URL: &str =
+    "https://sources.debian.org/src/popularity-contest/1.79/debian/cron.daily/";
+const SYSTEMD_UNIT_URL: &str =
+    "https://www.freedesktop.org/software/systemd/man/latest/systemd.unit.html";
+const SYSTEMD_SYSTEMCTL_URL: &str =
+    "https://www.freedesktop.org/software/systemd/man/latest/systemctl.html";
 const FEDORA_ABRT_URL: &str = "https://abrt.readthedocs.io/en/latest/conf.html";
 const KDE_USERFEEDBACK_URL: &str = "https://develop.kde.org/docs/administration/kiosk/keys/";
 const PLASMA_FEEDBACK_KCFG_URL: &str = "https://invent.kde.org/plasma/plasma-workspace/-/blob/master/kcms/feedback/feedbacksettings.kcfg";
@@ -43,29 +49,29 @@ const AVAHI_CONF_URL: &str =
 const RESOLVED_DBUS_URL: &str =
     "https://www.freedesktop.org/software/systemd/man/latest/org.freedesktop.resolve1.html";
 
-/// Probe Debian popularity-contest configuration.
+/// The daily job merges more than this one file.
+///
+/// popularity-contest 1.79 exits when its command is absent. Otherwise it
+/// unsets participation, sources the package default, then this etc file,
+/// then each drop-in. Submission runs unless the merged value is `no` or
+/// empty. A later drop-in can turn submission on after this file says no,
+/// and off after it says yes. The package default says a missing option
+/// defaults to no, but that default is not in the file this probe reads.
 fn probe_debian_popcon(ctx: &Context) -> Resolution {
     match ctx.linux.text(Target::DebianPopcon) {
-        Ok(None) => Resolution::determined(disabled(), ManagementSource::Default),
-        Ok(Some(content)) => {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if trimmed.starts_with("PARTICIPATE=") {
-                    let val = trimmed.trim_start_matches("PARTICIPATE=").trim_matches('"');
-                    return Resolution::determined(
-                        if val.eq_ignore_ascii_case("no") {
-                            disabled()
-                        } else {
-                            enabled()
-                        },
-                        ManagementSource::User,
-                    );
-                }
-            }
-            Resolution::determined(disabled(), ManagementSource::Default)
-        }
+        Ok(_) => popcon_not_established(),
         Err(reason) => Resolution::uncertain(reason, ManagementSource::User),
     }
+}
+
+fn popcon_not_established() -> Resolution {
+    let mut resolution =
+        Resolution::uncertain(Uncertainty::Undetermined, ManagementSource::Unknown);
+    resolution.note = Some(
+        "The package default, the drop-in directory, and the package command were not read. This file alone does not establish whether submission is off."
+            .to_owned(),
+    );
+    resolution
 }
 
 /// The opt-in file is not the documented consent state.
@@ -217,8 +223,57 @@ fn probe_resolved_mdns(ctx: &Context) -> Resolution {
     crate::platform::linux::exposure::resolved_mdns(ctx.linux)
 }
 
-/// Probe systemd fstrim timer status.
+/// Whether `fstrim.timer` is enabled, after the unit file systemd would load.
+///
+/// A wants symlink is the documented enabled state. It is not sufficient:
+/// an empty unit file, including a link to the null device, is masked and
+/// cannot start. Search the unit paths before the wants symlinks. An unread
+/// or unreadable path stops the conclusion.
 fn probe_systemd_fstrim(ctx: &Context) -> Resolution {
+    match fstrim_fragment(ctx) {
+        Err(reason) => Resolution::uncertain(reason, ManagementSource::LocalPolicy),
+        Ok(FstrimFragment::Masked) => noted(
+            Resolution::determined(disabled(), ManagementSource::LocalPolicy),
+            "The unit file systemd would load is empty. An empty unit file, including one linked to the null device, is masked and cannot start. A wants symlink does not show that the timer runs.",
+        ),
+        Ok(FstrimFragment::Missing) => noted(
+            Resolution::determined(disabled(), ManagementSource::Default),
+            "No fstrim unit file was found in the standard unit directories. The timer is not running.",
+        ),
+        Ok(FstrimFragment::Loadable) => fstrim_wants(ctx),
+    }
+}
+
+enum FstrimFragment {
+    Loadable,
+    Masked,
+    Missing,
+}
+
+fn fstrim_fragment(ctx: &Context) -> Result<FstrimFragment, Uncertainty> {
+    for target in [
+        Target::FstrimUnitEtc,
+        Target::FstrimUnitRun,
+        Target::FstrimUnitLocal,
+        Target::FstrimUnitUsr,
+        Target::FstrimUnitLib,
+    ] {
+        match ctx.linux.text(target) {
+            Ok(None) => {}
+            Ok(Some(content)) => {
+                return Ok(if content.is_empty() {
+                    FstrimFragment::Masked
+                } else {
+                    FstrimFragment::Loadable
+                });
+            }
+            Err(reason) => return Err(reason),
+        }
+    }
+    Ok(FstrimFragment::Missing)
+}
+
+fn fstrim_wants(ctx: &Context) -> Resolution {
     for target in [Target::FstrimAdmin, Target::FstrimLib, Target::FstrimVendor] {
         match ctx.linux.exists(target) {
             Ok(true) => return Resolution::determined(enabled(), ManagementSource::LocalPolicy),
@@ -227,6 +282,11 @@ fn probe_systemd_fstrim(ctx: &Context) -> Resolution {
         }
     }
     Resolution::determined(disabled(), ManagementSource::Default)
+}
+
+fn noted(mut resolution: Resolution, note: &str) -> Resolution {
+    resolution.note = Some(note.to_owned());
+    resolution
 }
 
 /// Probe systemd-journald volatile storage.
@@ -269,11 +329,18 @@ pub fn controls() -> Vec<Control> {
             mitigation: Some(
                 "Package installation, updates, and package management are completely unaffected.",
             ),
-            sources: &[Source {
-                url: DEBIAN_POPCON_URL,
-                claim: "Documents popularity-contest survey participation.",
-                reviewed: "2026-09-21",
-            }],
+            sources: &[
+                Source {
+                    url: DEBIAN_POPCON_URL,
+                    claim: "The daily job follows the etc configuration and the package default.",
+                    reviewed: "2026-10-20",
+                },
+                Source {
+                    url: DEBIAN_POPCON_CRON_URL,
+                    claim: "The 1.79 daily job exits when the package command is absent. Otherwise it unsets participation, sources the package default, then the etc file, then each popularity-contest.d drop-in, and skips submission when the merged value is no or empty.",
+                    reviewed: "2026-10-20",
+                },
+            ],
             probe: probe_debian_popcon,
             apply: None,
             rollback: None,
@@ -618,11 +685,23 @@ pub fn controls() -> Vec<Control> {
             mitigation: Some(
                 "The timer executes once per week during system idle time with negligible I/O impact.",
             ),
-            sources: &[Source {
-                url: FSTRIM_DOCS_URL,
-                claim: "Documents systemd fstrim service and timer discard operations.",
-                reviewed: "2026-10-01",
-            }],
+            sources: &[
+                Source {
+                    url: FSTRIM_DOCS_URL,
+                    claim: "Documents fstrim discard operations started by the systemd timer.",
+                    reviewed: "2026-10-20",
+                },
+                Source {
+                    url: SYSTEMD_UNIT_URL,
+                    claim: "An empty unit file, or a unit file linked to /dev/null, is masked and cannot be activated.",
+                    reviewed: "2026-10-20",
+                },
+                Source {
+                    url: SYSTEMD_SYSTEMCTL_URL,
+                    claim: "Enabled means a wants, requires, or alias symlink. mask links the unit to /dev/null under /etc/systemd/system or /run/systemd/system and prevents activation, including enablement.",
+                    reviewed: "2026-10-20",
+                },
+            ],
             probe: probe_systemd_fstrim,
             apply: None,
             rollback: None,

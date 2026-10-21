@@ -2221,17 +2221,15 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn issue19_cli_selected_pass_drift_and_visibility_loss_keep_real_exit_codes() {
-        use crate::platform::linux::evidence::Target;
         use clap::Parser;
-        for (bytes, expected) in [
-            (Some(b"PARTICIPATE=\"no\"\n".as_slice()), 0),
-            (Some(b"PARTICIPATE=\"yes\"\n".as_slice()), 1),
+        let cases = [
+            (Some(crate::test_context::fstrim_enabled()), 0),
+            (Some(crate::test_context::fstrim_disabled()), 1),
             (None, 3),
-        ] {
-            let host = crate::test_context::host("debian", "hyprland");
-            let reader = crate::test_context::reader(
-                bytes.map(|b| (Target::DebianPopcon, crate::test_context::text(b))),
-            );
+        ];
+        for (entries, expected) in cases {
+            let host = crate::test_context::host("arch", "hyprland");
+            let reader = crate::test_context::reader(entries.unwrap_or_default());
             let context = crate::test_context::context(&host, &reader);
             for format in ["json", "text"] {
                 let cli = Cli::try_parse_from([
@@ -2242,9 +2240,9 @@ mod tests {
                     format,
                     "check",
                     "--control",
-                    "debian",
+                    "systemd.fstrim",
                     "--section",
-                    "DeB",
+                    "SYS",
                     "--all",
                 ])
                 .unwrap();
@@ -2258,7 +2256,8 @@ mod tests {
                         std::path::Path::new("unused-read-only-check"),
                         Some(&context)
                     ),
-                    expected
+                    expected,
+                    "{format} exit"
                 );
                 assert!(err.is_empty());
                 if format == "json" {

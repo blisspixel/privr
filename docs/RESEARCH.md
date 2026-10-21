@@ -352,10 +352,17 @@ setting that hides crash prompts is not proof that capture or upload is disabled
   the desktop session setting is separate. The package-data file does not
   govern this switch:
   [ABRT configuration](https://abrt.readthedocs.io/en/latest/conf.html).
-- Debian `popularity-contest` is optional and explicit opt-in, but participation
-  is privacy-relevant when installed:
-  [Debian privacy policy](https://www.debian.org/legal/privacy) and
-  [popularity-contest manual](https://manpages.debian.org/testing/popularity-contest/popularity-contest.8.en.html).
+- Debian `popularity-contest` submits package lists when the merged
+  participation value is anything other than `no` or empty. The 1.79 daily
+  job exits when `/usr/sbin/popularity-contest` is absent. Otherwise it
+  unsets the variable, sources `/usr/share/popularity-contest/default.conf`
+  (which sets participation to `no` and says a missing option defaults to
+  `no`), then `/etc/popularity-contest.conf`, then each file `run-parts`
+  lists under `/etc/popularity-contest.d`. A later drop-in overrides the
+  etc file. Reading only that file cannot establish that submission is off:
+  [Debian privacy policy](https://www.debian.org/legal/privacy),
+  [popularity-contest manual](https://manpages.debian.org/testing/popularity-contest/popularity-contest.8.en.html),
+  and [the 1.79 daily job](https://sources.debian.org/src/popularity-contest/1.79/debian/cron.daily/).
 - KDE telemetry is disabled by default, and a user can enable it inside
   applications. The administrator force-off is `Enabled=false` in
   `/etc/xdg/KDE/UserFeedback.conf`. Plasma stores `FeedbackLevel` in

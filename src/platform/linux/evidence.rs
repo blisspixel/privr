@@ -25,6 +25,16 @@ pub enum Target {
     FstrimAdmin,
     FstrimLib,
     FstrimVendor,
+    /// `/etc/systemd/system/fstrim.timer`, the highest-precedence unit file.
+    FstrimUnitEtc,
+    /// `/run/systemd/system/fstrim.timer`, the runtime unit file.
+    FstrimUnitRun,
+    /// `/usr/local/lib/systemd/system/fstrim.timer`.
+    FstrimUnitLocal,
+    /// `/usr/lib/systemd/system/fstrim.timer`.
+    FstrimUnitUsr,
+    /// `/lib/systemd/system/fstrim.timer`.
+    FstrimUnitLib,
 }
 
 impl Target {
@@ -42,6 +52,11 @@ impl Target {
             Self::FstrimAdmin => "/etc/systemd/system/timers.target.wants/fstrim.timer".into(),
             Self::FstrimLib => "/lib/systemd/system/timers.target.wants/fstrim.timer".into(),
             Self::FstrimVendor => "/usr/lib/systemd/system/timers.target.wants/fstrim.timer".into(),
+            Self::FstrimUnitEtc => "/etc/systemd/system/fstrim.timer".into(),
+            Self::FstrimUnitRun => "/run/systemd/system/fstrim.timer".into(),
+            Self::FstrimUnitLocal => "/usr/local/lib/systemd/system/fstrim.timer".into(),
+            Self::FstrimUnitUsr => "/usr/lib/systemd/system/fstrim.timer".into(),
+            Self::FstrimUnitLib => "/lib/systemd/system/fstrim.timer".into(),
         })
     }
 

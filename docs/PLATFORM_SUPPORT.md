@@ -233,7 +233,7 @@ disclose this difference from a strict zero-egress configuration.
 | Control ID | Desired behavior | Capability | Notes | Primary source |
 |---|---|---|---|---|
 | `fedora.abrt.auto-reporting` | Disabled, user-triggered reports retained | check, apply | Only an explicit `AutoreportingEnabled=yes` in `abrt.conf` is determined. `no`, a missing key, and a missing file stay unknown. | [ABRT configuration](https://abrt.readthedocs.io/en/latest/conf.html) |
-| `debian.popularity-contest.participation` | `PARTICIPATE=no` | check, apply | Only when package is installed; preserve file metadata and comments | [popularity-contest manual](https://manpages.debian.org/testing/popularity-contest/popularity-contest.8.en.html) |
+| `debian.popularity-contest.participation` | Disabled | check, audit-only | The 1.79 daily job merges the package default, the etc file, and `popularity-contest.d` drop-ins. This check reads only the etc file, so yes, no, a missing key, and a missing file stay unknown. | [popularity-contest manual](https://manpages.debian.org/testing/popularity-contest/popularity-contest.8.en.html) |
 | `kde.user-feedback.global` | Disabled | check, apply | The legacy user file is not the setting. `PlasmaUserFeedback` and the administrator force-off file are unread, so every successful read stays unknown. | [KDE Kiosk policy](https://develop.kde.org/docs/administration/kiosk/keys/) |
 
 ## Linux audit-only expansion

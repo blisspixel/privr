@@ -1365,12 +1365,8 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn issue19_mcp_selected_scope_is_aggregated_before_presentation() {
-        use crate::platform::linux::evidence::Target;
         let host = crate::test_context::host("debian", "hyprland");
-        let reader = crate::test_context::reader([(
-            Target::DebianPopcon,
-            crate::test_context::text(b"PARTICIPATE=\"no\"\n"),
-        )]);
+        let reader = crate::test_context::reader(crate::test_context::fstrim_enabled());
         let context = crate::test_context::context(&host, &reader);
         let (_, report) = recorded_check(json!({"section":"SyStEmD","all":true}), &context);
         assert_eq!(report["results"].as_array().unwrap().len(), 5);
@@ -1380,8 +1376,9 @@ mod tests {
         assert_eq!(report["carried"], 17);
         assert!(reader.requested().is_empty());
 
-        let (_, shown) = recorded_check(json!({"control":"debian", "all":true}), &context);
-        let (_, hidden) = recorded_check(json!({"control":"debian", "all":false}), &context);
+        let (_, shown) = recorded_check(json!({"control":"systemd.fstrim", "all":true}), &context);
+        let (_, hidden) =
+            recorded_check(json!({"control":"systemd.fstrim", "all":false}), &context);
         assert_eq!(shown["summary"]["pass"], 1);
         assert_eq!(shown["summary"], hidden["summary"]);
         assert_eq!(shown["complete"], true);
@@ -1444,29 +1441,29 @@ mod tests {
     #[test]
     fn mcp_check_matches_the_shared_report_for_the_same_recording() {
         use crate::platform::linux::evidence::Target;
-        let host = crate::test_context::host("debian", "hyprland");
+        let host = crate::test_context::host("fedora", "hyprland");
         let reader = crate::test_context::reader([(
-            Target::DebianPopcon,
-            crate::test_context::text(b"PARTICIPATE=\"no\"\n"),
+            Target::FedoraAbrt,
+            crate::test_context::text(b"AutoreportingEnabled = yes\n# /home/secret-user\n"),
         )]);
         let context = crate::test_context::context(&host, &reader);
         let report = crate::report::Report::build_with_context(
             &context,
             Some("baseline"),
             None,
-            &["debian".to_owned()],
+            &["fedora".to_owned()],
             &[],
         );
-        let (_, mcp) = recorded_check(json!({"control": "debian", "all": true}), &context);
+        let (_, mcp) = recorded_check(json!({"control": "fedora", "all": true}), &context);
         let cli: Value = serde_json::from_str(&serde_json::to_string(&report).unwrap()).unwrap();
         assert_eq!(mcp, cli);
         assert_eq!(mcp["schema"], 2);
         assert_eq!(mcp["complete"], true);
-        assert_eq!(mcp["results"][0]["observed"], "disabled");
+        assert_eq!(mcp["results"][0]["observed"], "enabled");
         assert_eq!(mcp["results"][0]["policy_mode"], "enforce");
         assert!(mcp["results"][0]["confident"].as_bool().unwrap());
         let rendered = mcp.to_string();
-        assert!(!rendered.contains("/home/"));
+        assert!(!rendered.contains("/home/secret-user"));
         assert!(!rendered.contains("PARTICIPATE"));
     }
 

@@ -848,21 +848,44 @@ mod tests {
     #[test]
     fn issue19_real_probe_pass_drift_and_review_remain_distinct() {
         use crate::platform::linux::evidence::Target;
-        for (bytes, outcome, exit) in [
-            (b"PARTICIPATE=\"no\"\n".as_slice(), Outcome::Pass, 0),
-            (b"PARTICIPATE=\"yes\"\n".as_slice(), Outcome::Drift, 1),
+        for (entries, outcome, exit, requested) in [
+            (
+                crate::test_context::fstrim_enabled(),
+                Outcome::Pass,
+                0,
+                vec![
+                    Target::FstrimUnitEtc,
+                    Target::FstrimUnitRun,
+                    Target::FstrimUnitLocal,
+                    Target::FstrimUnitUsr,
+                    Target::FstrimAdmin,
+                    Target::FstrimLib,
+                    Target::FstrimVendor,
+                ],
+            ),
+            (
+                crate::test_context::fstrim_disabled(),
+                Outcome::Drift,
+                1,
+                vec![
+                    Target::FstrimUnitEtc,
+                    Target::FstrimUnitRun,
+                    Target::FstrimUnitLocal,
+                    Target::FstrimUnitUsr,
+                    Target::FstrimAdmin,
+                    Target::FstrimLib,
+                    Target::FstrimVendor,
+                ],
+            ),
         ] {
-            let host = crate::test_context::host("debian", "hyprland");
-            let reader = crate::test_context::reader([(
-                Target::DebianPopcon,
-                crate::test_context::text(bytes),
-            )]);
+            let host = crate::test_context::host("arch", "hyprland");
+            let reader = crate::test_context::reader(entries);
             let context = crate::test_context::context(&host, &reader);
             let report = Report::build_with_context(
                 &context,
                 Some("baseline"),
                 None,
-                &["debian".to_owned()],
+                &["systemd.fstrim".to_owned()],
                 &[],
             );
             assert_eq!(report.results.len(), 1);
@@ -870,10 +893,10 @@ mod tests {
             assert!(report.complete);
             assert_eq!(report.exit_code(), exit);
             assert_eq!(report.carried, 17);
-            assert_eq!(reader.requested(), vec![Target::DebianPopcon]);
+            assert_eq!(reader.requested(), requested);
             let control = catalog::all()
                 .into_iter()
-                .find(|c| c.spec.id.starts_with("debian"))
+                .find(|c| c.spec.id == "systemd.fstrim.timer")
                 .unwrap();
             let review = evaluate(
                 &control.spec,
@@ -1019,31 +1042,52 @@ mod tests {
     #[test]
     fn issue19_drift_with_unknown_remains_incomplete() {
         use crate::platform::linux::evidence::Target;
+        use crate::platform::linux::exposure::{self, ExposureRecords};
         let host = crate::test_context::host("debian", "gnome");
-        let reader = crate::test_context::reader([(
-            Target::DebianPopcon,
-            crate::test_context::text(b"PARTICIPATE=\"yes\"\n"),
-        )]);
+        let mut files = exposure::absent_files();
+        files.vendor_dropin = exposure::dropin(
+            "20-connectivity.conf",
+            b"[connectivity]\nuri=http://example.invalid/nm-check.txt\n",
+        );
+        let reader = crate::test_context::reader_with_exposure(
+            [(
+                Target::DebianPopcon,
+                crate::test_context::text(b"PARTICIPATE=\"yes\"\n"),
+            )],
+            ExposureRecords {
+                network_manager: Some(files),
+                ..ExposureRecords::default()
+            },
+        );
         let context = crate::test_context::context(&host, &reader);
         let report = Report::build_with_context(&context, Some("baseline"), None, &[], &[]);
         assert_eq!(report.summary.drift, 1);
         assert_eq!(report.summary.unknown, 5);
+        assert_eq!(report.summary.pass, 0);
         assert_eq!(report.summary.evaluated(), 1);
         assert!(!report.complete);
         assert_eq!(report.exit_code(), 3);
+        assert!(report.results.iter().any(|result| {
+            result.id == "debian.popularity-contest.participation"
+                && result.outcome == Outcome::Unknown
+        }));
+        assert!(
+            report
+                .results
+                .iter()
+                .any(|result| result.id == "networkmanager.connectivity.check"
+                    && result.outcome == Outcome::Drift)
+        );
     }
 
     #[cfg(target_os = "linux")]
     #[test]
     fn issue19_repeated_selectors_keep_prefix_case_and_and_or_semantics() {
-        use crate::platform::linux::evidence::{Reader, Target};
+        use crate::platform::linux::evidence::Reader;
         use crate::platform::linux::systemd::ConfigurationFamily;
         let host = crate::test_context::host("debian", "hyprland");
         let reader = Reader::recorded_with_configurations(
-            std::collections::BTreeMap::from([(
-                Target::DebianPopcon,
-                crate::test_context::text(b"PARTICIPATE=\"no\"\n"),
-            )]),
+            crate::test_context::fstrim_enabled().into_iter().collect(),
             std::collections::BTreeMap::from([(
                 ConfigurationFamily::Journald,
                 crate::test_context::configuration(b"[Journal]\nStorage=volatile\n"),
@@ -1054,8 +1098,12 @@ mod tests {
             &context,
             Some("baseline"),
             None,
-            &["debian".to_owned(), "systemd.journald".to_owned()],
-            &["DeB".to_owned(), "SYS".to_owned()],
+            &[
+                "systemd.fstrim".to_owned(),
+                "systemd.journald".to_owned(),
+                "systemd.fstrim".to_owned(),
+            ],
+            &["SYS".to_owned(), "SyS".to_owned()],
         );
         assert_eq!(report.results.len(), 2);
         assert_eq!(report.summary.pass, 1);
@@ -1070,7 +1118,7 @@ mod tests {
             &context,
             Some("baseline"),
             None,
-            &["Debian".to_owned()],
+            &["Systemd".to_owned()],
             &[],
         );
         assert!(wrong_case.results.is_empty());
@@ -1080,16 +1128,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn issue19_compiled_linux_targets_use_only_the_recorded_reader() {
-        use crate::model::evidence::{Evidence, RawValue, ValueKind};
-        use crate::model::host::ManagementSource;
         use crate::platform::linux::evidence::Target;
-        let absent = Evidence::Absent {
-            source: ManagementSource::Unknown,
-        };
-        let present = Evidence::Present {
-            source: ManagementSource::Unknown,
-            value: RawValue::new(ValueKind::Bool, vec![1]),
-        };
         for (distribution, desktop, selector, entries, expected, requested) in [
             (
                 "fedora",
@@ -1106,13 +1145,17 @@ mod tests {
                 "arch",
                 "hyprland",
                 "systemd.fstrim",
-                vec![
-                    (Target::FstrimAdmin, absent.clone()),
-                    (Target::FstrimLib, absent.clone()),
-                    (Target::FstrimVendor, present.clone()),
-                ],
+                crate::test_context::fstrim_enabled(),
                 Outcome::Pass,
-                vec![Target::FstrimAdmin, Target::FstrimLib, Target::FstrimVendor],
+                vec![
+                    Target::FstrimUnitEtc,
+                    Target::FstrimUnitRun,
+                    Target::FstrimUnitLocal,
+                    Target::FstrimUnitUsr,
+                    Target::FstrimAdmin,
+                    Target::FstrimLib,
+                    Target::FstrimVendor,
+                ],
             ),
         ] {
             let host = crate::test_context::host(distribution, desktop);
@@ -1291,6 +1334,252 @@ mod tests {
         assert_ne!(result.outcome, Outcome::Pass);
         assert_eq!(result.observation_reason, Some(Uncertainty::Denied));
         assert!(result.note.is_none());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn popularity_contest_file_alone_does_not_establish_participation() {
+        use crate::engine::evaluate::Uncertainty;
+        use crate::model::evidence::{DenialReason, Evidence};
+        use crate::model::host::ManagementSource;
+        use crate::model::outcome::ObservationBasis;
+        use crate::platform::linux::evidence::Target;
+
+        let host = crate::test_context::host("debian", "hyprland");
+        for bytes in [
+            b"PARTICIPATE=\"no\"\n# /home/secret-user\n".as_slice(),
+            b"PARTICIPATE=no\n".as_slice(),
+            b"PARTICIPATE=\"NO\"\n".as_slice(),
+            b"PARTICIPATE=\"yes\"\n".as_slice(),
+            b"PARTICIPATE=yes\n".as_slice(),
+            b"PARTICIPATE=\n".as_slice(),
+            b"PARTICIPATE=\"maybe\"\n".as_slice(),
+            b"# PARTICIPATE=yes\n".as_slice(),
+            b"PARTICIPATE = \"no\"\n".as_slice(),
+            b"".as_slice(),
+        ] {
+            let reader = crate::test_context::reader([(
+                Target::DebianPopcon,
+                crate::test_context::text(bytes),
+            )]);
+            let context = crate::test_context::context(&host, &reader);
+            let report = Report::build_with_context(
+                &context,
+                Some("baseline"),
+                None,
+                &["debian".to_owned()],
+                &[],
+            );
+            let result = &report.results[0];
+            assert_eq!(result.outcome, Outcome::Unknown);
+            assert_ne!(result.outcome, Outcome::Pass);
+            assert_ne!(result.outcome, Outcome::Drift);
+            assert_eq!(report.summary.pass, 0);
+            assert_eq!(report.summary.drift, 0);
+            assert!(!report.complete);
+            assert_eq!(report.exit_code(), 3);
+            assert!(result.observed.is_none());
+            assert!(!result.confident);
+            assert_eq!(result.observation_basis, ObservationBasis::Inconclusive);
+            assert_eq!(result.observation_reason, Some(Uncertainty::Undetermined));
+            assert_eq!(
+                result.management_source,
+                crate::model::host::ManagementSource::Unknown
+            );
+            let note = result.note.as_deref().unwrap();
+            assert!(note.contains("does not establish"));
+            assert!(!note.contains('/'));
+            assert!(!note.contains("secret-user"));
+            let json = serde_json::to_string(&report).expect("json");
+            let text = report.to_text(&Ui::plain(), true);
+            for rendered in [&json, &text] {
+                assert!(
+                    !rendered.contains("/home/secret-user"),
+                    "canary leaked: {rendered}"
+                );
+            }
+            assert_eq!(reader.requested(), vec![Target::DebianPopcon]);
+        }
+
+        let reader = crate::test_context::reader([(
+            Target::DebianPopcon,
+            Evidence::Absent {
+                source: ManagementSource::Unknown,
+            },
+        )]);
+        let context = crate::test_context::context(&host, &reader);
+        let report = Report::build_with_context(
+            &context,
+            Some("baseline"),
+            None,
+            &["debian".to_owned()],
+            &[],
+        );
+        assert_eq!(report.results[0].outcome, Outcome::Unknown);
+        assert_eq!(report.summary.pass, 0);
+        assert!(!report.complete);
+
+        for (evidence, reason) in [
+            (
+                Evidence::Denied {
+                    source: ManagementSource::User,
+                    reason: DenialReason::Permission,
+                },
+                Uncertainty::Denied,
+            ),
+            (
+                Evidence::Malformed {
+                    source: ManagementSource::Unknown,
+                    expected: crate::model::evidence::ValueKind::String,
+                    found: crate::model::evidence::ValueKind::Binary,
+                },
+                Uncertainty::Malformed,
+            ),
+            (
+                Evidence::Unsupported {
+                    source: ManagementSource::Unknown,
+                },
+                Uncertainty::Unsupported,
+            ),
+        ] {
+            let reader = crate::test_context::reader([(Target::DebianPopcon, evidence)]);
+            let context = crate::test_context::context(&host, &reader);
+            let report = Report::build_with_context(
+                &context,
+                Some("baseline"),
+                None,
+                &["debian".to_owned()],
+                &[],
+            );
+            let result = &report.results[0];
+            assert_eq!(result.outcome, Outcome::Unknown);
+            assert_ne!(result.outcome, Outcome::Pass);
+            assert_eq!(result.observation_reason, Some(reason));
+            assert!(result.note.is_none());
+            assert_eq!(report.summary.pass, 0);
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn fstrim_wants_symlink_does_not_pass_when_the_unit_is_masked() {
+        use crate::engine::evaluate::Uncertainty;
+        use crate::model::evidence::{DenialReason, Evidence};
+        use crate::model::host::ManagementSource;
+        use crate::platform::linux::evidence::Target;
+
+        let host = crate::test_context::host("arch", "hyprland");
+        let check = |entries: Vec<(Target, Evidence)>| {
+            let reader = crate::test_context::reader(entries);
+            let context = crate::test_context::context(&host, &reader);
+            let report = Report::build_with_context(
+                &context,
+                Some("baseline"),
+                None,
+                &["systemd.fstrim".to_owned()],
+                &[],
+            );
+            (reader, report)
+        };
+
+        let (reader, report) = check(crate::test_context::fstrim_masked());
+        let result = &report.results[0];
+        assert_eq!(result.outcome, Outcome::Drift);
+        assert_ne!(result.outcome, Outcome::Pass);
+        assert_eq!(result.observed.as_deref(), Some("disabled"));
+        assert!(result.confident);
+        assert_eq!(report.summary.pass, 0);
+        assert!(report.complete);
+        assert_eq!(report.exit_code(), 1);
+        let note = result.note.as_deref().unwrap();
+        assert!(note.contains("masked"));
+        assert!(!note.contains('/'));
+        assert!(!note.contains("secret-user"));
+        let json = serde_json::to_string(&report).expect("json");
+        assert!(!json.contains("/home/secret-user"));
+        assert_eq!(reader.requested(), vec![Target::FstrimUnitEtc]);
+
+        let mut runtime = crate::test_context::fstrim_enabled();
+        for (target, evidence) in &mut runtime {
+            if *target == Target::FstrimUnitRun {
+                *evidence = crate::test_context::text(b"");
+            }
+        }
+        let (reader, report) = check(runtime);
+        assert_eq!(report.results[0].outcome, Outcome::Drift);
+        assert_ne!(report.results[0].outcome, Outcome::Pass);
+        assert_eq!(
+            reader.requested(),
+            vec![Target::FstrimUnitEtc, Target::FstrimUnitRun]
+        );
+
+        let vendor_empty = crate::test_context::fstrim(
+            Some((Target::FstrimUnitUsr, b"".as_slice())),
+            &[Target::FstrimVendor],
+        );
+        let (reader, report) = check(vendor_empty);
+        assert_eq!(report.results[0].outcome, Outcome::Drift);
+        assert_ne!(report.results[0].outcome, Outcome::Pass);
+        assert!(!reader.requested().contains(&Target::FstrimVendor));
+
+        let missing = crate::test_context::fstrim(None, &[Target::FstrimVendor]);
+        let (reader, report) = check(missing);
+        assert_eq!(report.results[0].outcome, Outcome::Drift);
+        assert_ne!(report.results[0].outcome, Outcome::Pass);
+        assert!(reader.requested().contains(&Target::FstrimUnitLib));
+        assert!(!reader.requested().contains(&Target::FstrimVendor));
+
+        let mut etc_wins = crate::test_context::fstrim(
+            Some((
+                Target::FstrimUnitEtc,
+                b"[Timer]\nOnCalendar=weekly\n".as_slice(),
+            )),
+            &[Target::FstrimVendor],
+        );
+        for (target, evidence) in &mut etc_wins {
+            if *target == Target::FstrimUnitRun {
+                *evidence = crate::test_context::text(b"");
+            }
+        }
+        let (reader, report) = check(etc_wins);
+        assert_eq!(report.results[0].outcome, Outcome::Pass);
+        assert_eq!(reader.requested()[0], Target::FstrimUnitEtc);
+        assert!(!reader.requested().contains(&Target::FstrimUnitRun));
+
+        let mut denied = crate::test_context::fstrim_enabled();
+        for (target, evidence) in &mut denied {
+            if *target == Target::FstrimUnitEtc {
+                *evidence = Evidence::Denied {
+                    source: ManagementSource::LocalPolicy,
+                    reason: DenialReason::Permission,
+                };
+            }
+        }
+        let (reader, report) = check(denied);
+        assert_eq!(report.results[0].outcome, Outcome::Unknown);
+        assert_ne!(report.results[0].outcome, Outcome::Pass);
+        assert_eq!(
+            report.results[0].observation_reason,
+            Some(Uncertainty::Denied)
+        );
+        assert!(report.results[0].note.is_none());
+        assert_eq!(report.summary.pass, 0);
+        assert!(!report.complete);
+        assert_eq!(reader.requested(), vec![Target::FstrimUnitEtc]);
+
+        let mut bytes = crate::test_context::fstrim_enabled();
+        for (target, evidence) in &mut bytes {
+            if *target == Target::FstrimUnitEtc {
+                *evidence = crate::test_context::text(&[0xff]);
+            }
+        }
+        let (_, report) = check(bytes);
+        assert_eq!(report.results[0].outcome, Outcome::Unknown);
+        assert_eq!(
+            report.results[0].observation_reason,
+            Some(Uncertainty::Malformed)
+        );
+        assert_eq!(report.summary.pass, 0);
     }
 
     fn empty_report() -> Report {
@@ -1688,10 +1977,10 @@ mod tests {
     fn a_saved_report_keeps_the_reduced_observation_after_evidence_changes() {
         use crate::model::outcome::ObservationBasis;
         use crate::platform::linux::evidence::Target;
-        let host = crate::test_context::host("debian", "hyprland");
+        let host = crate::test_context::host("fedora", "hyprland");
         let mut reader = crate::test_context::reader([(
-            Target::DebianPopcon,
-            crate::test_context::text(b"PARTICIPATE=\"no\"\n# /home/secret-user\n"),
+            Target::FedoraAbrt,
+            crate::test_context::text(b"AutoreportingEnabled = yes\n# /home/secret-user\n"),
         )]);
         let report = {
             let context = crate::test_context::context(&host, &reader);
@@ -1699,19 +1988,19 @@ mod tests {
                 &context,
                 Some("baseline"),
                 None,
-                &["debian".to_owned()],
+                &["fedora".to_owned()],
                 &[],
             )
         };
         let reads = reader.requested().len();
         reader.rewrite(
-            Target::DebianPopcon,
-            crate::test_context::text(b"PARTICIPATE=\"yes\"\n/home/secret-user\n"),
+            Target::FedoraAbrt,
+            crate::test_context::text(b"AutoreportingEnabled = no\n/home/secret-user\n"),
         );
         assert_eq!(reader.requested().len(), reads);
         let result = &report.results[0];
-        assert_eq!(result.outcome, Outcome::Pass);
-        assert_eq!(result.observed.as_deref(), Some("disabled"));
+        assert_eq!(result.outcome, Outcome::Drift);
+        assert_eq!(result.observed.as_deref(), Some("enabled"));
         assert_eq!(result.desired, "disabled");
         assert_eq!(result.observation_basis, ObservationBasis::Established);
         assert!(result.observation_reason.is_none());
@@ -1727,15 +2016,14 @@ mod tests {
             assert!(!rendered.contains("PARTICIPATE"));
         }
         assert!(
-            json.contains("\"observed\":\"disabled\"")
-                || json.contains("\"observed\": \"disabled\"")
+            json.contains("\"observed\":\"enabled\"") || json.contains("\"observed\": \"enabled\"")
         );
         assert_eq!(report.schema, SCHEMA);
         assert!(!report.sources.is_empty());
         assert!(
             report.sources[result.source_refs[0] as usize]
                 .url
-                .contains("popularity-contest")
+                .contains("abrt")
         );
     }
 }

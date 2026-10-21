@@ -246,6 +246,12 @@ fn connectivity(files: &NmFiles) -> Result<Resolution, Uncertainty> {
     ))
 }
 
+/// Publish settings decide whether the daemon announces this host.
+///
+/// `systemctl is-active` prints whether the unit is running. `inactive` means
+/// stopped, and `failed` means the unit failed. Neither state is
+/// `disable-publishing`, which defaults to no. `publish-addresses` defaults
+/// to yes, so a stopped daemon with those defaults stays unknown.
 fn publishing(files: &AvahiFiles) -> Result<Resolution, Uncertainty> {
     if let Activity::Unknown(reason) = files.active {
         return Err(reason);
@@ -297,9 +303,19 @@ fn publishing(files: &AvahiFiles) -> Result<Resolution, Uncertainty> {
     .into_iter()
     .find(|source| *source != ManagementSource::Default)
     .unwrap_or(ManagementSource::Default);
-    let off = files.active == Activity::Inactive || !publishing;
+    // A unit that is not running has not been shown to be configured off.
+    // The next start uses these publish settings. Only those settings can
+    // establish that announcements are off.
+    if publishing && files.active != Activity::Active {
+        let mut resolution =
+            Resolution::uncertain(Uncertainty::Undetermined, ManagementSource::Unknown);
+        resolution.note = Some(format!(
+            "{note}. The service is not active, so this does not establish that publishing is off."
+        ));
+        return Ok(resolution);
+    }
     Ok(noted(
-        Resolution::determined(if off { disabled() } else { enabled() }, explicit),
+        Resolution::determined(if publishing { enabled() } else { disabled() }, explicit),
         note,
     ))
 }
@@ -794,7 +810,13 @@ fn systemctl_active(unit: &str) -> Activity {
     if output.stdout.len() > MAX_COMMAND_BYTES {
         return Activity::Unknown(Uncertainty::Undetermined);
     }
-    match String::from_utf8_lossy(&output.stdout).trim() {
+    activity_from_is_active(&String::from_utf8_lossy(&output.stdout))
+}
+
+/// Classify `systemctl is-active` stdout. The command prints the process
+/// state, not whether the unit is enabled and not whether publishing is off.
+fn activity_from_is_active(stdout: &str) -> Activity {
+    match stdout.trim() {
         "active" | "activating" | "reloading" => Activity::Active,
         "inactive" | "failed" | "deactivating" => Activity::Inactive,
         _ => Activity::Unknown(Uncertainty::Undetermined),
@@ -1246,6 +1268,122 @@ mod tests {
             },
         );
         assert_eq!(outcome, Outcome::Unknown);
+    }
+
+    #[test]
+    fn is_active_tokens_distinguish_running_from_stopped_failed_and_unknown() {
+        for token in ["active", "activating", "reloading", " active\n"] {
+            assert_eq!(
+                activity_from_is_active(token),
+                Activity::Active,
+                "{token:?}"
+            );
+        }
+        // These three tokens share one state. A stopped, failed, or stopping
+        // daemon must not become a pass while the publish settings stay on.
+        for token in ["inactive", "failed", "deactivating", " failed\n"] {
+            assert_eq!(
+                activity_from_is_active(token),
+                Activity::Inactive,
+                "{token:?}"
+            );
+        }
+        for token in [
+            "",
+            "unknown",
+            "not-found",
+            "maintenance",
+            "INACTIVE",
+            "failed extra",
+        ] {
+            assert!(
+                matches!(
+                    activity_from_is_active(token),
+                    Activity::Unknown(Uncertainty::Undetermined)
+                ),
+                "{token:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn stopped_avahi_does_not_pass_unless_publish_settings_are_off() {
+        let host = crate::test_context::host("arch", "hyprland");
+        let mut commented = absent_avahi();
+        commented.active = Activity::Inactive;
+        commented.etc_main =
+            text_file(b"[publish]\n# disable-publishing=yes\n# /home/secret-user\n");
+        let reader = crate::test_context::reader_with_exposure(
+            [],
+            ExposureRecords {
+                avahi: Some(commented),
+                ..ExposureRecords::default()
+            },
+        );
+        let context = crate::test_context::context(&host, &reader);
+        let report = Report::build_with_context(
+            &context,
+            Some("strict"),
+            None,
+            &["avahi.mdns.publishing".to_owned()],
+            &[],
+        );
+        let result = &report.results[0];
+        assert_eq!(result.outcome, Outcome::Unknown);
+        assert_ne!(result.outcome, Outcome::Pass);
+        assert!(!report.complete);
+        assert!(!result.confident);
+        assert_eq!(result.observed, None);
+        assert_eq!(result.observation_reason, Some(Uncertainty::Undetermined));
+        assert_eq!(result.management_source, ManagementSource::Unknown);
+        let note = result.note.as_deref().expect("note");
+        assert!(note.contains("service inactive"));
+        assert!(note.contains("publish-addresses yes"));
+        assert!(note.contains("does not establish that publishing is off"));
+        assert!(!note.contains('/'));
+        assert!(!note.contains("secret-user"));
+        let json = serde_json::to_string(&report).expect("report json");
+        assert!(!json.contains("secret-user"));
+
+        let mut disabled = absent_avahi();
+        disabled.active = Activity::Inactive;
+        disabled.etc_main = text_file(b"[publish]\ndisable-publishing=yes\n# /home/secret-user\n");
+        let (outcome, note) = checked(
+            "avahi.mdns.publishing",
+            "strict",
+            ExposureRecords {
+                avahi: Some(disabled),
+                ..ExposureRecords::default()
+            },
+        );
+        assert_eq!(outcome, Outcome::Pass);
+        let note = note.expect("note");
+        assert!(note.contains("disable-publishing yes"));
+        assert!(note.contains("service inactive"));
+        assert!(!note.contains("does not establish"));
+        assert!(!note.contains("secret-user"));
+        assert!(!note.contains('/'));
+
+        let mut quiet = absent_avahi();
+        quiet.active = Activity::Inactive;
+        quiet.etc_main = text_file(
+            b"[publish]\npublish-addresses=no\npublish-hinfo=no\npublish-workstation=no\n",
+        );
+        let (outcome, note) = checked(
+            "avahi.mdns.publishing",
+            "strict",
+            ExposureRecords {
+                avahi: Some(quiet),
+                ..ExposureRecords::default()
+            },
+        );
+        assert_eq!(outcome, Outcome::Pass);
+        let note = note.expect("note");
+        assert!(note.contains("publish-addresses no"));
+        assert!(note.contains("publish-hinfo no"));
+        assert!(note.contains("publish-workstation no"));
+        assert!(!note.contains("does not establish"));
+        assert!(!note.contains('/'));
     }
 
     #[test]

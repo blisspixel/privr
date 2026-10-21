@@ -36,6 +36,10 @@ designed to be driven by an agent harness as readily as by a person.
 - **A masked fstrim unit does not pass**. A wants symlink is enablement only
   when the unit file systemd would load is non-empty. An empty unit file,
   including a link to the null device, stays drift.
+- **A stopped avahi-daemon does not pass**. `systemctl is-active` reports
+  whether the process is running. It does not disable publishing.
+  `disable-publishing` defaults to no and `publish-addresses` defaults to
+  yes, so a stopped daemon with those defaults stays unknown.
 - **Check completeness follows the selected scope**. Zero evaluated controls are incomplete (exit 3), even when every result is not applicable or not selected. CLI and MCP selectors share the compiled report builder; hiding passing rows does not change summary counts. See [report semantics](docs/RESULTS.md#completeness).
 - **First-run output keeps uncertainty visible**. The headline leads with
   unknown, unchecked, and error counts, then how many evaluated controls pass.

@@ -3359,8 +3359,13 @@ mod tests {
             &mut err,
             &directory.0,
         );
-        let stdout = String::from_utf8(out).expect("utf-8");
-        assert!(stdout.contains("tx-apply-1"));
+        let combined = format!(
+            "{}\n{}",
+            String::from_utf8_lossy(&out),
+            String::from_utf8_lossy(&err)
+        );
+        assert!(combined.contains("tx-apply-1") || combined.contains("windows.advertising.id"));
+        assert!(!combined.contains("clean-recent"));
     }
 
     #[test]

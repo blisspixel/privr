@@ -43,7 +43,7 @@ milestone and its results should not be trusted.
 | Profile ladder | Implemented and verified. Baseline <= Strict <= Restrictive ladder partitions controls monotonically. |
 | Custom policy files, sections | Not built. The minimum custom-policy schema and section approval are 0.2.0 prerequisites; policy inheritance and exceptions are planned for 0.5.0. |
 | PowerShell session-only history | Planned research and guided configuration. No PSReadLine history or prediction control is implemented. See [the proposal](#powershell-session-only-history-planned). |
-| Privacy-cache inspection and clearing | Proposed research and guided workflows, with aggressive purge selection by default and a polite option. `purge` is not implemented. See [candidate priorities, sources, and safety gates](docs/CACHE_PRIVACY_PLAN.md); automated clearing remains in 0.5.0. |
+| Privacy-cache inspection and clearing | Implemented on Windows. `privr clean` (alias `privr purge`) inspects and safely removes reviewed disposable temporary files, crash dumps, browser caches, AI agent scratch files, package manager caches, and recent activity residue. Includes preview dashboard, category filtering, and polite retention mode. See [candidate priorities, sources, and safety gates](docs/CACHE_PRIVACY_PLAN.md). |
 | Fixture files | Initial file replay for 2 Windows controls (advertising ID and diagnostic data), covering 55 synthetic observation states. The compiled probes and evaluator run against exact typed bytes through recorded Context. Native captures, remaining controls, and mutation fixtures are still owed. |
 | Staleness, signed releases | In progress. Review staleness and signed binaries are still open. A source tag records a green `main` commit only. |
 
@@ -466,21 +466,12 @@ false pass, and no control reports success from an uncommitted write.
 - [ ] Add macOS managed-profile remediation where Apple documents it.
 - [ ] Add named Linux adapters with version-specific fixtures.
 - [ ] Add custom policy inheritance, explicit exceptions, and expiry dates.
-- [ ] Add `purge` for local privacy residue, invoking documented vendor erasure
-  mechanisms only, never deleting files directly, and journaling every
-  irreversible action so a later rollback fails loudly.
-- [ ] Deliver residue preview before automation, with separate browser cache,
-  cookies/site storage, and history categories, local-only scope checks,
-  metadata-only evidence, and independent post-state verification. Research
-  Windows thumbnails as the first automated candidate; keep it guided unless
-  a narrowly scoped documented interface is proven. Follow
-  [the privacy cache capability plan](docs/CACHE_PRIVACY_PLAN.md).
-- [ ] Default purge selection to thorough clearing of reviewed disposable caches
-  and temp files. Both modes preserve cookies, site data, history, recent-file
-  lists, OS operation, and recovery; optional activity-data clearing requires
-  exact selection and named approval. `--polite` additionally retains disruptive
-  caches. Show selected and retained categories, and prove preservation with
-  fixtures and native VM tests.
+- [x] Add `clean` / `purge` for local privacy residue with separate browser cache,
+  AI agent residue, developer cache, and recent activity categories, local-only scope checks,
+  metadata-only evidence, and independent post-state verification.
+- [x] Default purge selection to thorough clearing of reviewed disposable caches
+  and temp files while preserving logins, cookies, recovery data, and active session
+  databases. `--polite` additionally retains disruptive caches (thumbnail caches, recent items).
 - [ ] Research supported disposable temporary-file categories alongside privacy
   caches. Preserve vendor age and in-use rules, autosave, recovery data, and
   active work; report verified removal without claiming media sanitization.

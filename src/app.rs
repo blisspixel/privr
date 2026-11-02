@@ -305,7 +305,7 @@ fn run_with_check_context(
                         && std::io::stdout().is_terminal()
                     {
                         if report.summary.drift > 0 {
-                            let prompt_text = "Action? [y] apply safe fixes, [d] preview diff, [e] explain score & critical items, [q] quit (default: q): ";
+                            let prompt_text = "Action? [y] apply safe fixes, [d] preview diff, [c] clean residue, [e] explain score & critical items, [q] quit (default: q): ";
                             let _ =
                                 write!(out, "{}", ui.paint(crate::ui::style::HEADING, prompt_text));
                             let _ = out.flush();
@@ -317,7 +317,7 @@ fn run_with_check_context(
                                     let overview = crate::explain::render_overview(&ui);
                                     let _ = write!(out, "\n{overview}\n");
                                     let _ = out.flush();
-                                    let next_prompt = "Next action? [y] apply safe fixes, [d] preview diff, [q] quit (default: q): ";
+                                    let next_prompt = "Next action? [y] apply safe fixes, [d] preview diff, [c] clean residue, [q] quit (default: q): ";
                                     let _ = write!(
                                         out,
                                         "{}",
@@ -349,6 +349,26 @@ fn run_with_check_context(
                                                 sections,
                                                 elevate: false,
                                                 elevated_output: None,
+                                            }),
+                                        },
+                                        out,
+                                        err,
+                                        journal_dir,
+                                    );
+                                } else if trimmed == "c" || trimmed == "clean" || trimmed == "purge"
+                                {
+                                    return run_with_journal_dir(
+                                        Cli {
+                                            format,
+                                            color: cli.color,
+                                            command: Some(Command::Clean {
+                                                polite: false,
+                                                preview: false,
+                                                dry_run: false,
+                                                yes: false,
+                                                categories: Vec::new(),
+                                                controls: Vec::new(),
+                                                accept_risks: Vec::new(),
                                             }),
                                         },
                                         out,
@@ -428,7 +448,7 @@ fn run_with_check_context(
                                 }
                             }
                         } else if !report.complete {
-                            let prompt_text = "Action? [e] what couldn't be checked and why, [q] quit (default: q): ";
+                            let prompt_text = "Action? [e] what couldn't be checked and why, [c] clean residue, [q] quit (default: q): ";
                             let _ =
                                 write!(out, "{}", ui.paint(crate::ui::style::HEADING, prompt_text));
                             let _ = out.flush();
@@ -438,6 +458,56 @@ fn run_with_check_context(
                                 if trimmed == "e" || trimmed == "explain" {
                                     let _ = write!(out, "\n{}", narrate_concealed(&report, &ui));
                                     let _ = out.flush();
+                                } else if trimmed == "c" || trimmed == "clean" || trimmed == "purge"
+                                {
+                                    return run_with_journal_dir(
+                                        Cli {
+                                            format,
+                                            color: cli.color,
+                                            command: Some(Command::Clean {
+                                                polite: false,
+                                                preview: false,
+                                                dry_run: false,
+                                                yes: false,
+                                                categories: Vec::new(),
+                                                controls: Vec::new(),
+                                                accept_risks: Vec::new(),
+                                            }),
+                                        },
+                                        out,
+                                        err,
+                                        journal_dir,
+                                    );
+                                }
+                            }
+                        } else {
+                            let prompt_text =
+                                "Action? [c] clean residue & caches, [q] quit (default: q): ";
+                            let _ =
+                                write!(out, "{}", ui.paint(crate::ui::style::HEADING, prompt_text));
+                            let _ = out.flush();
+                            let mut input = String::new();
+                            if std::io::stdin().read_line(&mut input).is_ok() {
+                                let trimmed = input.trim().to_lowercase();
+                                if trimmed == "c" || trimmed == "clean" || trimmed == "purge" {
+                                    return run_with_journal_dir(
+                                        Cli {
+                                            format,
+                                            color: cli.color,
+                                            command: Some(Command::Clean {
+                                                polite: false,
+                                                preview: false,
+                                                dry_run: false,
+                                                yes: false,
+                                                categories: Vec::new(),
+                                                controls: Vec::new(),
+                                                accept_risks: Vec::new(),
+                                            }),
+                                        },
+                                        out,
+                                        err,
+                                        journal_dir,
+                                    );
                                 }
                             }
                         }
@@ -2037,6 +2107,199 @@ Run privr explain without arguments for the posture overview, or privr list to s
             let stdin = std::io::stdin();
             let reader = stdin.lock();
             crate::mcp::run_stdio(allow_apply, reader, out, err)
+        }
+        Command::Clean {
+            polite,
+            preview,
+            dry_run,
+            yes,
+            categories,
+            controls,
+            accept_risks,
+        } => {
+            #[cfg(not(windows))]
+            {
+                let _ = writeln!(
+                    err,
+                    "privr: disposable residue cleanup is currently implemented for Windows only."
+                );
+                0
+            }
+
+            #[cfg(windows)]
+            {
+                let is_preview_mode = preview || dry_run;
+                let mode = if polite {
+                    crate::model::residue::PurgeMode::Polite
+                } else {
+                    crate::model::residue::PurgeMode::Aggressive
+                };
+
+                let target_specs =
+                    crate::catalog::residue::select_residue_targets(mode, &controls, &categories);
+                if target_specs.is_empty() {
+                    let _ = writeln!(err, "privr: no matching residue targets found.");
+                    return 2;
+                }
+
+                // Check for required risk acknowledgements
+                for (spec, selected, _) in &target_specs {
+                    if *selected && spec.requires_risk_ack && !accept_risks.contains(&spec.id) {
+                        let _ = writeln!(
+                            err,
+                            "privr: target '{}' requires explicit acknowledgement via --accept-risk {}",
+                            spec.id, spec.id
+                        );
+                        return 2;
+                    }
+                }
+
+                // Inspect all targets
+                let mut preview_items = Vec::new();
+                for (spec, selected, reason) in &target_specs {
+                    let preview_item = crate::platform::windows::residue::inspect_target(
+                        spec,
+                        *selected,
+                        reason.clone(),
+                    );
+                    preview_items.push(preview_item);
+                }
+
+                let ui = crate::ui::Ui::for_stdout(cli.color.into());
+
+                // If preview requested or noninteractive without --yes
+                let is_terminal = std::io::stdin().is_terminal();
+                let is_dry_run = is_preview_mode || (!yes && !is_terminal);
+
+                if is_dry_run {
+                    match cli.format {
+                        OutputFormat::Json => {
+                            let report = crate::model::residue::PurgeReport {
+                                schema: 1,
+                                mode,
+                                dry_run: true,
+                                total_files_affected: preview_items
+                                    .iter()
+                                    .filter(|i| i.selected)
+                                    .map(|i| i.file_count)
+                                    .sum(),
+                                total_bytes_affected: preview_items
+                                    .iter()
+                                    .filter(|i| i.selected)
+                                    .map(|i| i.size_bytes)
+                                    .sum(),
+                                items: preview_items
+                                    .iter()
+                                    .filter(|i| i.selected)
+                                    .map(|i| crate::model::residue::ResiduePurgeItem {
+                                        id: i.id.clone(),
+                                        title: i.title.clone(),
+                                        category: i.category,
+                                        files_removed: i.file_count,
+                                        bytes_reclaimed: i.size_bytes,
+                                        files_retained: 0,
+                                        error: None,
+                                    })
+                                    .collect(),
+                            };
+                            let json = serde_json::to_string_pretty(&report).unwrap_or_default();
+                            let _ = writeln!(out, "{}", json);
+                        }
+                        OutputFormat::Text => {
+                            let rendered =
+                                crate::report::render_purge_preview(&ui, mode, &preview_items);
+                            let _ = write!(out, "{}", rendered);
+                            if !is_preview_mode {
+                                let _ = writeln!(
+                                    out,
+                                    "\nRun with --yes to execute clean, or confirm interactively."
+                                );
+                            }
+                        }
+                    }
+                    return 0;
+                }
+
+                // Interactive confirmation if not --yes
+                if !yes && is_terminal {
+                    let rendered = crate::report::render_purge_preview(&ui, mode, &preview_items);
+                    let _ = write!(out, "{}", rendered);
+
+                    let selected_count = preview_items.iter().filter(|i| i.selected).count();
+                    if selected_count == 0 {
+                        let _ = writeln!(out, "Nothing to clean in selected scope.");
+                        return 0;
+                    }
+
+                    let _ = write!(out, "\nClean selected residue? [y/N]: ");
+                    let _ = out.flush();
+
+                    let mut input = String::new();
+                    if std::io::stdin().read_line(&mut input).is_err()
+                        || !interpret_confirmation(Ok(input)).unwrap_or(false)
+                    {
+                        let _ = writeln!(out, "Cleaning cancelled.");
+                        return 0;
+                    }
+                    let _ = writeln!(out);
+                }
+
+                // Verify journal storage is writable before mutating
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default();
+                let timestamp = format!("{}.{:03}", now.as_secs(), now.subsec_millis());
+                let tx_id = format!("clean-{}-{}", now.as_secs(), now.subsec_millis());
+
+                let journal = crate::journal::TransactionJournal {
+                    schema: crate::journal::JOURNAL_SCHEMA,
+                    transaction_id: tx_id.clone(),
+                    timestamp: timestamp.clone(),
+                    platform: "windows".to_owned(),
+                    profile: format!("clean:{}", mode.as_str()),
+                    operations: Vec::new(),
+                };
+
+                if let Err(e) = crate::journal::save_transaction_in(journal_dir, &journal) {
+                    let _ = writeln!(err, "privr: cannot write transaction journal: {e}");
+                    return 1;
+                }
+
+                // Execute purge for selected targets
+                let mut purge_results = Vec::new();
+                for (spec, selected, _) in &target_specs {
+                    if *selected {
+                        let result = crate::platform::windows::residue::purge_target(spec);
+                        purge_results.push(result);
+                    }
+                }
+
+                let total_removed: usize = purge_results.iter().map(|r| r.files_removed).sum();
+                let total_reclaimed: u64 = purge_results.iter().map(|r| r.bytes_reclaimed).sum();
+
+                let report = crate::model::residue::PurgeReport {
+                    schema: 1,
+                    mode,
+                    dry_run: false,
+                    total_files_affected: total_removed,
+                    total_bytes_affected: total_reclaimed,
+                    items: purge_results,
+                };
+
+                match cli.format {
+                    OutputFormat::Json => {
+                        let json = serde_json::to_string_pretty(&report).unwrap_or_default();
+                        let _ = writeln!(out, "{}", json);
+                    }
+                    OutputFormat::Text => {
+                        let rendered =
+                            crate::report::render_purge_report(&ui, &report, Some(&tx_id));
+                        let _ = write!(out, "{}", rendered);
+                    }
+                }
+
+                0
+            }
         }
     }
 }

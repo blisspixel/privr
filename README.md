@@ -194,6 +194,7 @@ privr plan (or privr diff)
 privr apply (or privr fix)
 privr history (or privr log)
 privr undo (or privr rollback)
+privr clean (or privr purge)
 ```
 
 - `doctor` reports host facts, implemented elevation paths, compiled adapters,
@@ -213,6 +214,7 @@ privr undo (or privr rollback)
 - `apply` (aliases: `fix`, `harden`) executes safe, verified remediation with transaction journaling, interactive plan review, and native in-place elevation (`-e, --elevate`). Running `privr apply` without arguments is limited to Tier 0 and Tier 1 (transparent and cosmetic) daily-driver controls. Confirmation defaults to no, and one answer covers the whole selection. Per-section approval is not available yet; use `--section` to limit the set. A non-interactive shell must pass `--yes` after `privr plan`.
 - `history` (alias: `log`) lists previous transactions, timestamps, applied control counts, and profiles.
 - `rollback` (aliases: `restore`, `undo`) restores exact prior values. Running `privr undo` without arguments automatically targets the most recent transaction recorded on disk.
+- `clean` (alias: `purge`) safely inspects and purges disposable temporary files, crash dumps, browser caches, AI agent residue, developer caches, and recent activity residue. Logins, credentials, session databases, and browser cookies are strictly preserved. Running in an interactive terminal displays an organized dashboard preview and prompts before deleting anything (`privr clean --preview` forces read-only preview; `--polite` retains disruptive caches like thumbnails and recent items; `-c/--category` targets specific categories like `ai`, `browsers`, `dev`, `recent`, `system`).
 
 The full command and exit-code contract is in [docs/CLI.md](docs/CLI.md).
 

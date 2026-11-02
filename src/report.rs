@@ -551,7 +551,7 @@ impl Report {
                 "-".repeat(ui.width().min(76))
             };
             out.push_str(&format!("\n{}\n", ui.paint(style::MUTED, &divider)));
-            let next = "Next Steps: Run 'privr diff' to preview, or 'privr fix' to apply safe remediations.";
+            let next = "Next Steps: Run 'privr diff' to preview, 'privr fix' to apply safe remediations, or 'privr clean' to purge residue.";
             out.push_str(&ui.paint_lines(style::VALUE, &ui.wrap(next, 0)));
             out.push('\n');
         } else if self.complete {
@@ -732,6 +732,161 @@ pub fn humanize_section(section: &str) -> &str {
         "recall" => "Windows Recall & AI Analysis",
         _ => section,
     }
+}
+
+pub fn format_byte_size(bytes: u64) -> String {
+    if bytes == 0 {
+        return "0 B".to_owned();
+    }
+    const KB: f64 = 1024.0;
+    const MB: f64 = 1024.0 * 1024.0;
+    const GB: f64 = 1024.0 * 1024.0 * 1024.0;
+    let b = bytes as f64;
+    if b >= GB {
+        format!("{:.2} GB", b / GB)
+    } else if b >= MB {
+        format!("{:.2} MB", b / MB)
+    } else if b >= KB {
+        format!("{:.2} KB", b / KB)
+    } else {
+        format!("{} B", bytes)
+    }
+}
+
+pub fn render_purge_preview(
+    ui: &Ui,
+    mode: crate::model::residue::PurgeMode,
+    items: &[crate::model::residue::ResiduePreviewItem],
+) -> String {
+    let mut out = String::new();
+    let header = format!("privr clean (preview, {} mode)\n\n", mode.as_str());
+    out.push_str(&ui.paint(style::HEADING, &header));
+
+    let mut selected_files = 0;
+    let mut selected_bytes = 0;
+    let mut selected_count = 0;
+    let mut retained_count = 0;
+    let mut retained_bytes = 0;
+
+    let mut group_map: std::collections::BTreeMap<
+        (u8, &'static str),
+        Vec<&crate::model::residue::ResiduePreviewItem>,
+    > = std::collections::BTreeMap::new();
+    for item in items {
+        let key = (item.category.group_rank(), item.category.group_title());
+        group_map.entry(key).or_default().push(item);
+    }
+
+    for ((_, group_title), group_items) in group_map {
+        out.push_str(&format!("  {}\n", ui.paint(style::HEADING, group_title)));
+        for item in group_items {
+            let size_str = format_byte_size(item.size_bytes);
+            let count_str = format!("{} files", item.file_count);
+            let scope_str = format!("{size_str:>9}  ({count_str:>10})");
+
+            if item.selected {
+                selected_count += 1;
+                selected_files += item.file_count;
+                selected_bytes += item.size_bytes;
+
+                let bullet = if ui.unicode() { "•" } else { "*" };
+                let tag = ui.paint(style::outcome_style(Outcome::Drift), bullet);
+                out.push_str(&format!(
+                    "    {tag} {:<42} {}\n",
+                    item.title,
+                    ui.paint(style::VALUE, &scope_str)
+                ));
+            } else {
+                retained_count += 1;
+                retained_bytes += item.size_bytes;
+
+                let bullet = if ui.unicode() { "•" } else { "-" };
+                let tag = ui.paint(style::MUTED, bullet);
+                let note = if let Some(reason) = &item.retained_reason {
+                    format!(" [retained: {reason}]")
+                } else {
+                    " [retained]".to_owned()
+                };
+                out.push_str(&format!(
+                    "    {tag} {:<42} {}{}\n",
+                    ui.paint(style::MUTED, &item.title),
+                    ui.paint(style::MUTED, &scope_str),
+                    ui.paint(style::MUTED, &note)
+                ));
+            }
+        }
+        out.push('\n');
+    }
+
+    out.push_str(&format!(
+        "Plan: {} to clean ({}, {} files), {} retained ({}).\n",
+        selected_count,
+        format_byte_size(selected_bytes),
+        selected_files,
+        retained_count,
+        format_byte_size(retained_bytes)
+    ));
+
+    out
+}
+
+pub fn render_purge_report(
+    ui: &Ui,
+    report: &crate::model::residue::PurgeReport,
+    tx_id: Option<&str>,
+) -> String {
+    let mut out = String::new();
+    let header = format!("privr clean ({} mode)\n\n", report.mode.as_str());
+    out.push_str(&ui.paint(style::HEADING, &header));
+
+    let mut group_map: std::collections::BTreeMap<
+        (u8, &'static str),
+        Vec<&crate::model::residue::ResiduePurgeItem>,
+    > = std::collections::BTreeMap::new();
+    for item in &report.items {
+        if item.files_removed > 0 || item.files_retained > 0 {
+            let key = (item.category.group_rank(), item.category.group_title());
+            group_map.entry(key).or_default().push(item);
+        }
+    }
+
+    for ((_, group_title), group_items) in group_map {
+        out.push_str(&format!("  {}\n", ui.paint(style::HEADING, group_title)));
+        for item in group_items {
+            let bullet = if ui.unicode() { "•" } else { "*" };
+            let tag = ui.paint(style::outcome_style(Outcome::Pass), bullet);
+            if item.files_retained > 0 {
+                out.push_str(&format!(
+                    "    {tag} {}: {} reclaimed ({} files removed, {} in-use files retained)\n",
+                    item.title,
+                    format_byte_size(item.bytes_reclaimed),
+                    item.files_removed,
+                    item.files_retained
+                ));
+            } else {
+                out.push_str(&format!(
+                    "    {tag} {}: {} reclaimed ({} files removed)\n",
+                    item.title,
+                    format_byte_size(item.bytes_reclaimed),
+                    item.files_removed
+                ));
+            }
+        }
+        out.push('\n');
+    }
+
+    out.push_str(&format!(
+        "Summary: {} files removed, {} reclaimed across {} targets.\n",
+        report.total_files_affected,
+        format_byte_size(report.total_bytes_affected),
+        report.items.iter().filter(|i| i.files_removed > 0).count()
+    ));
+
+    if let Some(tx) = tx_id {
+        out.push_str(&format!("Transaction: {}\n", tx));
+    }
+
+    out
 }
 
 #[cfg(test)]

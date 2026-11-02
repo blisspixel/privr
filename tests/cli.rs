@@ -369,3 +369,103 @@ fn explain_known_control_shows_evidence_and_rationale() {
         .stdout(predicate::str::contains("Why it matters"))
         .stdout(predicate::str::contains("Evidence"));
 }
+
+#[cfg(windows)]
+#[test]
+fn clean_preview_defaults_to_dry_run_and_shows_plan() {
+    let mut command = Command::cargo_bin("privr").expect("binary");
+    command
+        .args(["clean", "--preview"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("privr clean (preview"))
+        .stdout(predicate::str::contains("Plan:"));
+}
+
+#[cfg(windows)]
+#[test]
+fn clean_dry_run_alias_works() {
+    let mut command = Command::cargo_bin("privr").expect("binary");
+    command
+        .args(["clean", "--dry-run"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("privr clean (preview"))
+        .stdout(predicate::str::contains("Plan:"));
+}
+
+#[cfg(windows)]
+#[test]
+fn clean_category_filter_scopes_selection() {
+    let mut command = Command::cargo_bin("privr").expect("binary");
+    command
+        .args(["clean", "--preview", "--category", "ai"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Claude desktop"))
+        .stdout(predicate::str::contains("Plan: 2 to clean"));
+}
+
+#[cfg(windows)]
+#[test]
+fn clean_help_shows_examples_and_categories() {
+    let mut command = Command::cargo_bin("privr").expect("binary");
+    command
+        .args(["clean", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Categories:"))
+        .stdout(predicate::str::contains("Examples:"))
+        .stdout(predicate::str::contains("privr clean --category"));
+}
+
+#[cfg(windows)]
+#[test]
+fn purge_alias_still_works() {
+    let mut command = Command::cargo_bin("privr").expect("binary");
+    command
+        .args(["purge", "--preview"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("privr clean (preview"));
+}
+
+#[cfg(windows)]
+#[test]
+fn purge_preview_json_is_valid() {
+    let mut command = Command::cargo_bin("privr").expect("binary");
+    let assert = command
+        .args(["clean", "--preview", "--format", "json"])
+        .assert()
+        .success();
+
+    let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf-8");
+    let parsed: serde_json::Value = serde_json::from_str(&output).expect("valid json report");
+    assert_eq!(parsed["schema"], 1);
+    assert_eq!(parsed["dry_run"], true);
+    assert!(parsed["items"].is_array());
+}
+
+#[cfg(windows)]
+#[test]
+fn purge_polite_retains_thumbnail_cache() {
+    let mut command = Command::cargo_bin("privr").expect("binary");
+    command
+        .args(["clean", "--preview", "--polite"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("retained"))
+        .stdout(predicate::str::contains("File Explorer thumbnail cache"));
+}
+
+#[cfg(windows)]
+#[test]
+fn purge_with_control_filter_scopes_selection() {
+    let mut command = Command::cargo_bin("privr").expect("binary");
+    command
+        .args(["clean", "--preview", "--control", "windows.residue.temp"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("User temporary files"))
+        .stdout(predicate::str::contains("Plan: 1 to clean"));
+}

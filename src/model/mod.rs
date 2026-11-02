@@ -17,6 +17,7 @@ pub mod host;
 pub mod outcome;
 pub mod posture;
 pub mod profile;
+pub mod residue;
 
 pub use outcome::Reversibility;
 pub use posture::{
@@ -24,6 +25,9 @@ pub use posture::{
     WorkloadPersona,
 };
 pub use profile::Profile;
+pub use residue::{
+    PurgeMode, PurgeReport, ResidueCategory, ResiduePreviewItem, ResiduePurgeItem, ResidueSpec,
+};
 
 pub use applicability::{Applicability, Applies, Predicate, Variant};
 pub use evidence::{DenialReason, Evidence, Observation, RawValue, UndeterminedReason, ValueKind};

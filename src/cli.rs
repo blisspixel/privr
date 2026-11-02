@@ -84,6 +84,9 @@ pub enum Command {
         /// List passing, not applicable, and not selected controls in text output.
         #[arg(long)]
         all: bool,
+        /// Compare this check against a saved historical JSON report to detect update regressions.
+        #[arg(long = "compare", value_name = "SAVED_REPORT")]
+        compare: Option<PathBuf>,
     },
     /// Show the exact supported changes without applying them.
     #[command(
@@ -203,9 +206,18 @@ pub enum Command {
                       each transaction has been rolled back.\n\n\
                       Examples:\n  \
                         privr history                    List all transactions in text format\n  \
+                        privr history --purge            Purge all transaction history files\n  \
+                        privr history --purge -y         Purge history without prompting\n  \
                         privr history --format json      Emit transaction records as JSON"
     )]
-    History,
+    History {
+        /// Purge and destroy all saved transaction history files.
+        #[arg(long)]
+        purge: bool,
+        /// Confirm history purge without interactive prompting.
+        #[arg(short = 'y', long)]
+        yes: bool,
+    },
 
     /// Recommend confirmed drift changes across profiles, filtered by workload and friction.
     #[command(

@@ -224,6 +224,28 @@ pub fn latest_transaction() -> Option<TransactionJournal> {
     list_transactions().pop()
 }
 
+/// Purge all transaction journal files, returning the count of removed records.
+pub fn purge_transactions() -> Result<usize, std::io::Error> {
+    purge_transactions_in(&transactions_dir())
+}
+
+pub(crate) fn purge_transactions_in(dir: &Path) -> Result<usize, std::io::Error> {
+    let entries = match fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(e) => return Err(e),
+    };
+    let mut count = 0;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_file() && path.extension().is_some_and(|ext| ext == "json") {
+            fs::remove_file(&path)?;
+            count += 1;
+        }
+    }
+    Ok(count)
+}
+
 /// A private, empty journal directory for each test, without environment changes.
 #[cfg(test)]
 pub(crate) struct TestDirectory(pub PathBuf);
@@ -454,5 +476,23 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn purge_transactions_removes_records_and_preserves_empty_dir() {
+        let directory = TestDirectory::new();
+        let tx1 = empty_transaction("tx-purge-1");
+        let tx2 = empty_transaction("tx-purge-2");
+        save_transaction_in(&directory.0, &tx1).expect("saved tx1");
+        save_transaction_in(&directory.0, &tx2).expect("saved tx2");
+        assert_eq!(list_transactions_in(&directory.0).len(), 2);
+
+        let purged = purge_transactions_in(&directory.0).expect("purged");
+        assert_eq!(purged, 2);
+        assert!(list_transactions_in(&directory.0).is_empty());
+
+        // Repeated purge on empty directory returns Ok(0)
+        let repeated = purge_transactions_in(&directory.0).expect("repeated purge");
+        assert_eq!(repeated, 0);
     }
 }

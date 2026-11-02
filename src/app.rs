@@ -238,6 +238,7 @@ fn run_with_check_context(
         controls: Vec::new(),
         sections: Vec::new(),
         all: false,
+        compare: None,
     }) {
         Command::Check {
             profile,
@@ -246,6 +247,7 @@ fn run_with_check_context(
             controls,
             sections,
             all,
+            compare,
         } => {
             // A custom policy file is not implemented, and silently evaluating
             // the built-in profile instead would answer a question the operator
@@ -291,6 +293,49 @@ fn run_with_check_context(
                     )
                 }
             };
+
+            if let Some(compare_path) = compare {
+                let content = match std::fs::read_to_string(&compare_path) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        let _ = writeln!(
+                            err,
+                            "privr: cannot read comparison report from '{}': {e}",
+                            compare_path.display()
+                        );
+                        return 2;
+                    }
+                };
+                let prior_report: crate::report::Report = match serde_json::from_str(&content) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        let _ = writeln!(
+                            err,
+                            "privr: invalid or incompatible comparison report in '{}': {e}",
+                            compare_path.display()
+                        );
+                        return 2;
+                    }
+                };
+                let comparison = crate::report::compare_reports(&prior_report, &report);
+                match format {
+                    OutputFormat::Json => {
+                        let json = serde_json::to_string_pretty(&comparison).unwrap_or_default();
+                        let _ = writeln!(out, "{json}");
+                    }
+                    OutputFormat::Text => {
+                        let rendered = crate::report::render_comparison(&ui, &comparison);
+                        let _ = write!(out, "{rendered}");
+                    }
+                }
+                if !comparison.complete {
+                    return 3;
+                }
+                if !comparison.regressions.is_empty() || report.summary.drift > 0 {
+                    return 1;
+                }
+                return 0;
+            }
 
             match format {
                 OutputFormat::Text => {
@@ -1679,46 +1724,82 @@ fn run_with_check_context(
             }
             0
         }
-        Command::History => {
-            let txs = crate::journal::list_transactions_in(journal_dir);
-            match format {
-                OutputFormat::Text => {
-                    if txs.is_empty() {
-                        let _ = writeln!(
-                            out,
-                            "No transaction history found. No changes have been applied yet."
-                        );
-                    } else {
-                        let _ = writeln!(out, "Transaction History ({} recorded):\n", txs.len());
-                        for tx in txs.iter().rev() {
-                            let block = verified_block_for(&ui, tx, None);
-                            if block.is_empty() {
-                                let _ = writeln!(
-                                    out,
-                                    "{}  no verified changes",
-                                    ui.paint(crate::ui::style::IDENT, &tx.transaction_id)
-                                );
-                            } else {
-                                let _ = write!(out, "{block}");
-                            }
-                            let meta = format!("{}  profile: {}", tx.timestamp, tx.profile);
+        Command::History { purge, yes } => {
+            if purge {
+                let is_terminal = std::io::stdin().is_terminal();
+                if !yes && is_terminal {
+                    let _ = write!(out, "Purge all transaction history records? [y/N]: ");
+                    let _ = out.flush();
+                    let mut input = String::new();
+                    if std::io::stdin().read_line(&mut input).is_err()
+                        || !interpret_confirmation(Ok(input)).unwrap_or(false)
+                    {
+                        let _ = writeln!(out, "History purge cancelled.");
+                        return 0;
+                    }
+                }
+                match crate::journal::purge_transactions_in(journal_dir) {
+                    Ok(count) => match format {
+                        OutputFormat::Text => {
+                            let _ = writeln!(out, "Purged {count} transaction history record(s).");
+                            0
+                        }
+                        OutputFormat::Json => {
+                            let json = serde_json::json!({
+                                "purged": count
+                            });
+                            let _ = writeln!(out, "{json}");
+                            0
+                        }
+                    },
+                    Err(e) => {
+                        let _ = writeln!(err, "privr: cannot purge transaction history: {e}");
+                        1
+                    }
+                }
+            } else {
+                let txs = crate::journal::list_transactions_in(journal_dir);
+                match format {
+                    OutputFormat::Text => {
+                        if txs.is_empty() {
                             let _ = writeln!(
                                 out,
-                                "{}{}\n",
-                                " ".repeat(10),
-                                ui.paint(crate::ui::style::MUTED, &meta)
+                                "No transaction history found. No changes have been applied yet."
                             );
+                        } else {
+                            let _ =
+                                writeln!(out, "Transaction History ({} recorded):\n", txs.len());
+                            for tx in txs.iter().rev() {
+                                let block = verified_block_for(&ui, tx, None);
+                                if block.is_empty() {
+                                    let _ = writeln!(
+                                        out,
+                                        "{}  no verified changes",
+                                        ui.paint(crate::ui::style::IDENT, &tx.transaction_id)
+                                    );
+                                } else {
+                                    let _ = write!(out, "{block}");
+                                }
+                                let meta = format!("{}  profile: {}", tx.timestamp, tx.profile);
+                                let _ = writeln!(
+                                    out,
+                                    "{}{}\n",
+                                    " ".repeat(10),
+                                    ui.paint(crate::ui::style::MUTED, &meta)
+                                );
+                            }
+                            let _ =
+                                writeln!(out, "To reverse the most recent changes: privr rollback");
                         }
-                        let _ = writeln!(out, "To reverse the most recent changes: privr rollback");
+                    }
+                    OutputFormat::Json => {
+                        if serde_json::to_writer_pretty(&mut *out, &txs).is_ok() {
+                            let _ = writeln!(out);
+                        }
                     }
                 }
-                OutputFormat::Json => {
-                    if serde_json::to_writer_pretty(&mut *out, &txs).is_ok() {
-                        let _ = writeln!(out);
-                    }
-                }
+                0
             }
-            0
         }
         Command::List { platform, query } => {
             // The catalogue a build carries is the platform it was built for.
@@ -2643,6 +2724,7 @@ mod tests {
             controls: Vec::new(),
             sections: Vec::new(),
             all: false,
+            compare: None,
         }));
         assert_eq!(code, 2);
         assert!(stdout.is_empty());
@@ -2783,6 +2865,7 @@ mod tests {
             controls: Vec::new(),
             sections: Vec::new(),
             all: true,
+            compare: None,
         }));
         let flat = flatten(&stdout);
         assert!(flat.contains("Profile baseline"));
@@ -3022,6 +3105,7 @@ mod tests {
             controls: Vec::new(),
             sections: vec!["advertising".to_owned()],
             all: true,
+            compare: None,
         }));
         assert!(matches!(code, 0 | 1 | 3));
         if cfg!(windows) {
@@ -3038,6 +3122,7 @@ mod tests {
             controls: Vec::new(),
             sections: Vec::new(),
             all: false,
+            compare: None,
         }));
         assert!(matches!(code, 0 | 1 | 3), "code: {code}, stderr: {stderr}");
         assert!(stdout.contains("workload:developer"));
@@ -3045,7 +3130,10 @@ mod tests {
 
     #[test]
     fn history_command_renders_text_and_json() {
-        let (code, stdout, stderr) = run_for_test(Some(Command::History));
+        let (code, stdout, stderr) = run_for_test(Some(Command::History {
+            purge: false,
+            yes: false,
+        }));
         assert_eq!(code, 0, "stderr: {stderr}");
         assert!(
             stdout.contains("Transaction History")
@@ -3059,7 +3147,10 @@ mod tests {
             Cli {
                 color: crate::cli::ColorWhen::Never,
                 format: OutputFormat::Json,
-                command: Some(Command::History),
+                command: Some(Command::History {
+                    purge: false,
+                    yes: false,
+                }),
             },
             &mut out,
             &mut err,
@@ -3068,6 +3159,41 @@ mod tests {
         assert_eq!(json_code, 0);
         let val: serde_json::Value = serde_json::from_slice(&out).expect("json");
         assert!(val.is_array());
+    }
+
+    #[test]
+    fn history_command_purges_transactions_with_yes() {
+        let directory = crate::journal::TestDirectory::new();
+        let tx = crate::journal::TransactionJournal {
+            schema: crate::journal::JOURNAL_SCHEMA,
+            transaction_id: "tx-purge-test".to_owned(),
+            timestamp: "2026-10-20T00:00:00Z".to_owned(),
+            platform: "windows".to_owned(),
+            profile: "baseline".to_owned(),
+            operations: Vec::new(),
+        };
+        crate::journal::save_transaction_in(&directory.0, &tx).expect("save tx");
+        assert_eq!(crate::journal::list_transactions_in(&directory.0).len(), 1);
+
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        let code = run_with_journal_dir(
+            Cli {
+                color: crate::cli::ColorWhen::Never,
+                format: OutputFormat::Text,
+                command: Some(Command::History {
+                    purge: true,
+                    yes: true,
+                }),
+            },
+            &mut out,
+            &mut err,
+            &directory.0,
+        );
+        assert_eq!(code, 0);
+        let stdout = String::from_utf8(out).expect("utf-8");
+        assert!(stdout.contains("Purged 1 transaction history record(s)."));
+        assert!(crate::journal::list_transactions_in(&directory.0).is_empty());
     }
 
     #[test]
@@ -3316,7 +3442,10 @@ mod tests {
             Cli {
                 color: crate::cli::ColorWhen::Never,
                 format: OutputFormat::Text,
-                command: Some(Command::History),
+                command: Some(Command::History {
+                    purge: false,
+                    yes: false,
+                }),
             },
             &mut out,
             &mut err,

@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::catalog;
 use crate::engine::evaluate::{Mode, Resolution, evaluate};
@@ -52,24 +52,43 @@ fn completed_scope_status(summary: &Summary) -> &'static str {
 /// confidence flag. Schema 1 readers must not parse schema 2 as schema 1.
 pub const SCHEMA: u8 = 2;
 
+/// Default timestamp provider for backward-compatible deserialization of historical reports.
+fn default_timestamp() -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    format!("{}.{:03}", now.as_secs(), now.subsec_millis())
+}
+
+/// Default tool version provider for backward-compatible deserialization of historical reports.
+fn default_tool_version() -> String {
+    env!("CARGO_PKG_VERSION").to_owned()
+}
+
 /// One compiled primary source, shared by every result that cites it.
 ///
 /// Claims and URLs are compiled public text. The table does not carry raw
 /// observations, paths, or command output.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SourceEntry {
     pub url: String,
     pub claim: String,
     pub reviewed: String,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Report {
     pub schema: u8,
     pub complete: bool,
     pub truncated: bool,
     pub profile: String,
     pub platform: String,
+    /// Timestamp when observation took place (UTC seconds.millis).
+    #[serde(default = "default_timestamp")]
+    pub timestamp: String,
+    /// The privr binary version producing this report.
+    #[serde(default = "default_tool_version")]
+    pub tool_version: String,
     /// The vendor's own version string. Carries no machine identifier.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub os_version: Option<String>,
@@ -240,12 +259,19 @@ impl Report {
             profile.unwrap_or("baseline").to_owned()
         };
 
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default();
+        let timestamp = format!("{}.{:03}", now.as_secs(), now.subsec_millis());
+
         Self {
             schema: SCHEMA,
             complete: summary.is_complete(),
             truncated: false,
             profile: profile_str,
             platform: host.platform.as_str().to_owned(),
+            timestamp,
+            tool_version: env!("CARGO_PKG_VERSION").to_owned(),
             os_version: host.version.known().map(|v| v.display.clone()),
             edition: host.edition.known().cloned(),
             carried: all_controls.len(),
@@ -935,6 +961,352 @@ pub fn render_purge_report(
     if let Some(tx) = tx_id {
         out.push_str(&format!("Transaction: {}\n", tx));
     }
+
+    out
+}
+
+/// Metadata identifying an observation's provenance.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ComparisonMeta {
+    pub timestamp: String,
+    pub tool_version: String,
+    pub platform: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub os_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub edition: Option<String>,
+    pub profile: String,
+}
+
+/// A delta between prior observation and current observation for one control.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ControlDelta {
+    pub id: String,
+    pub title: String,
+    pub section: String,
+    pub prior_outcome: Outcome,
+    pub current_outcome: Outcome,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prior_observed: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_observed: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+/// Comparison between a historical check report and current live evaluation.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ReportComparison {
+    pub schema: u8,
+    pub complete: bool,
+    pub prior: ComparisonMeta,
+    pub current: ComparisonMeta,
+    pub platform_upgraded: bool,
+    pub profile_mismatch: bool,
+    /// Controls that were Pass previously but regressed to Drift.
+    pub regressions: Vec<ControlDelta>,
+    /// Controls that were Drift previously and now Pass.
+    pub remediations: Vec<ControlDelta>,
+    /// Controls that were not applicable or absent previously, now evaluated.
+    pub newly_applicable: Vec<ControlDelta>,
+    /// Count of controls that passed previously and continue passing.
+    pub unchanged_pass: usize,
+    /// Count of controls that drifted previously and continue drifting.
+    pub unchanged_drift: usize,
+    /// Other outcome transitions.
+    pub other_changes: Vec<ControlDelta>,
+}
+
+pub fn compare_reports(prior: &Report, current: &Report) -> ReportComparison {
+    let platform_upgraded =
+        prior.os_version != current.os_version || prior.edition != current.edition;
+    let profile_mismatch = prior.profile != current.profile;
+
+    let mut regressions = Vec::new();
+    let mut remediations = Vec::new();
+    let mut newly_applicable = Vec::new();
+    let mut unchanged_pass = 0;
+    let mut unchanged_drift = 0;
+    let mut other_changes = Vec::new();
+
+    for curr in &current.results {
+        if let Some(prev) = prior.results.iter().find(|r| r.id == curr.id) {
+            match (prev.outcome, curr.outcome) {
+                (Outcome::Pass, Outcome::Drift) => {
+                    regressions.push(ControlDelta {
+                        id: curr.id.clone(),
+                        title: curr.title.clone(),
+                        section: curr.section.clone(),
+                        prior_outcome: prev.outcome,
+                        current_outcome: curr.outcome,
+                        prior_observed: prev.observed.clone(),
+                        current_observed: curr.observed.clone(),
+                        note: curr.note.clone(),
+                    });
+                }
+                (Outcome::Drift, Outcome::Pass) => {
+                    remediations.push(ControlDelta {
+                        id: curr.id.clone(),
+                        title: curr.title.clone(),
+                        section: curr.section.clone(),
+                        prior_outcome: prev.outcome,
+                        current_outcome: curr.outcome,
+                        prior_observed: prev.observed.clone(),
+                        current_observed: curr.observed.clone(),
+                        note: curr.note.clone(),
+                    });
+                }
+                (Outcome::Pass, Outcome::Pass) => {
+                    unchanged_pass += 1;
+                }
+                (Outcome::Drift, Outcome::Drift) => {
+                    unchanged_drift += 1;
+                }
+                (prev_out, curr_out)
+                    if (prev_out == Outcome::NotApplicable || prev_out == Outcome::NotSelected)
+                        && (curr_out == Outcome::Pass || curr_out == Outcome::Drift) =>
+                {
+                    newly_applicable.push(ControlDelta {
+                        id: curr.id.clone(),
+                        title: curr.title.clone(),
+                        section: curr.section.clone(),
+                        prior_outcome: prev.outcome,
+                        current_outcome: curr.outcome,
+                        prior_observed: prev.observed.clone(),
+                        current_observed: curr.observed.clone(),
+                        note: curr.note.clone(),
+                    });
+                }
+                (prev_out, curr_out) if prev_out != curr_out => {
+                    other_changes.push(ControlDelta {
+                        id: curr.id.clone(),
+                        title: curr.title.clone(),
+                        section: curr.section.clone(),
+                        prior_outcome: prev.outcome,
+                        current_outcome: curr.outcome,
+                        prior_observed: prev.observed.clone(),
+                        current_observed: curr.observed.clone(),
+                        note: curr.note.clone(),
+                    });
+                }
+                _ => {}
+            }
+        } else if curr.outcome == Outcome::Pass || curr.outcome == Outcome::Drift {
+            newly_applicable.push(ControlDelta {
+                id: curr.id.clone(),
+                title: curr.title.clone(),
+                section: curr.section.clone(),
+                prior_outcome: Outcome::NotChecked,
+                current_outcome: curr.outcome,
+                prior_observed: None,
+                current_observed: curr.observed.clone(),
+                note: curr.note.clone(),
+            });
+        }
+    }
+
+    ReportComparison {
+        schema: SCHEMA,
+        complete: current.complete,
+        prior: ComparisonMeta {
+            timestamp: prior.timestamp.clone(),
+            tool_version: prior.tool_version.clone(),
+            platform: prior.platform.clone(),
+            os_version: prior.os_version.clone(),
+            edition: prior.edition.clone(),
+            profile: prior.profile.clone(),
+        },
+        current: ComparisonMeta {
+            timestamp: current.timestamp.clone(),
+            tool_version: current.tool_version.clone(),
+            platform: current.platform.clone(),
+            os_version: current.os_version.clone(),
+            edition: current.edition.clone(),
+            profile: current.profile.clone(),
+        },
+        platform_upgraded,
+        profile_mismatch,
+        regressions,
+        remediations,
+        newly_applicable,
+        unchanged_pass,
+        unchanged_drift,
+        other_changes,
+    }
+}
+
+pub fn render_comparison(ui: &Ui, comparison: &ReportComparison) -> String {
+    let mut out = String::new();
+    out.push_str(&format!(
+        "{}\n\n",
+        ui.paint(style::HEADING, "privr check (post-update comparison)")
+    ));
+
+    out.push_str(&format!(
+        "  {}\n",
+        ui.paint(style::HEADING, "Observation Provenance")
+    ));
+    out.push_str(&format!(
+        "    Prior check:   {} (tool v{}) on {} {}\n",
+        comparison.prior.timestamp,
+        comparison.prior.tool_version,
+        comparison
+            .prior
+            .edition
+            .as_deref()
+            .unwrap_or(&comparison.prior.platform),
+        comparison.prior.os_version.as_deref().unwrap_or("unknown")
+    ));
+    out.push_str(&format!(
+        "    Current check: {} (tool v{}) on {} {}\n",
+        comparison.current.timestamp,
+        comparison.current.tool_version,
+        comparison
+            .current
+            .edition
+            .as_deref()
+            .unwrap_or(&comparison.current.platform),
+        comparison
+            .current
+            .os_version
+            .as_deref()
+            .unwrap_or("unknown")
+    ));
+
+    if comparison.platform_upgraded {
+        out.push_str(&format!(
+            "    {}\n",
+            ui.paint(
+                style::outcome_style(Outcome::Drift),
+                &format!(
+                    "Platform change detected: {} -> {}",
+                    comparison.prior.os_version.as_deref().unwrap_or("unknown"),
+                    comparison
+                        .current
+                        .os_version
+                        .as_deref()
+                        .unwrap_or("unknown")
+                )
+            )
+        ));
+    }
+    if comparison.profile_mismatch {
+        out.push_str(&format!(
+            "    {}\n",
+            ui.paint(
+                style::MUTED,
+                &format!(
+                    "Note: comparison profiles differ ('{}' vs '{}')",
+                    comparison.prior.profile, comparison.current.profile
+                )
+            )
+        ));
+    }
+    out.push('\n');
+
+    let bullet = if ui.unicode() { "•" } else { "*" };
+
+    if !comparison.regressions.is_empty() {
+        out.push_str(&format!(
+            "  {}\n",
+            ui.paint(
+                style::outcome_style(Outcome::Drift),
+                &format!(
+                    "Regression Drift ({} protections lost after update)",
+                    comparison.regressions.len()
+                )
+            )
+        ));
+        for delta in &comparison.regressions {
+            let tag = ui.paint(style::outcome_style(Outcome::Drift), bullet);
+            out.push_str(&format!("    {tag} {}\n", delta.title));
+            out.push_str(&format!("        {}\n", ui.paint(style::IDENT, &delta.id)));
+            let prior_val = delta.prior_observed.as_deref().unwrap_or("pass");
+            let curr_val = delta.current_observed.as_deref().unwrap_or("drift");
+            out.push_str(&format!(
+                "        Prior: {} [{}] -> Current: {} [{}]\n",
+                delta.prior_outcome.as_str(),
+                prior_val,
+                ui.paint(
+                    style::outcome_style(delta.current_outcome),
+                    delta.current_outcome.as_str()
+                ),
+                curr_val
+            ));
+            if let Some(note) = &delta.note {
+                out.push_str(&format!("        Note: {}\n", ui.paint(style::MUTED, note)));
+            }
+            out.push('\n');
+        }
+    }
+
+    if !comparison.newly_applicable.is_empty() {
+        out.push_str(&format!(
+            "  {}\n",
+            ui.paint(
+                style::HEADING,
+                &format!(
+                    "Newly Applicable Controls ({} introduced in current platform build)",
+                    comparison.newly_applicable.len()
+                )
+            )
+        ));
+        for delta in &comparison.newly_applicable {
+            let tag = ui.paint(style::outcome_style(delta.current_outcome), bullet);
+            out.push_str(&format!("    {tag} {}\n", delta.title));
+            out.push_str(&format!("        {}\n", ui.paint(style::IDENT, &delta.id)));
+            let curr_val = delta
+                .current_observed
+                .as_deref()
+                .unwrap_or(delta.current_outcome.as_str());
+            out.push_str(&format!(
+                "        Current state: {} [{}]\n",
+                ui.paint(
+                    style::outcome_style(delta.current_outcome),
+                    delta.current_outcome.as_str()
+                ),
+                curr_val
+            ));
+            if let Some(note) = &delta.note {
+                out.push_str(&format!("        Note: {}\n", ui.paint(style::MUTED, note)));
+            }
+            out.push('\n');
+        }
+    }
+
+    if !comparison.remediations.is_empty() {
+        out.push_str(&format!(
+            "  {}\n",
+            ui.paint(
+                style::outcome_style(Outcome::Pass),
+                &format!(
+                    "Remediated ({} controls now matching policy)",
+                    comparison.remediations.len()
+                )
+            )
+        ));
+        for delta in &comparison.remediations {
+            let tag = ui.paint(style::outcome_style(Outcome::Pass), bullet);
+            out.push_str(&format!("    {tag} {}\n", delta.title));
+            out.push_str(&format!("        {}\n", ui.paint(style::IDENT, &delta.id)));
+            let curr_val = delta.current_observed.as_deref().unwrap_or("pass");
+            out.push_str(&format!(
+                "        Current state: {} [{}]\n",
+                ui.paint(style::outcome_style(Outcome::Pass), "pass"),
+                curr_val
+            ));
+            out.push('\n');
+        }
+    }
+
+    out.push_str(&format!(
+        "Summary: {} regressed drift, {} remediated, {} newly applicable, {} unchanged pass, {} unchanged drift.\n",
+        comparison.regressions.len(),
+        comparison.remediations.len(),
+        comparison.newly_applicable.len(),
+        comparison.unchanged_pass,
+        comparison.unchanged_drift
+    ));
 
     out
 }
@@ -1794,6 +2166,8 @@ mod tests {
             truncated: false,
             profile: "baseline".to_owned(),
             platform: "linux".to_owned(),
+            timestamp: "2026-10-20.000".to_owned(),
+            tool_version: "0.1.6".to_owned(),
             os_version: None,
             edition: None,
             carried: 0,
@@ -2230,5 +2604,101 @@ mod tests {
                 .url
                 .contains("abrt")
         );
+    }
+
+    #[test]
+    fn compare_reports_detects_regressions_and_upgrades() {
+        use crate::engine::evaluate::Mode;
+        use crate::model::host::ManagementSource;
+        use crate::model::outcome::{
+            Effect, Exception, Maturity, ObservationBasis, Remediation, Reversibility, Support,
+        };
+        use crate::model::posture::PostureDimension;
+
+        let mut prior = empty_report();
+        prior.os_version = Some("10.0.22631".to_owned());
+        prior.edition = Some("Windows 11 Pro".to_owned());
+        prior.timestamp = "2026-10-20.100".to_owned();
+
+        let mut current = empty_report();
+        current.os_version = Some("10.0.26100".to_owned());
+        current.edition = Some("Windows 11 Pro".to_owned());
+        current.timestamp = "2026-11-02.200".to_owned();
+
+        // Control 1: was Pass, now Drift (regressed!)
+        let c1_prev = ControlResult {
+            id: "windows.storage.bitlocker-cipher".to_owned(),
+            title: "BitLocker encryption cipher strength".to_owned(),
+            section: "storage".to_owned(),
+            dimension: PostureDimension::ForensicResidue,
+            friction: FrictionTier::Tier0Transparent,
+            outcome: Outcome::Pass,
+            management_source: ManagementSource::LocalPolicy,
+            remediation: Remediation::Automatic,
+            remediation_reason: None,
+            support: Support::Verified,
+            reversibility: Reversibility::Exact,
+            maturity: Maturity::Automated,
+            effect: Effect::Active,
+            exception: Exception::None,
+            note: None,
+            ineffective: None,
+            policy_mode: Mode::Enforce,
+            desired: "enabled".to_owned(),
+            observed: Some("enabled".to_owned()),
+            observation_reason: None,
+            observation_basis: ObservationBasis::Established,
+            confident: true,
+            source_refs: Vec::new(),
+        };
+        let mut c1_curr = c1_prev.clone();
+        c1_curr.outcome = Outcome::Drift;
+        c1_curr.observed = Some("disabled".to_owned());
+
+        // Control 2: was NotApplicable on 22631, now Drift on 26100 (newly applicable!)
+        let mut c2_prev = c1_prev.clone();
+        c2_prev.id = "windows.ai.recall-snapshot".to_owned();
+        c2_prev.title = "Recall screen snapshots".to_owned();
+        c2_prev.section = "ai".to_owned();
+        c2_prev.outcome = Outcome::NotApplicable;
+
+        let mut c2_curr = c2_prev.clone();
+        c2_curr.outcome = Outcome::Drift;
+        c2_curr.observed = Some("enabled".to_owned());
+
+        // Control 3: was Pass, remains Pass
+        let mut c3 = c1_prev.clone();
+        c3.id = "windows.advertising.id".to_owned();
+        c3.title = "Advertising ID".to_owned();
+        c3.section = "advertising".to_owned();
+
+        prior.results = vec![c1_prev, c2_prev, c3.clone()];
+        current.results = vec![c1_curr, c2_curr, c3];
+
+        let comparison = compare_reports(&prior, &current);
+        assert!(comparison.platform_upgraded);
+        assert!(!comparison.profile_mismatch);
+        assert_eq!(comparison.regressions.len(), 1);
+        assert_eq!(
+            comparison.regressions[0].id,
+            "windows.storage.bitlocker-cipher"
+        );
+        assert_eq!(comparison.newly_applicable.len(), 1);
+        assert_eq!(
+            comparison.newly_applicable[0].id,
+            "windows.ai.recall-snapshot"
+        );
+        assert_eq!(comparison.unchanged_pass, 1);
+
+        let rendered = render_comparison(&Ui::plain(), &comparison);
+        assert!(rendered.contains("privr check (post-update comparison)"));
+        assert!(rendered.contains("Platform change detected: 10.0.22631 -> 10.0.26100"));
+        assert!(rendered.contains("Regression Drift (1 protections lost after update)"));
+        assert!(rendered.contains("windows.storage.bitlocker-cipher"));
+        assert!(
+            rendered.contains("Newly Applicable Controls (1 introduced in current platform build)")
+        );
+        assert!(rendered.contains("windows.ai.recall-snapshot"));
+        assert!(rendered.contains("Summary: 1 regressed drift, 0 remediated, 1 newly applicable, 1 unchanged pass, 0 unchanged drift."));
     }
 }

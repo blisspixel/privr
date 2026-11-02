@@ -519,3 +519,74 @@ fn clean_preview_with_trim_json_contains_trim_status() {
     assert!(parsed["trim"]["volume"].is_string());
     assert!(parsed["trim"]["media_type"].is_string());
 }
+
+#[test]
+fn history_purge_with_yes_executes_safely() {
+    let mut command = Command::cargo_bin("privr").expect("binary");
+    command
+        .args(["history", "--purge", "-y"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Purged"));
+}
+
+#[test]
+fn check_compare_identifies_regression_and_outputs_provenance() {
+    let mut check_cmd = Command::cargo_bin("privr").expect("binary");
+    let assert = check_cmd.args(["check", "--format", "json"]).assert();
+
+    let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf-8");
+    let temp_file =
+        std::env::temp_dir().join(format!("privr-prior-test-{}.json", std::process::id()));
+    std::fs::write(&temp_file, output).expect("write temp report");
+
+    let mut compare_cmd = Command::cargo_bin("privr").expect("binary");
+    let result = compare_cmd
+        .args(["check", "--compare", temp_file.to_str().expect("str")])
+        .assert();
+
+    let _ = std::fs::remove_file(&temp_file);
+
+    result
+        .stdout(predicate::str::contains(
+            "privr check (post-update comparison)",
+        ))
+        .stdout(predicate::str::contains("Observation Provenance"))
+        .stdout(predicate::str::contains("Prior check:"))
+        .stdout(predicate::str::contains("Current check:"))
+        .stdout(predicate::str::contains("Summary:"));
+}
+
+#[test]
+fn check_compare_format_json_emits_structured_comparison() {
+    let mut check_cmd = Command::cargo_bin("privr").expect("binary");
+    let assert = check_cmd.args(["check", "--format", "json"]).assert();
+
+    let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf-8");
+    let temp_file =
+        std::env::temp_dir().join(format!("privr-prior-json-test-{}.json", std::process::id()));
+    std::fs::write(&temp_file, output).expect("write temp report");
+
+    let mut compare_cmd = Command::cargo_bin("privr").expect("binary");
+    let assert_cmp = compare_cmd
+        .args([
+            "check",
+            "--compare",
+            temp_file.to_str().expect("str"),
+            "--format",
+            "json",
+        ])
+        .assert();
+
+    let _ = std::fs::remove_file(&temp_file);
+
+    let cmp_output = String::from_utf8(assert_cmp.get_output().stdout.clone()).expect("utf-8");
+    let parsed: serde_json::Value =
+        serde_json::from_str(&cmp_output).expect("valid comparison json");
+    assert_eq!(parsed["schema"], 2);
+    assert!(parsed["prior"].is_object());
+    assert!(parsed["current"].is_object());
+    assert!(parsed["regressions"].is_array());
+    assert!(parsed["remediations"].is_array());
+    assert!(parsed["newly_applicable"].is_array());
+}

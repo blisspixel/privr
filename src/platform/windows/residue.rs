@@ -294,6 +294,24 @@ fn find_rule(id: &str) -> Option<&'static TargetPathRule> {
     TARGET_RULES.iter().find(|r| r.target_id == id)
 }
 
+/// Determine whether metadata represents a symlink, NTFS junction, or reparse point.
+fn is_reparse_point_or_symlink(meta: &fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    meta.file_type().is_symlink() || (meta.file_attributes() & 0x0000_0400) != 0
+}
+
+/// Reset read-only attribute on Windows to allow deleting disposable cache files.
+/// Stated reason: on Windows NTFS, `set_readonly(false)` directly toggles the
+/// `FILE_ATTRIBUTE_READONLY` flag without Unix world-writable side effects.
+#[allow(clippy::permissions_set_readonly_false)]
+fn clear_readonly_if_set(meta: &fs::Metadata, path: &Path) {
+    let mut perms = meta.permissions();
+    if perms.readonly() {
+        perms.set_readonly(false);
+        let _ = fs::set_permissions(path, perms);
+    }
+}
+
 /// Recursively scans a path counting files and bytes without following reparse points or symlinks.
 fn scan_path(
     path: &Path,
@@ -310,7 +328,7 @@ fn scan_path(
         Err(_) => return (0, 0),
     };
 
-    if meta.file_type().is_symlink() {
+    if is_reparse_point_or_symlink(&meta) {
         return (0, 0);
     }
 
@@ -340,7 +358,7 @@ fn scan_path(
                 Err(_) => continue,
             };
 
-            if entry_meta.file_type().is_symlink() {
+            if is_reparse_point_or_symlink(&entry_meta) {
                 continue;
             }
 
@@ -422,7 +440,7 @@ fn purge_path(
         Err(_) => return (0, 0, 0),
     };
 
-    if meta.file_type().is_symlink() {
+    if is_reparse_point_or_symlink(&meta) {
         return (0, 0, 0);
     }
 
@@ -434,10 +452,15 @@ fn purge_path(
             }
         }
         let len = meta.len();
-        return match fs::remove_file(path) {
-            Ok(_) => (1, len, 0),
-            Err(_) => (0, 0, 1), // File locked or permission denied
-        };
+        if fs::remove_file(path).is_ok() {
+            return (1, len, 0);
+        }
+        // Attempt resetting readonly attribute before declaring locked/retained
+        clear_readonly_if_set(&meta, path);
+        if fs::remove_file(path).is_ok() {
+            return (1, len, 0);
+        }
+        return (0, 0, 1);
     }
 
     if meta.is_dir() {
@@ -457,7 +480,7 @@ fn purge_path(
                 Err(_) => continue,
             };
 
-            if entry_meta.file_type().is_symlink() {
+            if is_reparse_point_or_symlink(&entry_meta) {
                 continue;
             }
 
@@ -470,14 +493,17 @@ fn purge_path(
                     }
                 }
                 let len = entry_meta.len();
-                match fs::remove_file(&entry_path) {
-                    Ok(_) => {
+                if fs::remove_file(&entry_path).is_ok() {
+                    removed += 1;
+                    bytes += len;
+                } else {
+                    clear_readonly_if_set(&entry_meta, &entry_path);
+                    if fs::remove_file(&entry_path).is_ok() {
                         removed += 1;
                         bytes += len;
+                        continue;
                     }
-                    Err(_) => {
-                        retained += 1;
-                    }
+                    retained += 1;
                 }
             } else if entry_meta.is_dir() && filter.is_none() {
                 let (sub_rem, sub_bytes, sub_ret) =

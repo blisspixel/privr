@@ -1203,27 +1203,24 @@ fn run_with_check_context(
                 if let Some(w) = workload {
                     child_args.push("--workload");
                     workload_str = clap::ValueEnum::to_possible_value(&w)
-                        .expect("valid value")
-                        .get_name()
-                        .to_string();
+                        .map(|pv| pv.get_name().to_string())
+                        .unwrap_or_else(|| w.as_str().to_string());
                     child_args.push(&workload_str);
                 }
                 let friction_str;
                 if let Some(f) = max_friction {
                     child_args.push("--max-friction");
                     friction_str = clap::ValueEnum::to_possible_value(&f)
-                        .expect("valid value")
-                        .get_name()
-                        .to_string();
+                        .map(|pv| pv.get_name().to_string())
+                        .unwrap_or_else(|| f.as_str().to_string());
                     child_args.push(&friction_str);
                 }
                 let profile_str_val;
                 if profile.is_some() {
                     child_args.push("--profile");
                     profile_str_val = clap::ValueEnum::to_possible_value(&profile_val)
-                        .expect("valid value")
-                        .get_name()
-                        .to_string();
+                        .map(|pv| pv.get_name().to_string())
+                        .unwrap_or_else(|| profile_val.as_str().to_string());
                     child_args.push(&profile_str_val);
                 }
                 for c_arg in &controls {

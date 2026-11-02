@@ -53,7 +53,7 @@ designed to be driven by an agent harness as readily as by a person.
   `explain` is a fresh read and says so. Plan, apply, rollback, recommend,
   simulate, and journal records stay schema 1.
 - **File-based probe replay has started** for Windows advertising ID and diagnostic data. Advertising policy distinguishes enforcement from user choice. Synthetic observations exercise the compiled probes and evaluator; native captures and full per-control coverage remain release blockers.
-- **Agent integration (`privr mcp`) is implemented**, providing a stdio Model Context Protocol (MCP) server exposing `privr_check`, `privr_plan`, `privr_apply`, `privr_recommend`, `privr_simulate`, `privr_explain`, and `privr_doctor` with Agent Plugins v1.0.0 packaging.
+- **Agent integration (`privr mcp`) is implemented**, providing a stdio Model Context Protocol (MCP) server exposing `privr_check` (with post-update regression comparison), `privr_plan`, `privr_apply`, `privr_recommend`, `privr_simulate`, `privr_explain`, `privr_clean`, `privr_history`, and `privr_doctor` with Agent Plugins v1.0.0 packaging.
 
 The full state, including known defects, is in
 [ROADMAP.md](ROADMAP.md#current-state).
@@ -227,12 +227,13 @@ stdio server is implemented at `privr mcp`, alongside packaging for the open
 and `skills/privr/SKILL.md`).
 
 - Read-only tool access (`privr_status`, `privr_doctor`, `privr_catalog`,
-  `privr_check`, `privr_explain`, `privr_plan`, `privr_recommend`, `privr_simulate`)
-  over stdio, so an agent can inspect, simulate, and propose without being able
-  to change anything.
-- Mutating tools (`privr_apply`, `privr_rollback`) are absent from discovery
-  unless explicitly enabled via `--allow-apply`, and approval cannot be granted
-  through an unconfirmed tool call.
+  `privr_check` with post-update comparison, `privr_explain`, `privr_plan`,
+  `privr_recommend`, `privr_simulate`, `privr_history`, and preview mode for
+  `privr_clean`) over stdio, so an agent can inspect, simulate, and propose without
+  being able to change anything.
+- Mutating tools (`privr_apply`, `privr_rollback`, `privr_clean` purge, and
+  `privr_history` purge) require `--allow-apply` and explicit `yes: true` confirmation,
+  and approval cannot be granted through an unconfirmed tool call.
 - Result objects are self-contained and ordered deterministically, with
   verbosity tiers so a full report fits a small context window.
 - Reports carry no stable machine identifier, so a report is safe to hand to a

@@ -237,6 +237,10 @@ fn handle_tools_list(allow_apply: bool) -> Value {
                     "section": {
                         "type": "string",
                         "description": "Optional section filter"
+                    },
+                    "compare": {
+                        "type": "string",
+                        "description": "Optional file path or JSON string of a saved prior report to compare against and detect update regressions"
                     }
                 }
             }
@@ -330,6 +334,60 @@ fn handle_tools_list(allow_apply: bool) -> Value {
                     "section": {
                         "type": "string",
                         "description": "Optional section name filter"
+                    }
+                }
+            }
+        }),
+        json!({
+            "name": "privr_history",
+            "description": "Show chronological transaction history of applied changes, or purge transaction records.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "purge": {
+                        "type": "boolean",
+                        "description": "Purge and destroy all saved transaction history files (requires --allow-apply and 'yes': true)",
+                        "default": false
+                    },
+                    "yes": {
+                        "type": "boolean",
+                        "description": "Explicit confirmation to purge transaction history"
+                    }
+                }
+            }
+        }),
+        json!({
+            "name": "privr_clean",
+            "description": "Preview or clean disposable caches, temporary files, activity residue, and issue hardware SSD TRIM.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "dry_run": {
+                        "type": "boolean",
+                        "description": "Preview targets, file counts, and byte sizes without mutating (default is true)",
+                        "default": true
+                    },
+                    "polite": {
+                        "type": "boolean",
+                        "description": "Retain disruptive or costly-to-rebuild caches such as thumbnail cache and recent items",
+                        "default": false
+                    },
+                    "category": {
+                        "type": "string",
+                        "description": "Filter by residue category: system, browsers, ai, dev, recent, all"
+                    },
+                    "control": {
+                        "type": "string",
+                        "description": "Optional exact residue target ID or prefix filter"
+                    },
+                    "trim": {
+                        "type": "boolean",
+                        "description": "Check TRIM support or execute hardware TRIM/Deallocate on solid-state drives",
+                        "default": false
+                    },
+                    "yes": {
+                        "type": "boolean",
+                        "description": "Explicit confirmation to purge residue (required when dry_run is false)"
                     }
                 }
             }
@@ -477,6 +535,31 @@ fn handle_tools_call_with_check_context(
                 let host = crate::platform::discover();
                 crate::report::Report::build_filtered(&host, profile.as_str(), &controls, &sections)
             };
+            if let Some(compare_val) = arguments.get("compare").and_then(Value::as_str) {
+                let prior_report: crate::report::Report =
+                    if compare_val.trim_start().starts_with('{') {
+                        serde_json::from_str(compare_val).map_err(|e| {
+                            (-32602, format!("Malformed comparison report JSON: {e}"))
+                        })?
+                    } else {
+                        let path = std::path::PathBuf::from(compare_val);
+                        let content = std::fs::read_to_string(&path).map_err(|e| {
+                            (
+                                -32602,
+                                format!("Cannot read comparison report file '{compare_val}': {e}"),
+                            )
+                        })?;
+                        serde_json::from_str(&content).map_err(|e| {
+                            (
+                                -32602,
+                                format!("Malformed comparison report JSON in '{compare_val}': {e}"),
+                            )
+                        })?
+                    };
+                let comparison = crate::report::compare_reports(&prior_report, &report);
+                return tool_success(serde_json::to_string_pretty(&comparison).unwrap_or_default());
+            }
+
             if !arguments
                 .get("all")
                 .and_then(Value::as_bool)
@@ -1160,6 +1243,216 @@ fn handle_tools_call_with_check_context(
             });
             tool_success(serde_json::to_string_pretty(&report).unwrap_or_default())
         }
+        "privr_history" => {
+            let purge = arguments
+                .get("purge")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            if purge {
+                if !allow_apply {
+                    return Err((
+                        -32600,
+                        "privr_history purge requires server launched with --allow-apply"
+                            .to_owned(),
+                    ));
+                }
+                let yes = arguments
+                    .get("yes")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                if !yes {
+                    return Err((
+                        -32602,
+                        "Explicit confirmation 'yes': true required to purge transaction history"
+                            .to_owned(),
+                    ));
+                }
+                match crate::journal::purge_transactions() {
+                    Ok(count) => {
+                        let res = json!({
+                            "purged": count
+                        });
+                        tool_success(serde_json::to_string_pretty(&res).unwrap_or_default())
+                    }
+                    Err(e) => Err((-32603, format!("Failed to purge transaction history: {e}"))),
+                }
+            } else {
+                let txs = crate::journal::list_transactions();
+                tool_success(serde_json::to_string_pretty(&txs).unwrap_or_default())
+            }
+        }
+        "privr_clean" => {
+            let dry_run = arguments
+                .get("dry_run")
+                .and_then(Value::as_bool)
+                .unwrap_or(true);
+            let polite = arguments
+                .get("polite")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let trim = arguments
+                .get("trim")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let category_filter: Vec<String> = arguments
+                .get("category")
+                .and_then(Value::as_str)
+                .map(|s| s.split(',').map(|c| c.trim().to_owned()).collect())
+                .unwrap_or_default();
+            let control_filter: Vec<String> = arguments
+                .get("control")
+                .and_then(Value::as_str)
+                .map(|s| s.split(',').map(|c| c.trim().to_owned()).collect())
+                .unwrap_or_default();
+
+            if !dry_run {
+                if !allow_apply {
+                    return Err((
+                        -32600,
+                        "privr_clean mutating purge requires server launched with --allow-apply"
+                            .to_owned(),
+                    ));
+                }
+                let yes = arguments
+                    .get("yes")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                if !yes {
+                    return Err((
+                        -32602,
+                        "Explicit confirmation 'yes': true required to execute residue clean"
+                            .to_owned(),
+                    ));
+                }
+            }
+
+            #[cfg(windows)]
+            {
+                let mode = if polite {
+                    crate::model::residue::PurgeMode::Polite
+                } else {
+                    crate::model::residue::PurgeMode::Aggressive
+                };
+
+                let trim_status = if trim {
+                    if dry_run {
+                        Some(crate::platform::windows::residue::check_volume_trim_support('C'))
+                    } else {
+                        Some(crate::platform::windows::residue::execute_volume_trim('C'))
+                    }
+                } else {
+                    None
+                };
+
+                let target_specs = crate::catalog::residue::select_residue_targets(
+                    mode,
+                    &control_filter,
+                    &category_filter,
+                );
+
+                if dry_run {
+                    let mut preview_items = Vec::new();
+                    for (spec, selected, reason) in &target_specs {
+                        let item = crate::platform::windows::residue::inspect_target(
+                            spec,
+                            *selected,
+                            reason.clone(),
+                        );
+                        preview_items.push(item);
+                    }
+                    let report = crate::model::residue::PurgeReport {
+                        schema: 1,
+                        mode,
+                        dry_run: true,
+                        total_files_affected: preview_items
+                            .iter()
+                            .filter(|i| i.selected)
+                            .map(|i| i.file_count)
+                            .sum(),
+                        total_bytes_affected: preview_items
+                            .iter()
+                            .filter(|i| i.selected)
+                            .map(|i| i.size_bytes)
+                            .sum(),
+                        items: preview_items
+                            .into_iter()
+                            .filter(|i| i.selected)
+                            .map(|i| crate::model::residue::ResiduePurgeItem {
+                                id: i.id,
+                                title: i.title,
+                                category: i.category,
+                                files_removed: i.file_count,
+                                bytes_reclaimed: i.size_bytes,
+                                files_retained: 0,
+                                error: None,
+                            })
+                            .collect(),
+                        trim: trim_status,
+                    };
+                    tool_success(serde_json::to_string_pretty(&report).unwrap_or_default())
+                } else {
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default();
+                    let timestamp = format!("{}.{:03}", now.as_secs(), now.subsec_millis());
+                    let tx_id = format!("clean-{}-{}", now.as_secs(), now.subsec_millis());
+
+                    let journal = crate::journal::TransactionJournal {
+                        schema: crate::journal::JOURNAL_SCHEMA,
+                        transaction_id: tx_id,
+                        timestamp,
+                        platform: "windows".to_owned(),
+                        profile: format!("clean:{}", mode.as_str()),
+                        operations: Vec::new(),
+                    };
+
+                    if let Err(e) = crate::journal::save_transaction(&journal) {
+                        return Err((-32603, format!("Cannot write transaction journal: {e}")));
+                    }
+
+                    let mut purge_results = Vec::new();
+                    for (spec, selected, _) in &target_specs {
+                        if *selected {
+                            let result = crate::platform::windows::residue::purge_target(spec);
+                            purge_results.push(result);
+                        }
+                    }
+                    let total_removed: usize = purge_results.iter().map(|r| r.files_removed).sum();
+                    let total_reclaimed: u64 =
+                        purge_results.iter().map(|r| r.bytes_reclaimed).sum();
+                    let report = crate::model::residue::PurgeReport {
+                        schema: 1,
+                        mode,
+                        dry_run: false,
+                        total_files_affected: total_removed,
+                        total_bytes_affected: total_reclaimed,
+                        items: purge_results,
+                        trim: trim_status,
+                    };
+                    tool_success(serde_json::to_string_pretty(&report).unwrap_or_default())
+                }
+            }
+
+            #[cfg(not(windows))]
+            {
+                let _ = (dry_run, polite, trim, category_filter, control_filter);
+                let mode = if polite {
+                    crate::model::residue::PurgeMode::Polite
+                } else {
+                    crate::model::residue::PurgeMode::Aggressive
+                };
+                let report = crate::model::residue::PurgeReport {
+                    schema: 1,
+                    mode,
+                    dry_run,
+                    total_files_affected: 0,
+                    total_bytes_affected: 0,
+                    items: Vec::new(),
+                    trim: None,
+                };
+                tool_success(serde_json::to_string_pretty(&report).unwrap_or_default())
+            }
+        }
         unknown => Err((-32601, format!("Unknown tool '{unknown}'"))),
     }
 }
@@ -1248,11 +1541,16 @@ mod tests {
     fn handle_message(req: &Value, allow_apply: bool, err: &mut impl Write) -> Option<Value> {
         let params = &req["params"];
         let confirmed_mutation = allow_apply
-            && matches!(
+            && ((matches!(
                 params["name"].as_str(),
                 Some("privr_apply" | "privr_rollback")
-            )
-            && params["arguments"]["yes"] == true;
+            ) && params["arguments"]["yes"] == true)
+                || (params["name"].as_str() == Some("privr_history")
+                    && params["arguments"]["purge"] == true
+                    && params["arguments"]["yes"] == true)
+                || (params["name"].as_str() == Some("privr_clean")
+                    && params["arguments"]["dry_run"] == false
+                    && params["arguments"]["yes"] == true));
         assert!(
             !confirmed_mutation,
             "unit tests must not execute confirmed live mutations"
@@ -2012,5 +2310,127 @@ mod tests {
                 -32602
             );
         }
+    }
+
+    #[test]
+    fn test_privr_history_and_clean_tools_in_tool_list() {
+        let tools_val = handle_tools_list(false);
+        let tools_arr = tools_val["tools"].as_array().expect("tools array");
+        assert!(tools_arr.iter().any(|t| t["name"] == "privr_history"));
+        assert!(tools_arr.iter().any(|t| t["name"] == "privr_clean"));
+        assert!(tools_arr.iter().any(|t| t["name"] == "privr_check"));
+    }
+
+    #[test]
+    fn test_privr_history_read_only_call() {
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "privr_history",
+                "arguments": {}
+            }
+        });
+        let res = super::handle_message(&req, false, &mut Vec::new()).expect("response");
+        if let Some(err) = res.get("error") {
+            panic!("Got error: {err:?}");
+        }
+        assert_eq!(res["result"]["isError"], false);
+    }
+
+    #[test]
+    fn test_privr_history_purge_refuses_without_allow_apply() {
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "privr_history",
+                "arguments": {
+                    "purge": true,
+                    "yes": true
+                }
+            }
+        });
+        let res = super::handle_message(&req, false, &mut Vec::new()).expect("response");
+        assert_eq!(res["error"]["code"], -32600);
+    }
+
+    #[test]
+    fn test_privr_clean_preview_call() {
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": {
+                "name": "privr_clean",
+                "arguments": {
+                    "dry_run": true,
+                    "polite": true
+                }
+            }
+        });
+        let res = super::handle_message(&req, false, &mut Vec::new()).expect("response");
+        if let Some(err) = res.get("error") {
+            panic!("Got error: {err:?}");
+        }
+        assert_eq!(res["result"]["isError"], false);
+        let text = res["result"]["content"][0]["text"].as_str().expect("text");
+        let parsed: Value = serde_json::from_str(text).expect("valid json report");
+        assert_eq!(parsed["dry_run"], true);
+    }
+
+    #[test]
+    fn test_privr_clean_mutating_refuses_without_allow_apply() {
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 4,
+            "method": "tools/call",
+            "params": {
+                "name": "privr_clean",
+                "arguments": {
+                    "dry_run": false,
+                    "yes": true
+                }
+            }
+        });
+        let res = super::handle_message(&req, false, &mut Vec::new()).expect("response");
+        assert_eq!(res["error"]["code"], -32600);
+    }
+
+    #[test]
+    fn test_privr_check_compare_returns_structured_delta() {
+        let host = crate::platform::discover();
+        let mut prior = crate::report::Report::build_filtered(
+            &host,
+            "baseline",
+            &["windows.delivery-optimization.mode".to_string()],
+            &[],
+        );
+        prior.os_version = Some("10.0.22631".to_owned());
+        let prior_str = serde_json::to_string(&prior).unwrap();
+
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 5,
+            "method": "tools/call",
+            "params": {
+                "name": "privr_check",
+                "arguments": {
+                    "control": "windows.delivery-optimization.mode",
+                    "compare": prior_str
+                }
+            }
+        });
+        let res = super::handle_message(&req, false, &mut Vec::new()).expect("response");
+        if let Some(err) = res.get("error") {
+            panic!("Got error: {err:?}");
+        }
+        assert_eq!(res["result"]["isError"], false);
+        let text = res["result"]["content"][0]["text"].as_str().expect("text");
+        let parsed: Value = serde_json::from_str(text).expect("valid comparison json");
+        assert!(parsed.get("regressions").is_some());
+        assert_eq!(parsed["platform_upgraded"], true);
     }
 }

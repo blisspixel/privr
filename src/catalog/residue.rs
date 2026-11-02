@@ -246,15 +246,14 @@ mod tests {
         let aggressive = select_residue_targets(PurgeMode::Aggressive, &[], &[]);
         let polite = select_residue_targets(PurgeMode::Polite, &[], &[]);
 
-        let thumb_agg = aggressive
-            .iter()
-            .find(|(s, _, _)| s.id == "windows.residue.thumbnail-cache");
-        let thumb_pol = polite
-            .iter()
-            .find(|(s, _, _)| s.id == "windows.residue.thumbnail-cache");
-
         #[cfg(windows)]
         {
+            let thumb_agg = aggressive
+                .iter()
+                .find(|(s, _, _)| s.id == "windows.residue.thumbnail-cache");
+            let thumb_pol = polite
+                .iter()
+                .find(|(s, _, _)| s.id == "windows.residue.thumbnail-cache");
             assert!(
                 thumb_agg.unwrap().1,
                 "Thumbnail cache should be selected in aggressive mode"
@@ -263,6 +262,11 @@ mod tests {
                 !thumb_pol.unwrap().1,
                 "Thumbnail cache should be retained in polite mode"
             );
+        }
+        #[cfg(not(windows))]
+        {
+            assert!(aggressive.is_empty());
+            assert!(polite.is_empty());
         }
     }
 

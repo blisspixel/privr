@@ -571,14 +571,9 @@ impl Report {
                 0,
             ));
         } else if self.summary.drift > 0 {
-            let divider = if ui.unicode() {
-                "─".repeat(ui.width().min(76))
-            } else {
-                "-".repeat(ui.width().min(76))
-            };
-            out.push_str(&format!("\n{}\n", ui.paint(style::MUTED, &divider)));
-            let next = "Next Steps: Run 'privr diff' to preview, 'privr fix' to apply safe remediations, or 'privr clean' to purge residue.";
-            out.push_str(&ui.paint_lines(style::VALUE, &ui.wrap(next, 0)));
+            out.push('\n');
+            let next = "Next steps: Run 'privr diff' to preview, 'privr fix' to apply safe remediations, or 'privr clean' to purge residue.";
+            out.push_str(&ui.paint_lines(style::MUTED, &ui.wrap(next, 0)));
             out.push('\n');
         } else if self.complete {
             out.push_str(completed_scope_status(&self.summary));
@@ -689,7 +684,7 @@ fn write_result_row(
     out.push_str(&ui.wrap_after(&result.title, 15));
     out.push('\n');
     out.push_str(&format!(
-        "             {}\n",
+        "               {}\n",
         ui.paint(style::MUTED, &result.id)
     ));
 
@@ -704,7 +699,7 @@ fn write_result_row(
                 ui.paint(style::outcome_style(Outcome::Error), "compatibility risk")
             }
         };
-        out.push_str(&format!("             {friction_badge}"));
+        out.push_str(&format!("               {friction_badge}"));
         if control.is_some_and(|item| item.spec.requires_elevation) {
             out.push(' ');
             out.push_str(&ui.paint(style::CAVEAT, "requires elevation"));
@@ -718,12 +713,12 @@ fn write_result_row(
             Outcome::Drift | Outcome::Review => style::CAVEAT,
             _ => style::VALUE,
         };
-        let wrapped = ui.wrap(note, 13);
+        let wrapped = ui.wrap(note, 15);
         out.push_str(&ui.paint_lines(note_style, &wrapped));
         out.push('\n');
     }
     if let Some(reason) = result.observation_reason {
-        let reason_line = ui.wrap(&format!("reason: {}", uncertainty_word(reason)), 13);
+        let reason_line = ui.wrap(&format!("reason: {}", uncertainty_word(reason)), 15);
         out.push_str(&ui.paint_lines(style::VALUE, &reason_line));
         out.push('\n');
     }
@@ -760,6 +755,9 @@ pub fn humanize_section(section: &str) -> &str {
     }
 }
 
+/// Format raw byte sizes into human-readable notation.
+/// Stated reason: allow dead_code on non-Windows targets where residue cleanup rendering is currently disabled.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn format_byte_size(bytes: u64) -> String {
     if bytes == 0 {
         return "0 B".to_owned();
@@ -779,6 +777,9 @@ pub fn format_byte_size(bytes: u64) -> String {
     }
 }
 
+/// Render the preview table and summary for disposable residue cleanup.
+/// Stated reason: allow dead_code on non-Windows targets where residue cleanup rendering is currently disabled.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn render_purge_preview(
     ui: &Ui,
     mode: crate::model::residue::PurgeMode,
@@ -884,6 +885,9 @@ pub fn render_purge_preview(
     out
 }
 
+/// Render the completion report for executed residue purge transactions.
+/// Stated reason: allow dead_code on non-Windows targets where residue cleanup rendering is currently disabled.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn render_purge_report(
     ui: &Ui,
     report: &crate::model::residue::PurgeReport,

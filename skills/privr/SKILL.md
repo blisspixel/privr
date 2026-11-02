@@ -23,16 +23,20 @@ When `privr` is loaded as an MCP server (`privr mcp`), the following tools are a
 - `privr_status`: Returns host platform, architecture, OS version, and catalogue count. Safe by construction; exposes no user or machine identifiers.
 - `privr_doctor`: Evaluates host capability facts, privilege level, platform adapters, storage integrity, and schema versions.
 - `privr_catalog`: Queries compiled controls in the catalogue. Accepts optional `query` and `platform` filters.
-- `privr_check`: Evaluates host privacy posture against a profile (`baseline`, `strict`, `restrictive`). Accepts `all` boolean to include passing controls, and `control` string to filter by ID or prefix.
+- `privr_check`: Evaluates host privacy posture against a profile (`baseline`, `strict`, `restrictive`). Accepts `all` boolean to include passing controls, `control` string to filter by ID or prefix, and `compare` path/JSON string to compare against prior reports for update regression analysis.
 - `privr_explain`: Returns full privacy rationale, tradeoff, mitigation, and primary vendor documentation for a specific control identifier (e.g. `windows.storage.thumbnail-cache`).
 - `privr_plan`: Returns a dry-run report of proposed changes for drifted controls without modifying the host.
 - `privr_recommend`: Returns prioritized, deterministic remediation recommendations based on workload persona (`general`, `developer`, `creative`, `mobile`, `high-assurance`), friction budget, and posture dimension.
 - `privr_simulate`: Counterfactually simulates applying a profile or controls without modifying machine state, projecting posture vectors and friction breakdowns.
+- `privr_history`: Displays recorded transaction journals.
+- `privr_clean`: Inspects disposable caches, temporary files, activity residue, and SSD TRIM support (preview mode with `dry_run: true`).
 
 ### Mutation tools (gated behind `--allow-apply`)
 
 - `privr_apply`: Applies and verifies supported changes for drifted controls. Requires explicit confirmation parameter (`yes: true`). Supports `elevate: true` to request native in-place elevation. Records all operations in a transaction journal.
 - `privr_rollback`: Restores prior values recorded in a transaction journal. Requires `transaction_id` and explicit confirmation (`yes: true`).
+- `privr_clean`: Purges selected disposable caches and issues hardware TRIM when `dry_run: false`. Requires explicit confirmation (`yes: true`).
+- `privr_history`: Purges transaction records when `purge: true`. Requires explicit confirmation (`yes: true`).
 
 ## CLI workflow for agents
 
@@ -44,6 +48,9 @@ privr doctor --format json
 
 # Non-destructive check with structured JSON output
 privr check --format json
+
+# Compare against a prior check report to detect update regressions
+privr check --compare prior-report.json --format json
 
 # Include passing controls
 privr check --all --format json
@@ -63,8 +70,17 @@ privr list --query thumbnail --format json
 # Review a dry-run plan
 privr plan --format json
 
+# Preview disposable residue and SSD TRIM support
+privr clean --preview --format json
+
+# Clean disposable residue and issue hardware TRIM
+privr clean --yes --trim --format json
+
 # Apply verified daily-driver changes with in-place elevation
 privr apply --yes --elevate --format json
+
+# View transaction history
+privr history --format json
 
 # Roll back a recorded transaction
 privr rollback <tx-id> --yes --format json

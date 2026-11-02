@@ -101,6 +101,13 @@ impl Resolution {
         self
     }
 
+    /// Attach an informational note to this resolution.
+    #[must_use]
+    pub fn with_note(mut self, note: impl Into<String>) -> Self {
+        self.note = Some(note.into());
+        self
+    }
+
     pub fn uncertain(uncertainty: Uncertainty, source: ManagementSource) -> Self {
         Self {
             state: None,

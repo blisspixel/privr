@@ -126,6 +126,16 @@ pub struct ResiduePurgeItem {
     pub error: Option<String>,
 }
 
+/// Free space TRIM / Deallocate status for a volume.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct TrimStatus {
+    pub volume: String,
+    pub media_type: String,
+    pub supported: bool,
+    pub executed: bool,
+    pub message: String,
+}
+
 /// Versioned report for a purge preview or execution.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PurgeReport {
@@ -135,4 +145,6 @@ pub struct PurgeReport {
     pub total_files_affected: usize,
     pub total_bytes_affected: u64,
     pub items: Vec<ResiduePurgeItem>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trim: Option<TrimStatus>,
 }

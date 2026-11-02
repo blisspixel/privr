@@ -369,6 +369,7 @@ fn run_with_check_context(
                                                 categories: Vec::new(),
                                                 controls: Vec::new(),
                                                 accept_risks: Vec::new(),
+                                                trim: false,
                                             }),
                                         },
                                         out,
@@ -472,6 +473,7 @@ fn run_with_check_context(
                                                 categories: Vec::new(),
                                                 controls: Vec::new(),
                                                 accept_risks: Vec::new(),
+                                                trim: false,
                                             }),
                                         },
                                         out,
@@ -502,6 +504,7 @@ fn run_with_check_context(
                                                 categories: Vec::new(),
                                                 controls: Vec::new(),
                                                 accept_risks: Vec::new(),
+                                                trim: false,
                                             }),
                                         },
                                         out,
@@ -1755,6 +1758,13 @@ fn run_with_check_context(
                 let _ = write!(out, "{}", crate::explain::render_overview(&ui));
                 return 0;
             }
+            if matches!(
+                topic_or_id.to_ascii_lowercase().as_str(),
+                "storage" | "trim" | "wipe" | "sanitization" | "ssd"
+            ) {
+                let _ = write!(out, "{}", crate::explain::render_storage_explanation(&ui));
+                return 0;
+            }
             match crate::explain::find(topic_or_id) {
                 Ok(control) => {
                     let host = crate::platform::discover();
@@ -2116,9 +2126,20 @@ Run privr explain without arguments for the posture overview, or privr list to s
             categories,
             controls,
             accept_risks,
+            trim,
         } => {
             #[cfg(not(windows))]
             {
+                let _ = (
+                    polite,
+                    preview,
+                    dry_run,
+                    yes,
+                    categories,
+                    controls,
+                    accept_risks,
+                    trim,
+                );
                 let _ = writeln!(
                     err,
                     "privr: disposable residue cleanup is currently implemented for Windows only."
@@ -2135,9 +2156,15 @@ Run privr explain without arguments for the posture overview, or privr list to s
                     crate::model::residue::PurgeMode::Aggressive
                 };
 
+                let trim_status = if trim {
+                    Some(crate::platform::windows::residue::check_volume_trim_support('C'))
+                } else {
+                    None
+                };
+
                 let target_specs =
                     crate::catalog::residue::select_residue_targets(mode, &controls, &categories);
-                if target_specs.is_empty() {
+                if target_specs.is_empty() && !trim {
                     let _ = writeln!(err, "privr: no matching residue targets found.");
                     return 2;
                 }
@@ -2201,13 +2228,18 @@ Run privr explain without arguments for the posture overview, or privr list to s
                                         error: None,
                                     })
                                     .collect(),
+                                trim: trim_status,
                             };
                             let json = serde_json::to_string_pretty(&report).unwrap_or_default();
                             let _ = writeln!(out, "{}", json);
                         }
                         OutputFormat::Text => {
-                            let rendered =
-                                crate::report::render_purge_preview(&ui, mode, &preview_items);
+                            let rendered = crate::report::render_purge_preview(
+                                &ui,
+                                mode,
+                                &preview_items,
+                                trim_status.as_ref(),
+                            );
                             let _ = write!(out, "{}", rendered);
                             if !is_preview_mode {
                                 let _ = writeln!(
@@ -2222,16 +2254,28 @@ Run privr explain without arguments for the posture overview, or privr list to s
 
                 // Interactive confirmation if not --yes
                 if !yes && is_terminal {
-                    let rendered = crate::report::render_purge_preview(&ui, mode, &preview_items);
+                    let rendered = crate::report::render_purge_preview(
+                        &ui,
+                        mode,
+                        &preview_items,
+                        trim_status.as_ref(),
+                    );
                     let _ = write!(out, "{}", rendered);
 
                     let selected_count = preview_items.iter().filter(|i| i.selected).count();
-                    if selected_count == 0 {
+                    if selected_count == 0 && !trim {
                         let _ = writeln!(out, "Nothing to clean in selected scope.");
                         return 0;
                     }
 
-                    let _ = write!(out, "\nClean selected residue? [y/N]: ");
+                    let prompt_text = if selected_count == 0 && trim {
+                        "\nIssue hardware TRIM to SSD? [y/N]: "
+                    } else if trim {
+                        "\nClean selected residue and issue hardware TRIM? [y/N]: "
+                    } else {
+                        "\nClean selected residue? [y/N]: "
+                    };
+                    let _ = write!(out, "{}", prompt_text);
                     let _ = out.flush();
 
                     let mut input = String::new();
@@ -2274,6 +2318,12 @@ Run privr explain without arguments for the posture overview, or privr list to s
                     }
                 }
 
+                let executed_trim = if trim {
+                    Some(crate::platform::windows::residue::execute_volume_trim('C'))
+                } else {
+                    None
+                };
+
                 let total_removed: usize = purge_results.iter().map(|r| r.files_removed).sum();
                 let total_reclaimed: u64 = purge_results.iter().map(|r| r.bytes_reclaimed).sum();
 
@@ -2284,6 +2334,7 @@ Run privr explain without arguments for the posture overview, or privr list to s
                     total_files_affected: total_removed,
                     total_bytes_affected: total_reclaimed,
                     items: purge_results,
+                    trim: executed_trim,
                 };
 
                 match cli.format {

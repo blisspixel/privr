@@ -329,6 +329,7 @@ pub enum Command {
                         privr clean --polite            Clean while retaining recent items & thumbnails\n  \
                         privr clean --category ai       Clean only AI agent temporary files\n  \
                         privr clean -c ai,browsers      Clean AI agent and web browser caches\n  \
+                        privr clean --trim              Clean residue and issue hardware TRIM to SSD\n  \
                         privr clean --preview           Preview what would be cleaned without mutating"
     )]
     Clean {
@@ -353,6 +354,9 @@ pub enum Command {
         /// Explicitly acknowledge risk for a targeted category. Repeatable.
         #[arg(long = "accept-risk")]
         accept_risks: Vec<String>,
+        /// Issue hardware TRIM / Deallocate to solid-state drives (SSDs/NVMe) to unmap free blocks and optimize write performance.
+        #[arg(long)]
+        trim: bool,
     },
 }
 

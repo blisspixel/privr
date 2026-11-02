@@ -353,6 +353,24 @@ fn explain_topic_keywords_show_scoring_model() {
 }
 
 #[test]
+fn explain_storage_topic_shows_flash_mechanics_and_sanitization() {
+    for topic in ["storage", "trim", "wipe"] {
+        let mut command = Command::cargo_bin("privr").expect("binary");
+        command
+            .args(["explain", topic])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains(
+                "privr Storage Privacy & Forensic Sanitization Architecture",
+            ))
+            .stdout(predicate::str::contains("Physical Reality: Flash Storage"))
+            .stdout(predicate::str::contains("Hardware TRIM"))
+            .stdout(predicate::str::contains("Chip-Off Forensics"))
+            .stdout(predicate::str::contains("NIST SP 800-88"));
+    }
+}
+
+#[test]
 fn explain_known_control_shows_evidence_and_rationale() {
     let control_id = if cfg!(windows) {
         "windows.advertising.id"
@@ -468,4 +486,36 @@ fn purge_with_control_filter_scopes_selection() {
         .success()
         .stdout(predicate::str::contains("User temporary files"))
         .stdout(predicate::str::contains("Plan: 1 to clean"));
+}
+
+#[cfg(windows)]
+#[test]
+fn clean_preview_with_trim_shows_hardware_maintenance() {
+    let mut command = Command::cargo_bin("privr").expect("binary");
+    command
+        .args(["clean", "--preview", "--trim"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Hardware Storage Maintenance"))
+        .stdout(predicate::str::contains(
+            "Solid-state drive free space TRIM",
+        ));
+}
+
+#[cfg(windows)]
+#[test]
+fn clean_preview_with_trim_json_contains_trim_status() {
+    let mut command = Command::cargo_bin("privr").expect("binary");
+    let assert = command
+        .args(["clean", "--preview", "--trim", "--format", "json"])
+        .assert()
+        .success();
+
+    let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf-8");
+    let parsed: serde_json::Value = serde_json::from_str(&output).expect("valid json report");
+    assert_eq!(parsed["schema"], 1);
+    assert_eq!(parsed["dry_run"], true);
+    assert!(parsed["trim"].is_object());
+    assert!(parsed["trim"]["volume"].is_string());
+    assert!(parsed["trim"]["media_type"].is_string());
 }

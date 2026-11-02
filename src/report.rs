@@ -757,6 +757,7 @@ pub fn render_purge_preview(
     ui: &Ui,
     mode: crate::model::residue::PurgeMode,
     items: &[crate::model::residue::ResiduePreviewItem],
+    trim: Option<&crate::model::residue::TrimStatus>,
 ) -> String {
     let mut out = String::new();
     let header = format!("privr clean (preview, {} mode)\n\n", mode.as_str());
@@ -818,6 +819,33 @@ pub fn render_purge_preview(
         out.push('\n');
     }
 
+    if let Some(trim) = trim {
+        out.push_str(&format!(
+            "  {}\n",
+            ui.paint(style::HEADING, "Hardware Storage Maintenance")
+        ));
+        let bullet = if ui.unicode() { "•" } else { "*" };
+        if trim.supported {
+            let tag = ui.paint(style::outcome_style(Outcome::Drift), bullet);
+            out.push_str(&format!(
+                "    {tag} {:<42} {}\n\n",
+                format!("Solid-state drive free space TRIM ({})", trim.volume),
+                ui.paint(style::VALUE, "[eligible: SSD/NVMe volume, 0 B wear]")
+            ));
+        } else {
+            let bullet_muted = if ui.unicode() { "•" } else { "-" };
+            let tag = ui.paint(style::MUTED, bullet_muted);
+            out.push_str(&format!(
+                "    {tag} {:<42} {}\n\n",
+                format!("Solid-state drive free space TRIM ({})", trim.volume),
+                ui.paint(
+                    style::MUTED,
+                    "[skipped: rotational magnetic media, TRIM not applicable]"
+                )
+            ));
+        }
+    }
+
     out.push_str(&format!(
         "Plan: {} to clean ({}, {} files), {} retained ({}).\n",
         selected_count,
@@ -873,6 +901,28 @@ pub fn render_purge_report(
             }
         }
         out.push('\n');
+    }
+
+    if let Some(trim) = &report.trim {
+        out.push_str(&format!(
+            "  {}\n",
+            ui.paint(style::HEADING, "Hardware Storage Maintenance")
+        ));
+        let bullet = if ui.unicode() { "•" } else { "*" };
+        if trim.executed {
+            let tag = ui.paint(style::outcome_style(Outcome::Pass), bullet);
+            out.push_str(&format!(
+                "    {tag} Solid-state drive free space TRIM ({}): {}\n\n",
+                trim.volume, trim.message
+            ));
+        } else {
+            let bullet_muted = if ui.unicode() { "•" } else { "-" };
+            let tag = ui.paint(style::MUTED, bullet_muted);
+            out.push_str(&format!(
+                "    {tag} Solid-state drive free space TRIM ({}): {}\n\n",
+                trim.volume, trim.message
+            ));
+        }
     }
 
     out.push_str(&format!(

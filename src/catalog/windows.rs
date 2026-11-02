@@ -13,7 +13,7 @@ use super::{Context, Control, Source};
 use crate::engine::evaluate::{ControlSpec, Resolution, SemanticState, Uncertainty};
 use crate::model::applicability::{Applicability, Predicate, Variant};
 use crate::model::evidence::{Evidence, Observation, RawValue};
-use crate::model::host::{HostFacts, ManagementSource, Platform};
+use crate::model::host::{Fact, HostFacts, ManagementSource, OsVersion, Platform};
 use crate::model::outcome::{Ineffective, Maturity, Remediation, Reversibility};
 use crate::model::posture::{FrictionTier, PostureDimension};
 use crate::model::profile::Profile;
@@ -1034,6 +1034,14 @@ fn toggle_control_with_desired(
     rollback: Option<super::RollbackFn>,
 ) -> Control {
     let (dimension, friction) = dimension_and_friction_for_control(id, section);
+    let predicates = if id == "windows.ai.recall-snapshot" {
+        vec![
+            Predicate::Platform(Platform::Windows),
+            Predicate::VersionAtLeast(OsVersion::new(vec![10, 0, 26100], "10.0.26100")),
+        ]
+    } else {
+        vec![Predicate::Platform(Platform::Windows)]
+    };
     Control {
         spec: ControlSpec {
             id: id.to_owned(),
@@ -1041,10 +1049,7 @@ fn toggle_control_with_desired(
             section: section.to_owned(),
             dimension,
             friction,
-            applicability: Applicability::new(vec![Variant::new(
-                "windows",
-                vec![Predicate::Platform(Platform::Windows)],
-            )]),
+            applicability: Applicability::new(vec![Variant::new("windows", predicates)]),
 
             desired,
             reversibility: Reversibility::Exact,
@@ -1107,6 +1112,14 @@ const RECALL_SNAPSHOTS: Toggle = Toggle {
 };
 
 fn probe_recall_snapshots(ctx: &Context) -> Resolution {
+    if let Fact::Known(ref ver) = ctx.host.version
+        && !ver.at_least(&OsVersion::new(vec![10, 0, 26100], "10.0.26100"))
+    {
+        return Resolution::determined(disabled(), ManagementSource::Default).with_note(format!(
+            "Windows Recall is not present on Windows build {} (requires build 26100 or newer).",
+            ver.display
+        ));
+    }
     RECALL_SNAPSHOTS.probe(ctx)
 }
 
@@ -1313,6 +1326,45 @@ const PAGEFILE_CLEAR: Toggle = Toggle {
 
 fn probe_pagefile_clear(ctx: &Context) -> Resolution {
     PAGEFILE_CLEAR.probe(ctx)
+}
+
+const BITLOCKER_POLICY_DOCS: &str = "https://learn.microsoft.com/windows/security/operating-system-security/data-protection/bitlocker/bitlocker-group-policy-settings";
+const KERNEL_DMA_DOCS: &str = "https://learn.microsoft.com/windows/security/hardware-security/kernel-dma-protection-for-thunderbolt";
+
+const BITLOCKER_CIPHER_POLICY: Target = Target::new(
+    Hive::LocalMachine,
+    r"SOFTWARE\Policies\Microsoft\FVE",
+    "EncryptionMethodWithXtsOs",
+    View::Native,
+);
+
+const BITLOCKER_CIPHER: Toggle = Toggle {
+    target: BITLOCKER_CIPHER_POLICY,
+    private_value: 7,
+    absent_means: "disabled",
+    desired_state: "enabled",
+};
+
+fn probe_bitlocker_cipher(ctx: &Context) -> Resolution {
+    BITLOCKER_CIPHER.probe(ctx)
+}
+
+const DMA_PROTECTION_POLICY: Target = Target::new(
+    Hive::LocalMachine,
+    r"SOFTWARE\Policies\Microsoft\Windows\Kernel DMA Protection",
+    "DeviceEnumerationPolicy",
+    View::Native,
+);
+
+const DMA_PROTECTION: Toggle = Toggle {
+    target: DMA_PROTECTION_POLICY,
+    private_value: 1,
+    absent_means: "disabled",
+    desired_state: "enabled",
+};
+
+fn probe_dma_protection(ctx: &Context) -> Resolution {
+    DMA_PROTECTION.probe(ctx)
 }
 
 const TRIM_NOTIFY_POLICY: Target = Target::new(
@@ -1812,6 +1864,48 @@ pub fn controls() -> Vec<Control> {
             |ctx| THUMBNAIL_CACHE.probe(ctx),
             Some(|ctx| THUMBNAIL_CACHE.apply(ctx)),
             Some(|ctx, pre, post| THUMBNAIL_CACHE.rollback(ctx, pre, post)),
+        ),
+        toggle_control_with_desired(
+            "windows.storage.bitlocker-cipher",
+            "storage",
+            "BitLocker encryption cipher strength (XTS-AES 256)",
+            enabled(),
+            "Windows configures operating system volume encryption with XTS-AES 256-bit cipher strength.",
+            "BitLocker defaults to XTS-AES 128-bit encryption when unconfigured. Enforcing XTS-AES 256-bit provides maximum cryptographic security against offline analysis of physical NAND flash cells.",
+            Some("New BitLocker volume encryption enforces XTS-AES 256-bit cipher strength."),
+            Some(
+                "Existing encrypted volumes remain encrypted at their initial strength until re-encrypted.",
+            ),
+            &[Source {
+                url: BITLOCKER_POLICY_DOCS,
+                claim: "Documents BitLocker drive encryption method and cipher strength policy.",
+                reviewed: "2026-10-01",
+            }],
+            probe_bitlocker_cipher,
+            Some(|ctx| BITLOCKER_CIPHER.apply(ctx)),
+            Some(|ctx, pre, post| BITLOCKER_CIPHER.rollback(ctx, pre, post)),
+        ),
+        toggle_control_with_desired(
+            "windows.storage.dma-protection",
+            "storage",
+            "Kernel DMA Protection for external devices",
+            enabled(),
+            "Windows restricts external Thunderbolt and USB4 direct memory access while locked.",
+            "Direct Memory Access (DMA) over external PCIe ports allows malicious physical peripherals to dump system RAM and extract BitLocker encryption keys. Restricting enumeration blocks DMA while locked.",
+            Some(
+                "External Thunderbolt docks and high-speed peripherals connect only after user authentication.",
+            ),
+            Some(
+                "Standard USB keyboards, mice, and display outputs continue functioning normally.",
+            ),
+            &[Source {
+                url: KERNEL_DMA_DOCS,
+                claim: "Documents Kernel DMA Protection external device enumeration policy.",
+                reviewed: "2026-10-01",
+            }],
+            probe_dma_protection,
+            Some(|ctx| DMA_PROTECTION.apply(ctx)),
+            Some(|ctx, pre, post| DMA_PROTECTION.rollback(ctx, pre, post)),
         ),
         toggle_control_with_desired(
             "windows.storage.trim-notify",
@@ -2600,5 +2694,143 @@ mod tests {
             probe_trim_notify(&recorded(&host, &absent)).state,
             Some(enabled())
         );
+    }
+
+    #[test]
+    fn bitlocker_cipher_probe_reads_policy() {
+        let host = windows_host();
+        let present = recording(vec![(
+            BITLOCKER_CIPHER_POLICY,
+            Evidence::Present {
+                source: ManagementSource::LocalPolicy,
+                value: RawValue::u32(7),
+            },
+        )]);
+        assert_eq!(
+            probe_bitlocker_cipher(&recorded(&host, &present)).state,
+            Some(enabled())
+        );
+
+        let default_cipher = recording(vec![(
+            BITLOCKER_CIPHER_POLICY,
+            Evidence::Present {
+                source: ManagementSource::LocalPolicy,
+                value: RawValue::u32(6),
+            },
+        )]);
+        assert_eq!(
+            probe_bitlocker_cipher(&recorded(&host, &default_cipher)).state,
+            Some(disabled())
+        );
+
+        let absent = recording(vec![(
+            BITLOCKER_CIPHER_POLICY,
+            Evidence::Absent {
+                source: ManagementSource::LocalPolicy,
+            },
+        )]);
+        assert_eq!(
+            probe_bitlocker_cipher(&recorded(&host, &absent)).state,
+            Some(disabled())
+        );
+    }
+
+    #[test]
+    fn dma_protection_probe_reads_policy() {
+        let host = windows_host();
+        let present = recording(vec![(
+            DMA_PROTECTION_POLICY,
+            Evidence::Present {
+                source: ManagementSource::LocalPolicy,
+                value: RawValue::u32(1),
+            },
+        )]);
+        assert_eq!(
+            probe_dma_protection(&recorded(&host, &present)).state,
+            Some(enabled())
+        );
+
+        let unrestricted = recording(vec![(
+            DMA_PROTECTION_POLICY,
+            Evidence::Present {
+                source: ManagementSource::LocalPolicy,
+                value: RawValue::u32(2),
+            },
+        )]);
+        assert_eq!(
+            probe_dma_protection(&recorded(&host, &unrestricted)).state,
+            Some(disabled())
+        );
+
+        let absent = recording(vec![(
+            DMA_PROTECTION_POLICY,
+            Evidence::Absent {
+                source: ManagementSource::LocalPolicy,
+            },
+        )]);
+        assert_eq!(
+            probe_dma_protection(&recorded(&host, &absent)).state,
+            Some(disabled())
+        );
+    }
+
+    #[test]
+    fn recall_snapshots_version_gating_and_probe() {
+        use crate::model::applicability::Applies;
+
+        let controls = controls();
+        let recall = controls
+            .iter()
+            .find(|c| c.spec.id == "windows.ai.recall-snapshot")
+            .expect("recall control exists");
+
+        // Windows 11 23H2 (build 22631) - Recall does not exist
+        let mut pre_24h2_host = windows_host();
+        pre_24h2_host.version = Fact::Known(OsVersion::new(vec![10, 0, 22631], "10.0.22631"));
+
+        assert_eq!(
+            recall.spec.applicability.resolve(&pre_24h2_host).applies,
+            Applies::No
+        );
+
+        let empty = recording(vec![]);
+        let pre_res = probe_recall_snapshots(&recorded(&pre_24h2_host, &empty));
+        assert_eq!(pre_res.state, Some(disabled()));
+        assert_eq!(pre_res.source, ManagementSource::Default);
+        assert!(
+            pre_res
+                .note
+                .as_deref()
+                .unwrap_or_default()
+                .contains("requires build 26100")
+        );
+
+        // Windows 11 24H2 (build 26100) - Recall exists
+        let post_24h2_host = windows_host();
+        assert_eq!(
+            recall.spec.applicability.resolve(&post_24h2_host).applies,
+            Applies::Yes
+        );
+
+        // Disabled via policy on 24H2
+        let disabled_policy = recording(vec![(
+            RECALL_POLICY,
+            Evidence::Present {
+                source: ManagementSource::LocalPolicy,
+                value: RawValue::u32(1),
+            },
+        )]);
+        let post_res = probe_recall_snapshots(&recorded(&post_24h2_host, &disabled_policy));
+        assert_eq!(post_res.state, Some(disabled()));
+
+        // Absent policy on 24H2 defaults to enabled (drift)
+        let absent_policy = recording(vec![(
+            RECALL_POLICY,
+            Evidence::Absent {
+                source: ManagementSource::LocalPolicy,
+            },
+        )]);
+        let post_res_absent = probe_recall_snapshots(&recorded(&post_24h2_host, &absent_policy));
+        assert_eq!(post_res_absent.state, Some(enabled()));
     }
 }

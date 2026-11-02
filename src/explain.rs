@@ -343,6 +343,101 @@ fn render_overview_for(controls: &[Control], ui: &Ui) -> String {
     out
 }
 
+/// Render the storage privacy, flash mechanics, and sanitization model.
+pub fn render_storage_explanation(ui: &Ui) -> String {
+    let mut out = String::new();
+    out.push_str(&format!(
+        "{}\n\n",
+        ui.paint(
+            style::HEADING,
+            "privr Storage Privacy & Forensic Sanitization Architecture"
+        )
+    ));
+
+    out.push_str(&format!(
+        "{}\n",
+        ui.paint(
+            style::HEADING,
+            "1. Physical Reality: Flash Storage vs Magnetic Platters"
+        )
+    ));
+    out.push_str(&ui.wrap(
+        "On rotational hard drives (HDDs), logical sector addresses map directly to physical \
+         magnetic tracks. Overwriting a sector with zeroes physically flips the magnetic domains. \
+         On modern solid-state storage (SSDs, NVMe), this direct mapping does not exist.",
+        2,
+    ));
+    out.push('\n');
+    out.push_str(&ui.wrap(
+        "The Flash Translation Layer (FTL) dynamically redirects writes across flash dies for wear \
+         leveling. Overwriting a file in user space writes to a fresh block; the old block remains \
+         in unallocated or overprovisioned space. Consequently, traditional multi-pass DoD 5220.22-M \
+         wiping is ineffective on flash storage and unnecessarily consumes flash endurance (TBW).",
+        2,
+    ));
+    out.push_str("\n\n");
+
+    out.push_str(&format!(
+        "{}\n",
+        ui.paint(style::HEADING, "2. Hardware TRIM and Write Performance")
+    ));
+    out.push_str(&ui.wrap(
+        "NAND flash can be written at page granularity (4KB-16KB) but can only be erased at block \
+         granularity (2MB-8MB). Without TRIM, the SSD controller assumes deleted files still contain \
+         valid data, causing slow synchronous Read-Modify-Write cycles when space runs low.",
+        2,
+    ));
+    out.push('\n');
+    out.push_str(&ui.wrap(
+        "Hardware TRIM / Deallocate (privr clean --trim) informs the controller that deleted clusters \
+         are invalid. The FTL unmaps those LBAs immediately (causing reads to return deterministic \
+         zeroes under DZAT) and enables background garbage collection to pre-erase blocks without write latency.",
+        2,
+    ));
+    out.push_str("\n\n");
+
+    out.push_str(&format!(
+        "{}\n",
+        ui.paint(
+            style::HEADING,
+            "3. High-Assurance Defense Against Chip-Off Forensics"
+        )
+    ));
+    out.push_str(&ui.wrap(
+        "TRIM unmaps logical addresses, but physical floating-gate charges linger in silicon until \
+         garbage collection cycles. If an adversary desolders the NAND flash chips from the PCB \
+         (chip-off analysis), raw un-erased pages can be read directly.",
+        2,
+    ));
+    out.push('\n');
+    out.push_str(&ui.wrap(
+        "The only defense against chip-off forensics on an active system is Full Disk Encryption \
+         (BitLocker / LUKS). When encryption is active, raw NAND charges are cryptographically \
+         indistinguishable from white noise. Desoldering the chip yields only unbreakable ciphertext.",
+        2,
+    ));
+    out.push_str("\n\n");
+
+    out.push_str(&format!(
+        "{}\n",
+        ui.paint(
+            style::HEADING,
+            "4. Decommissioning & Drive Disposal Standards"
+        )
+    ));
+    out.push_str(&ui.wrap(
+        "When selling, donating, or permanently retiring an SSD, follow NIST SP 800-88 Rev. 1 \
+         (Purge standard) rather than multi-pass overwrites:\n  \
+         - Cryptographic Erase (Crypto Erase): securely discards and rotates the internal Media Encryption Key (MEK).\n  \
+         - NVMe Sanitize (Block Erase): issues a hardware firmware command sending an erase voltage across all NAND dies.\n  \
+         Both methods sanitize all physical cells, including overprovisioned and retired blocks, in seconds with zero wear.",
+        2,
+    ));
+    out.push('\n');
+
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -501,6 +596,19 @@ mod tests {
         for control in catalog::all() {
             assert!(text.contains(&control.spec.id), "{}", control.spec.id);
         }
+        assert!(!text.contains('\u{1b}'));
+    }
+
+    #[test]
+    fn storage_explanation_renders_flash_and_sanitization_walkthrough() {
+        let plain_ui = Ui::plain();
+        let text = render_storage_explanation(&plain_ui);
+        assert!(text.contains("privr Storage Privacy & Forensic Sanitization Architecture"));
+        assert!(text.contains("1. Physical Reality: Flash Storage vs Magnetic Platters"));
+        assert!(text.contains("2. Hardware TRIM and Write Performance"));
+        assert!(text.contains("3. High-Assurance Defense Against Chip-Off Forensics"));
+        assert!(text.contains("4. Decommissioning & Drive Disposal Standards"));
+        assert!(text.contains("NIST SP 800-88"));
         assert!(!text.contains('\u{1b}'));
     }
 

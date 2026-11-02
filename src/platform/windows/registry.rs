@@ -268,6 +268,7 @@ pub fn write_raw(target: &Target, value: &RawValue) -> Result<(), u32> {
         ValueKind::U64 => Type::U64,
         ValueKind::String => Type::String,
         ValueKind::Binary => Type::Bytes,
+        ValueKind::StringList => Type::MultiString,
         _ => return Err(ERROR_ACCESS_DENIED),
     };
     key.set_bytes(target.value, ty, &value.bytes)

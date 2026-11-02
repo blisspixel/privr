@@ -33,7 +33,10 @@ pub fn is_control_recommended_for_workload(
         return false;
     }
 
-    if workload == WorkloadPersona::General && spec.id == "windows.security.ncsi-probing" {
+    if workload == WorkloadPersona::General
+        && (spec.id == "windows.security.ncsi-probing"
+            || spec.id == "networkmanager.connectivity.check")
+    {
         return false;
     }
 
@@ -82,16 +85,13 @@ pub fn generate_recommendations(
                 "Suppresses remote vendor crash telemetry while preserving local crash dumps for debugger symbol inspection.",
             )
         } else if workload == WorkloadPersona::Mobile
-            && (spec.id == "windows.security.llmnr" || spec.id == "windows.security.wpad")
+            && (spec.id == "windows.security.llmnr"
+                || spec.id == "systemd.resolved.llmnr"
+                || spec.id == "windows.security.wpad")
         {
             Some(
                 "Essential on mobile laptops to prevent credential harvesting and proxy poisoning on public Wi-Fi.",
             )
-        } else if workload == WorkloadPersona::Mobile && spec.id == "windows.storage.pagefile-clear"
-        {
-            // Do not recommend pagefile clear on mobile laptops: BitLocker protects disk, and
-            // pagefile zeroing drains battery and causes overheating when the lid is closed.
-            continue;
         } else {
             None
         };

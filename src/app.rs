@@ -1503,7 +1503,10 @@ fn run_with_check_context(
         } => {
             let transaction_id = match transaction_id {
                 Some(id) => id,
-                None => match crate::journal::list_transactions_in(journal_dir).pop() {
+                None => match crate::journal::list_transactions_in(journal_dir)
+                    .into_iter()
+                    .rfind(|tx| !tx.operations.is_empty())
+                {
                     Some(tx) => tx.transaction_id,
                     None => {
                         let _ = writeln!(err, "privr: no transaction history found to roll back.");
@@ -1511,6 +1514,14 @@ fn run_with_check_context(
                     }
                 },
             };
+
+            if !crate::journal::is_valid_transaction_id(&transaction_id) {
+                let _ = writeln!(
+                    err,
+                    "privr: invalid transaction identifier '{transaction_id}'"
+                );
+                return 2;
+            }
 
             use std::io::IsTerminal;
             let is_interactive = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
@@ -1546,14 +1557,6 @@ fn run_with_check_context(
                 }
             }
 
-            if !crate::journal::is_valid_transaction_id(&transaction_id) {
-                let _ = writeln!(
-                    err,
-                    "privr: invalid transaction identifier '{transaction_id}'"
-                );
-                return 2;
-            }
-
             let journal = match crate::journal::load_transaction_in(journal_dir, &transaction_id) {
                 Ok(j) => j,
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -1571,6 +1574,21 @@ fn run_with_check_context(
                     return 2;
                 }
             };
+
+            if journal.operations.is_empty() {
+                if journal.profile.starts_with("clean:") {
+                    let _ = writeln!(
+                        err,
+                        "privr: transaction '{transaction_id}' is an irreversible residue clean and cannot be rolled back."
+                    );
+                } else {
+                    let _ = writeln!(
+                        err,
+                        "privr: transaction '{transaction_id}' contains no operations to roll back."
+                    );
+                }
+                return 2;
+            }
 
             let host = crate::platform::discover();
             let is_elevated = host.elevated == crate::model::host::Fact::Known(true);
@@ -1723,16 +1741,34 @@ fn run_with_check_context(
         }
         Command::History { purge, yes } => {
             if purge {
-                let is_terminal = std::io::stdin().is_terminal();
-                if !yes && is_terminal {
+                use std::io::IsTerminal;
+                let is_interactive =
+                    std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+                if !yes {
+                    if !is_interactive {
+                        let _ = writeln!(
+                            err,
+                            "privr: no terminal for approval; rerun with privr history --purge --yes"
+                        );
+                        return 2;
+                    }
                     let _ = write!(out, "Purge all transaction history records? [y/N]: ");
                     let _ = out.flush();
                     let mut input = String::new();
-                    if std::io::stdin().read_line(&mut input).is_err()
-                        || !interpret_confirmation(Ok(input)).unwrap_or(false)
-                    {
-                        let _ = writeln!(out, "History purge cancelled.");
-                        return 0;
+                    match interpret_confirmation(
+                        std::io::stdin()
+                            .read_line(&mut input)
+                            .map(|_| input.clone()),
+                    ) {
+                        Ok(true) => {}
+                        Ok(false) => {
+                            let _ = writeln!(out, "privr: history purge cancelled.");
+                            return 0;
+                        }
+                        Err(code) => {
+                            let _ = writeln!(err, "privr: failed to read confirmation input");
+                            return code;
+                        }
                     }
                 }
                 match crate::journal::purge_transactions_in(journal_dir) {
@@ -1769,11 +1805,24 @@ fn run_with_check_context(
                             for tx in txs.iter().rev() {
                                 let block = verified_block_for(&ui, tx, None);
                                 if block.is_empty() {
-                                    let _ = writeln!(
-                                        out,
-                                        "{}  no verified changes",
-                                        ui.paint(crate::ui::style::IDENT, &tx.transaction_id)
-                                    );
+                                    if tx.profile.starts_with("clean:") {
+                                        let mode_name = tx
+                                            .profile
+                                            .strip_prefix("clean:")
+                                            .unwrap_or(&tx.profile);
+                                        let _ = writeln!(
+                                            out,
+                                            "{}  disposable residue clean ({})",
+                                            ui.paint(crate::ui::style::IDENT, &tx.transaction_id),
+                                            mode_name
+                                        );
+                                    } else {
+                                        let _ = writeln!(
+                                            out,
+                                            "{}  no verified changes",
+                                            ui.paint(crate::ui::style::IDENT, &tx.transaction_id)
+                                        );
+                                    }
                                 } else {
                                     let _ = write!(out, "{block}");
                                 }
@@ -3207,6 +3256,111 @@ mod tests {
         assert_eq!(code, 1);
         assert!(stdout.is_empty());
         assert!(stderr.contains("no transaction history found"));
+    }
+
+    #[test]
+    fn history_purge_without_yes_refuses_when_not_interactive() {
+        let (code, stdout, stderr) = run_for_test(Some(Command::History {
+            purge: true,
+            yes: false,
+        }));
+        assert_eq!(code, 2);
+        assert!(stdout.is_empty());
+        assert!(
+            stderr.contains(
+                "privr: no terminal for approval; rerun with privr history --purge --yes"
+            )
+        );
+    }
+
+    #[test]
+    fn rollback_refuses_irreversible_clean_transaction() {
+        let directory = crate::journal::TestDirectory::new();
+        let clean_tx = crate::journal::TransactionJournal {
+            schema: crate::journal::JOURNAL_SCHEMA,
+            transaction_id: "clean-123-456".to_owned(),
+            timestamp: "2026-11-01T00:00:00Z".to_owned(),
+            platform: "windows".to_owned(),
+            profile: "clean:aggressive".to_owned(),
+            operations: Vec::new(),
+        };
+        crate::journal::save_transaction_in(&directory.0, &clean_tx).expect("save clean tx");
+
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        let code = run_with_journal_dir(
+            Cli {
+                color: crate::cli::ColorWhen::Never,
+                format: OutputFormat::Text,
+                command: Some(Command::Rollback {
+                    transaction_id: Some("clean-123-456".to_owned()),
+                    yes: true,
+                    elevate: false,
+                    elevated_output: None,
+                }),
+            },
+            &mut out,
+            &mut err,
+            &directory.0,
+        );
+        assert_eq!(code, 2);
+        let stderr = String::from_utf8(err).expect("utf-8");
+        assert!(stderr.contains("is an irreversible residue clean and cannot be rolled back"));
+    }
+
+    #[test]
+    fn rollback_without_id_skips_clean_transactions_to_find_revertible_apply() {
+        let directory = crate::journal::TestDirectory::new();
+        let apply_tx = crate::journal::TransactionJournal {
+            schema: crate::journal::JOURNAL_SCHEMA,
+            transaction_id: "tx-apply-1".to_owned(),
+            timestamp: "2026-10-01T00:00:00Z".to_owned(),
+            platform: "windows".to_owned(),
+            profile: "baseline".to_owned(),
+            operations: vec![crate::journal::OperationJournal {
+                control_id: "windows.advertising.id".to_owned(),
+                target_key: "HKCU|Software\\Test|Val#native".to_owned(),
+                preimage: Some(crate::model::evidence::RawValue::new(
+                    crate::model::evidence::ValueKind::U32,
+                    vec![1, 0, 0, 0],
+                )),
+                postimage: crate::model::evidence::RawValue::new(
+                    crate::model::evidence::ValueKind::U32,
+                    vec![0, 0, 0, 0],
+                ),
+                verified: true,
+            }],
+        };
+        let clean_tx = crate::journal::TransactionJournal {
+            schema: crate::journal::JOURNAL_SCHEMA,
+            transaction_id: "clean-recent".to_owned(),
+            timestamp: "2026-10-02T00:00:00Z".to_owned(),
+            platform: "windows".to_owned(),
+            profile: "clean:polite".to_owned(),
+            operations: Vec::new(),
+        };
+        crate::journal::save_transaction_in(&directory.0, &apply_tx).expect("save apply tx");
+        crate::journal::save_transaction_in(&directory.0, &clean_tx).expect("save clean tx");
+
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        let _ = run_with_journal_dir(
+            Cli {
+                color: crate::cli::ColorWhen::Never,
+                format: OutputFormat::Text,
+                command: Some(Command::Rollback {
+                    transaction_id: None,
+                    yes: true,
+                    elevate: false,
+                    elevated_output: None,
+                }),
+            },
+            &mut out,
+            &mut err,
+            &directory.0,
+        );
+        let stdout = String::from_utf8(out).expect("utf-8");
+        assert!(stdout.contains("tx-apply-1"));
     }
 
     #[test]

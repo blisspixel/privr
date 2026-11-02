@@ -15,6 +15,7 @@ struct TargetPathRule {
     path_display: &'static str,
     resolve_paths: fn() -> Vec<PathBuf>,
     file_filter: Option<fn(&Path, &str) -> bool>,
+    recurse_filter: Option<fn(&Path) -> bool>,
 }
 
 fn env_path(var: &str) -> Option<PathBuf> {
@@ -134,22 +135,28 @@ fn claude_cache_paths() -> Vec<PathBuf> {
 fn codex_cache_paths() -> Vec<PathBuf> {
     let mut v = Vec::new();
     if let Some(up) = user_profile() {
-        let codex = up.join(".codex");
-        v.push(codex.join(".tmp"));
-        v.push(codex.join("cache"));
-        v.push(codex.join("ambient-suggestions"));
-        // Top-level codex folder for log filtering
-        v.push(codex);
+        v.push(up.join(".codex"));
     }
     v
 }
 
+fn is_in_disposable_codex_dir(path: &Path) -> bool {
+    path.components().any(|c| {
+        let s = c.as_os_str();
+        s == ".tmp" || s == "cache" || s == "ambient-suggestions"
+    })
+}
+
 fn codex_log_filter(parent: &Path, name: &str) -> bool {
-    let in_disposable = parent
-        .file_name()
-        .and_then(|n| n.to_str())
-        .is_some_and(|n| n == ".tmp" || n == "cache" || n == "ambient-suggestions");
-    in_disposable || (name.starts_with("sandbox.") && name.ends_with(".log"))
+    is_in_disposable_codex_dir(parent) || (name.starts_with("sandbox.") && name.ends_with(".log"))
+}
+
+fn codex_recurse_filter(dir: &Path) -> bool {
+    let name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    name == ".tmp"
+        || name == "cache"
+        || name == "ambient-suggestions"
+        || is_in_disposable_codex_dir(dir)
 }
 
 fn recent_files_paths() -> Vec<PathBuf> {
@@ -213,84 +220,98 @@ static TARGET_RULES: &[TargetPathRule] = &[
         path_display: "%TEMP%",
         resolve_paths: temp_paths,
         file_filter: None,
+        recurse_filter: None,
     },
     TargetPathRule {
         target_id: "windows.residue.crash-dumps",
         path_display: "%LOCALAPPDATA%\\CrashDumps",
         resolve_paths: crash_dump_paths,
         file_filter: None,
+        recurse_filter: None,
     },
     TargetPathRule {
         target_id: "windows.residue.thumbnail-cache",
         path_display: "%LOCALAPPDATA%\\Microsoft\\Windows\\Explorer\\thumbcache_*.db",
         resolve_paths: thumbnail_cache_paths,
         file_filter: Some(thumbnail_filter),
+        recurse_filter: None,
     },
     TargetPathRule {
         target_id: "windows.residue.directx-shader",
         path_display: "%LOCALAPPDATA%\\D3DSCache",
         resolve_paths: directx_shader_paths,
         file_filter: None,
+        recurse_filter: None,
     },
     TargetPathRule {
         target_id: "browser.residue.edge-cache",
         path_display: "%LOCALAPPDATA%\\Microsoft\\Edge\\User Data\\Default\\Cache",
         resolve_paths: edge_cache_paths,
         file_filter: None,
+        recurse_filter: None,
     },
     TargetPathRule {
         target_id: "browser.residue.chrome-cache",
         path_display: "%LOCALAPPDATA%\\Google\\Chrome\\User Data\\Default\\Cache",
         resolve_paths: chrome_cache_paths,
         file_filter: None,
+        recurse_filter: None,
     },
     TargetPathRule {
         target_id: "app.residue.discord",
         path_display: "%APPDATA%\\discord\\Cache",
         resolve_paths: discord_cache_paths,
         file_filter: None,
+        recurse_filter: None,
     },
     TargetPathRule {
         target_id: "ai.residue.claude",
         path_display: "%APPDATA%\\Claude\\Cache, ~/.claude/paste-cache",
         resolve_paths: claude_cache_paths,
         file_filter: None,
+        recurse_filter: None,
     },
     TargetPathRule {
         target_id: "ai.residue.codex",
         path_display: "~/.codex/.tmp, cache, sandbox.*.log",
         resolve_paths: codex_cache_paths,
         file_filter: Some(codex_log_filter),
+        recurse_filter: Some(codex_recurse_filter),
     },
     TargetPathRule {
         target_id: "windows.residue.recent-files",
         path_display: "%APPDATA%\\Microsoft\\Windows\\Recent (.lnk, Jump Lists)",
         resolve_paths: recent_files_paths,
         file_filter: Some(recent_files_filter),
+        recurse_filter: None,
     },
     TargetPathRule {
         target_id: "windows.residue.inetcache",
         path_display: "%LOCALAPPDATA%\\Microsoft\\Windows\\INetCache",
         resolve_paths: inetcache_paths,
         file_filter: None,
+        recurse_filter: None,
     },
     TargetPathRule {
         target_id: "editor.residue.vscode",
         path_display: "%APPDATA%\\Code\\CachedData, Service Worker",
         resolve_paths: vscode_cache_paths,
         file_filter: None,
+        recurse_filter: None,
     },
     TargetPathRule {
         target_id: "dev.residue.pip-cache",
         path_display: "%LOCALAPPDATA%\\pip\\cache",
         resolve_paths: pip_cache_paths,
         file_filter: None,
+        recurse_filter: None,
     },
     TargetPathRule {
         target_id: "dev.residue.npm-cache",
         path_display: "%LOCALAPPDATA%\\npm-cache",
         resolve_paths: npm_cache_paths,
         file_filter: None,
+        recurse_filter: None,
     },
 ];
 
@@ -320,6 +341,7 @@ fn clear_readonly_if_set(meta: &fs::Metadata, path: &Path) {
 fn scan_path(
     path: &Path,
     filter: Option<fn(&Path, &str) -> bool>,
+    recurse_filter: Option<fn(&Path) -> bool>,
     _is_root_dir: bool,
     max_depth: usize,
 ) -> (usize, u64) {
@@ -378,14 +400,13 @@ fn scan_path(
                 count += 1;
                 bytes += entry_meta.len();
             } else if entry_meta.is_dir() {
-                let allow_recurse = filter.is_none()
-                    || path
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .is_some_and(|n| n == ".tmp" || n == "cache" || n == "ambient-suggestions");
+                let allow_recurse = match recurse_filter {
+                    Some(rf) => rf(&entry_path),
+                    None => filter.is_none(),
+                };
                 if allow_recurse {
                     let (sub_count, sub_bytes) =
-                        scan_path(&entry_path, filter, false, max_depth - 1);
+                        scan_path(&entry_path, filter, recurse_filter, false, max_depth - 1);
                     count += sub_count;
                     bytes += sub_bytes;
                 }
@@ -411,7 +432,7 @@ pub fn inspect_target(
             let mut total_count = 0;
             let mut total_bytes = 0;
             for p in paths {
-                let (c, b) = scan_path(&p, r.file_filter, true, 8);
+                let (c, b) = scan_path(&p, r.file_filter, r.recurse_filter, true, 8);
                 total_count += c;
                 total_bytes += b;
             }
@@ -437,6 +458,7 @@ pub fn inspect_target(
 fn purge_path(
     path: &Path,
     filter: Option<fn(&Path, &str) -> bool>,
+    recurse_filter: Option<fn(&Path) -> bool>,
     is_target_root: bool,
     max_depth: usize,
 ) -> (usize, u64, usize) {
@@ -516,14 +538,13 @@ fn purge_path(
                     retained += 1;
                 }
             } else if entry_meta.is_dir() {
-                let allow_recurse = filter.is_none()
-                    || path
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .is_some_and(|n| n == ".tmp" || n == "cache" || n == "ambient-suggestions");
+                let allow_recurse = match recurse_filter {
+                    Some(rf) => rf(&entry_path),
+                    None => filter.is_none(),
+                };
                 if allow_recurse {
                     let (sub_rem, sub_bytes, sub_ret) =
-                        purge_path(&entry_path, filter, false, max_depth - 1);
+                        purge_path(&entry_path, filter, recurse_filter, false, max_depth - 1);
                     removed += sub_rem;
                     bytes += sub_bytes;
                     retained += sub_ret;
@@ -555,7 +576,7 @@ pub fn purge_target(spec: &ResidueSpec) -> ResiduePurgeItem {
             let mut total_retained = 0;
 
             for p in paths {
-                let (rem, b, ret) = purge_path(&p, r.file_filter, true, 8);
+                let (rem, b, ret) = purge_path(&p, r.file_filter, r.recurse_filter, true, 8);
                 total_removed += rem;
                 total_bytes += b;
                 total_retained += ret;
@@ -691,4 +712,118 @@ pub fn execute_volume_trim(drive_letter: char) -> TrimStatus {
         }
     }
     status
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn system_drive_letter_is_alphabetic() {
+        let drive = system_drive_letter();
+        assert!(drive.is_ascii_alphabetic());
+        assert!(drive.is_ascii_uppercase());
+    }
+
+    #[test]
+    fn trim_support_rejects_non_alphabetic_character() {
+        let status = check_volume_trim_support('?');
+        assert!(!status.supported);
+        assert!(!status.executed);
+        assert_eq!(status.media_type, "Unknown");
+        assert!(status.message.contains("Invalid drive letter"));
+    }
+
+    #[test]
+    fn codex_disposable_filtering_and_recursion() {
+        let codex_root = Path::new(r"C:\Users\Test\.codex");
+        let tmp_nested = codex_root.join(".tmp").join("session-abc");
+        let cache_nested = codex_root.join("cache").join("models");
+        let ambient = codex_root.join("ambient-suggestions");
+        let skills = codex_root.join("skills");
+        let sessions = codex_root.join("sessions");
+
+        assert!(is_in_disposable_codex_dir(&tmp_nested));
+        assert!(is_in_disposable_codex_dir(&cache_nested));
+        assert!(is_in_disposable_codex_dir(&ambient));
+        assert!(!is_in_disposable_codex_dir(&skills));
+        assert!(!is_in_disposable_codex_dir(&sessions));
+
+        assert!(codex_recurse_filter(&codex_root.join(".tmp")));
+        assert!(codex_recurse_filter(&tmp_nested));
+        assert!(codex_recurse_filter(&codex_root.join("cache")));
+        assert!(codex_recurse_filter(&cache_nested));
+        assert!(codex_recurse_filter(&ambient));
+        assert!(!codex_recurse_filter(&skills));
+        assert!(!codex_recurse_filter(&sessions));
+
+        assert!(codex_log_filter(codex_root, "sandbox.2026-11-01.log"));
+        assert!(!codex_log_filter(codex_root, "config.json"));
+        assert!(!codex_log_filter(codex_root, "other.log"));
+        assert!(codex_log_filter(&tmp_nested, "output.bin"));
+        assert!(codex_log_filter(&cache_nested, "weights.dat"));
+    }
+
+    #[test]
+    fn scan_and_purge_codex_preserves_configs_and_skills() {
+        static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let root = std::env::temp_dir().join(format!(
+            "privr-codex-test-{}-{nanos}-{seq}",
+            std::process::id()
+        ));
+        let tmp_dir = root.join(".tmp").join("nested");
+        let cache_dir = root.join("cache");
+        let skills_dir = root.join("skills");
+
+        fs::create_dir_all(&tmp_dir).expect("create tmp dir");
+        fs::create_dir_all(&cache_dir).expect("create cache dir");
+        fs::create_dir_all(&skills_dir).expect("create skills dir");
+
+        let disposable_tmp_file = tmp_dir.join("scratch.tmp");
+        let disposable_cache_file = cache_dir.join("weights.bin");
+        let disposable_log_file = root.join("sandbox.test.log");
+        let preserved_config_file = root.join("config.json");
+        let preserved_skill_file = skills_dir.join("my_skill.md");
+
+        fs::write(&disposable_tmp_file, "temp data").expect("write file");
+        fs::write(&disposable_cache_file, "cached weights").expect("write file");
+        fs::write(&disposable_log_file, "sandbox log").expect("write file");
+        fs::write(&preserved_config_file, "{\"key\":\"val\"}").expect("write file");
+        fs::write(&preserved_skill_file, "# Skill").expect("write file");
+
+        let (count, bytes) = scan_path(
+            &root,
+            Some(codex_log_filter),
+            Some(codex_recurse_filter),
+            true,
+            8,
+        );
+        assert_eq!(count, 3, "should count exactly 3 disposable files");
+        assert!(bytes > 0);
+
+        let (rem, rem_bytes, ret) = purge_path(
+            &root,
+            Some(codex_log_filter),
+            Some(codex_recurse_filter),
+            true,
+            8,
+        );
+        assert_eq!(rem, 3);
+        assert_eq!(rem_bytes, bytes);
+        assert_eq!(ret, 0);
+
+        assert!(!disposable_tmp_file.exists());
+        assert!(!disposable_cache_file.exists());
+        assert!(!disposable_log_file.exists());
+
+        assert!(preserved_config_file.exists());
+        assert!(preserved_skill_file.exists());
+
+        let _ = fs::remove_dir_all(&root);
+    }
 }

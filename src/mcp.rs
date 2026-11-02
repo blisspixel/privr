@@ -1075,6 +1075,17 @@ fn handle_tools_call_with_check_context(
                 }
             };
 
+            if journal.operations.is_empty() {
+                if journal.profile.starts_with("clean:") {
+                    return tool_error(format!(
+                        "Transaction '{tx_id}' is an irreversible residue clean and cannot be rolled back."
+                    ));
+                }
+                return tool_error(format!(
+                    "Transaction '{tx_id}' contains no operations to roll back."
+                ));
+            }
+
             let host = crate::platform::discover();
             let context = crate::catalog::Context::live(&host);
             let all_controls = crate::catalog::all();

@@ -2234,8 +2234,9 @@ Run privr explain without arguments for the posture overview, or privr list to s
                     crate::model::residue::PurgeMode::Aggressive
                 };
 
+                let sys_drive = crate::platform::windows::residue::system_drive_letter();
                 let trim_status = if trim {
-                    Some(crate::platform::windows::residue::check_volume_trim_support('C'))
+                    Some(crate::platform::windows::residue::check_volume_trim_support(sys_drive))
                 } else {
                     None
                 };
@@ -2397,7 +2398,9 @@ Run privr explain without arguments for the posture overview, or privr list to s
                 }
 
                 let executed_trim = if trim {
-                    Some(crate::platform::windows::residue::execute_volume_trim('C'))
+                    Some(crate::platform::windows::residue::execute_volume_trim(
+                        sys_drive,
+                    ))
                 } else {
                     None
                 };

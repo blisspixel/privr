@@ -513,10 +513,9 @@ fn collect(family: ConfigurationFamily, paths: [PathBuf; 4]) -> ConfigurationEvi
     }
     if let Ok(selected) = winners(&evidence) {
         for (name, root) in selected {
-            let index = ROOTS
-                .iter()
-                .position(|r| *r == root)
-                .expect("compiled root");
+            let Some(index) = ROOTS.iter().position(|r| *r == root) else {
+                continue;
+            };
             let file = if total > MAX_TOTAL_BYTES {
                 ConfigurationFile::Uncertain(Uncertainty::Undetermined)
             } else {
@@ -531,28 +530,30 @@ fn collect(family: ConfigurationFamily, paths: [PathBuf; 4]) -> ConfigurationEvi
             if let ConfigurationFile::Regular(value) = &file {
                 total += value.bytes.len();
             }
-            evidence
-                .roots
-                .get_mut(&root)
-                .expect("collected root")
-                .files
-                .insert(name, file);
+            if let Some(entry) = evidence.roots.get_mut(&root) {
+                entry.files.insert(name, file);
+            }
         }
     }
     for (root, path) in ROOTS.into_iter().zip(&paths) {
         let directory = path.join(format!("{}.d", family.filename()));
         let after = list_directory(&directory);
         let metadata_after = std::fs::symlink_metadata(&directory).ok();
-        let unchanged = match (&directory_metadata[&root], &metadata_after) {
+        let unchanged = match (
+            directory_metadata.get(&root).and_then(|m| m.as_ref()),
+            &metadata_after,
+        ) {
             (Some(before), Some(after)) => same_file(before, after),
             (None, None) => true,
             _ => false,
         };
-        evidence.roots.get_mut(&root).expect("collected root").after = if unchanged {
-            after
-        } else {
-            DirectoryListing::Uncertain(Uncertainty::Undetermined)
-        };
+        if let Some(entry) = evidence.roots.get_mut(&root) {
+            entry.after = if unchanged {
+                after
+            } else {
+                DirectoryListing::Uncertain(Uncertainty::Undetermined)
+            };
+        }
     }
     evidence
 }

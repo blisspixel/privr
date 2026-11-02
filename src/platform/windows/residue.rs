@@ -14,7 +14,7 @@ struct TargetPathRule {
     target_id: &'static str,
     path_display: &'static str,
     resolve_paths: fn() -> Vec<PathBuf>,
-    file_filter: Option<fn(&str) -> bool>,
+    file_filter: Option<fn(&Path, &str) -> bool>,
 }
 
 fn env_path(var: &str) -> Option<PathBuf> {
@@ -59,7 +59,7 @@ fn thumbnail_cache_paths() -> Vec<PathBuf> {
     v
 }
 
-fn thumbnail_filter(name: &str) -> bool {
+fn thumbnail_filter(_parent: &Path, name: &str) -> bool {
     name.starts_with("thumbcache_") && name.ends_with(".db")
 }
 
@@ -144,8 +144,12 @@ fn codex_cache_paths() -> Vec<PathBuf> {
     v
 }
 
-fn codex_log_filter(name: &str) -> bool {
-    name.starts_with("sandbox.") && name.ends_with(".log")
+fn codex_log_filter(parent: &Path, name: &str) -> bool {
+    let in_disposable = parent
+        .file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| n == ".tmp" || n == "cache" || n == "ambient-suggestions");
+    in_disposable || (name.starts_with("sandbox.") && name.ends_with(".log"))
 }
 
 fn recent_files_paths() -> Vec<PathBuf> {
@@ -159,7 +163,7 @@ fn recent_files_paths() -> Vec<PathBuf> {
     v
 }
 
-fn recent_files_filter(name: &str) -> bool {
+fn recent_files_filter(_parent: &Path, name: &str) -> bool {
     name.ends_with(".lnk")
         || name.ends_with(".automaticDestinations-ms")
         || name.ends_with(".customDestinations-ms")
@@ -315,7 +319,7 @@ fn clear_readonly_if_set(meta: &fs::Metadata, path: &Path) {
 /// Recursively scans a path counting files and bytes without following reparse points or symlinks.
 fn scan_path(
     path: &Path,
-    filter: Option<fn(&str) -> bool>,
+    filter: Option<fn(&Path, &str) -> bool>,
     _is_root_dir: bool,
     max_depth: usize,
 ) -> (usize, u64) {
@@ -334,8 +338,9 @@ fn scan_path(
 
     if meta.is_file() {
         if let Some(f) = filter {
+            let parent = path.parent().unwrap_or(path);
             let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            if !f(name) {
+            if !f(parent, name) {
                 return (0, 0);
             }
         }
@@ -366,15 +371,19 @@ fn scan_path(
                 if let Some(f) = filter {
                     let name = entry.file_name();
                     let name_str = name.to_str().unwrap_or("");
-                    if !f(name_str) {
+                    if !f(path, name_str) {
                         continue;
                     }
                 }
                 count += 1;
                 bytes += entry_meta.len();
             } else if entry_meta.is_dir() {
-                // If a filter is specified (e.g. thumbcache_*.db or codex logs), do not recurse into subdirectories
-                if filter.is_none() {
+                let allow_recurse = filter.is_none()
+                    || path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .is_some_and(|n| n == ".tmp" || n == "cache" || n == "ambient-suggestions");
+                if allow_recurse {
                     let (sub_count, sub_bytes) =
                         scan_path(&entry_path, filter, false, max_depth - 1);
                     count += sub_count;
@@ -427,7 +436,7 @@ pub fn inspect_target(
 /// Recursively removes files and empty directories within a target, handling locked files cleanly.
 fn purge_path(
     path: &Path,
-    filter: Option<fn(&str) -> bool>,
+    filter: Option<fn(&Path, &str) -> bool>,
     is_target_root: bool,
     max_depth: usize,
 ) -> (usize, u64, usize) {
@@ -446,8 +455,9 @@ fn purge_path(
 
     if meta.is_file() {
         if let Some(f) = filter {
+            let parent = path.parent().unwrap_or(path);
             let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            if !f(name) {
+            if !f(parent, name) {
                 return (0, 0, 0);
             }
         }
@@ -488,7 +498,7 @@ fn purge_path(
                 if let Some(f) = filter {
                     let name = entry.file_name();
                     let name_str = name.to_str().unwrap_or("");
-                    if !f(name_str) {
+                    if !f(path, name_str) {
                         continue;
                     }
                 }
@@ -505,14 +515,21 @@ fn purge_path(
                     }
                     retained += 1;
                 }
-            } else if entry_meta.is_dir() && filter.is_none() {
-                let (sub_rem, sub_bytes, sub_ret) =
-                    purge_path(&entry_path, filter, false, max_depth - 1);
-                removed += sub_rem;
-                bytes += sub_bytes;
-                retained += sub_ret;
-                // Attempt to clean up directory if it's now empty
-                let _ = fs::remove_dir(&entry_path);
+            } else if entry_meta.is_dir() {
+                let allow_recurse = filter.is_none()
+                    || path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .is_some_and(|n| n == ".tmp" || n == "cache" || n == "ambient-suggestions");
+                if allow_recurse {
+                    let (sub_rem, sub_bytes, sub_ret) =
+                        purge_path(&entry_path, filter, false, max_depth - 1);
+                    removed += sub_rem;
+                    bytes += sub_bytes;
+                    retained += sub_ret;
+                    // Attempt to clean up directory if it's now empty
+                    let _ = fs::remove_dir(&entry_path);
+                }
             }
         }
 
@@ -566,8 +583,35 @@ pub fn purge_target(spec: &ResidueSpec) -> ResiduePurgeItem {
     }
 }
 
+/// Helper to determine the primary Windows system drive letter.
+pub fn system_drive_letter() -> char {
+    if let Some(ch) = std::env::var("SystemDrive")
+        .ok()
+        .and_then(|drive| drive.chars().find(|c| c.is_ascii_alphabetic()))
+    {
+        return ch.to_ascii_uppercase();
+    }
+    if let Some(ch) = std::env::var("USERPROFILE")
+        .ok()
+        .and_then(|profile| profile.chars().find(|c| c.is_ascii_alphabetic()))
+    {
+        return ch.to_ascii_uppercase();
+    }
+    'C'
+}
+
 /// Check whether the volume containing user data supports hardware TRIM.
 pub fn check_volume_trim_support(drive_letter: char) -> TrimStatus {
+    let drive_letter = drive_letter.to_ascii_uppercase();
+    if !drive_letter.is_ascii_alphabetic() {
+        return TrimStatus {
+            volume: format!("{drive_letter}:"),
+            media_type: "Unknown".to_owned(),
+            supported: false,
+            executed: false,
+            message: "Invalid drive letter specified".to_owned(),
+        };
+    }
     let drive_str = format!("{drive_letter}:");
     let script = format!(
         "$ErrorActionPreference = 'SilentlyContinue'; \
@@ -577,37 +621,44 @@ pub fn check_volume_trim_support(drive_letter: char) -> TrimStatus {
         .args(["-NoProfile", "-Command", &script])
         .output();
 
-    let media = match output {
+    let (media, supported, msg) = match output {
         Ok(out) if out.status.success() => {
             let s = String::from_utf8_lossy(&out.stdout).trim().to_uppercase();
             if s.contains("SSD") {
-                "SSD".to_owned()
+                (
+                    "SSD".to_owned(),
+                    true,
+                    "Solid-state drive eligible for hardware TRIM / Deallocate (0 B flash wear)"
+                        .to_owned(),
+                )
             } else if s.contains("HDD") {
-                "HDD".to_owned()
+                (
+                    "HDD".to_owned(),
+                    false,
+                    "Rotational magnetic media detected; hardware TRIM not applicable".to_owned(),
+                )
             } else {
-                "SSD".to_owned()
+                (
+                    "Unknown".to_owned(),
+                    false,
+                    "Storage media type could not be verified; hardware TRIM skipped for safety"
+                        .to_owned(),
+                )
             }
         }
-        _ => "SSD".to_owned(),
+        _ => (
+            "Unknown".to_owned(),
+            false,
+            "Could not query physical disk media type; hardware TRIM skipped for safety".to_owned(),
+        ),
     };
 
-    if media == "SSD" {
-        TrimStatus {
-            volume: drive_str,
-            media_type: "SSD".to_owned(),
-            supported: true,
-            executed: false,
-            message: "Solid-state drive eligible for hardware TRIM / Deallocate (0 B flash wear)"
-                .to_owned(),
-        }
-    } else {
-        TrimStatus {
-            volume: drive_str,
-            media_type: "HDD".to_owned(),
-            supported: false,
-            executed: false,
-            message: "Rotational magnetic media detected; hardware TRIM not applicable".to_owned(),
-        }
+    TrimStatus {
+        volume: drive_str,
+        media_type: media,
+        supported,
+        executed: false,
+        message: msg,
     }
 }
 

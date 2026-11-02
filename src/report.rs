@@ -862,13 +862,15 @@ pub fn render_purge_preview(
         } else {
             let bullet_muted = if ui.unicode() { "•" } else { "-" };
             let tag = ui.paint(style::MUTED, bullet_muted);
+            let skip_desc = if trim.media_type == "HDD" {
+                "[skipped: rotational magnetic media, TRIM not applicable]"
+            } else {
+                "[skipped: media type unverified, TRIM skipped for safety]"
+            };
             out.push_str(&format!(
                 "    {tag} {:<42} {}\n\n",
                 format!("Solid-state drive free space TRIM ({})", trim.volume),
-                ui.paint(
-                    style::MUTED,
-                    "[skipped: rotational magnetic media, TRIM not applicable]"
-                )
+                ui.paint(style::MUTED, skip_desc)
             ));
         }
     }

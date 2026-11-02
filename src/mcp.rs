@@ -1334,11 +1334,16 @@ fn handle_tools_call_with_check_context(
                     crate::model::residue::PurgeMode::Aggressive
                 };
 
+                let sys_drive = crate::platform::windows::residue::system_drive_letter();
                 let trim_status = if trim {
                     if dry_run {
-                        Some(crate::platform::windows::residue::check_volume_trim_support('C'))
+                        Some(
+                            crate::platform::windows::residue::check_volume_trim_support(sys_drive),
+                        )
                     } else {
-                        Some(crate::platform::windows::residue::execute_volume_trim('C'))
+                        Some(crate::platform::windows::residue::execute_volume_trim(
+                            sys_drive,
+                        ))
                     }
                 } else {
                     None

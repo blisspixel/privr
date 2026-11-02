@@ -214,6 +214,88 @@ fn npm_cache_paths() -> Vec<PathBuf> {
     v
 }
 
+fn cryptnet_cache_paths() -> Vec<PathBuf> {
+    let mut v = Vec::new();
+    if let Some(up) = user_profile() {
+        let base = up
+            .join("AppData")
+            .join("LocalLow")
+            .join("Microsoft")
+            .join("CryptnetUrlCache");
+        v.push(base.join("Content"));
+        v.push(base.join("MetaData"));
+    }
+    v
+}
+
+fn wer_report_paths() -> Vec<PathBuf> {
+    let mut v = Vec::new();
+    if let Some(lad) = local_app_data() {
+        let wer = lad.join("Microsoft").join("Windows").join("WER");
+        v.push(wer.join("ReportArchive"));
+        v.push(wer.join("ReportQueue"));
+    }
+    v
+}
+
+fn firefox_cache_paths() -> Vec<PathBuf> {
+    let mut v = Vec::new();
+    if let Some(lad) = local_app_data() {
+        let profiles = lad.join("Mozilla").join("Firefox").join("Profiles");
+        if let Ok(entries) = fs::read_dir(&profiles) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    v.push(path.join("cache2"));
+                    v.push(path.join("startupCache"));
+                }
+            }
+        }
+    }
+    v
+}
+
+fn brave_cache_paths() -> Vec<PathBuf> {
+    let mut v = Vec::new();
+    if let Some(lad) = local_app_data() {
+        let default_dir = lad
+            .join("BraveSoftware")
+            .join("Brave-Browser")
+            .join("User Data")
+            .join("Default");
+        v.push(default_dir.join("Cache"));
+        v.push(default_dir.join("Code Cache"));
+    }
+    v
+}
+
+fn delivery_optimization_paths() -> Vec<PathBuf> {
+    let mut v = Vec::new();
+    if let Some(lad) = local_app_data() {
+        v.push(
+            lad.join("Microsoft")
+                .join("Windows")
+                .join("DeliveryOptimization")
+                .join("Cache"),
+        );
+    }
+    v
+}
+
+fn powershell_history_paths() -> Vec<PathBuf> {
+    let mut v = Vec::new();
+    if let Some(ad) = app_data() {
+        v.push(
+            ad.join("Microsoft")
+                .join("Windows")
+                .join("PowerShell")
+                .join("PSReadLine")
+                .join("ConsoleHost_history.txt"),
+        );
+    }
+    v
+}
+
 static TARGET_RULES: &[TargetPathRule] = &[
     TargetPathRule {
         target_id: "windows.residue.temp",
@@ -310,6 +392,48 @@ static TARGET_RULES: &[TargetPathRule] = &[
         target_id: "dev.residue.npm-cache",
         path_display: "%LOCALAPPDATA%\\npm-cache",
         resolve_paths: npm_cache_paths,
+        file_filter: None,
+        recurse_filter: None,
+    },
+    TargetPathRule {
+        target_id: "windows.residue.cryptnet-cache",
+        path_display: "%USERPROFILE%\\AppData\\LocalLow\\Microsoft\\CryptnetUrlCache",
+        resolve_paths: cryptnet_cache_paths,
+        file_filter: None,
+        recurse_filter: None,
+    },
+    TargetPathRule {
+        target_id: "windows.residue.wer-reports",
+        path_display: "%LOCALAPPDATA%\\Microsoft\\Windows\\WER (ReportArchive, ReportQueue)",
+        resolve_paths: wer_report_paths,
+        file_filter: None,
+        recurse_filter: None,
+    },
+    TargetPathRule {
+        target_id: "browser.residue.firefox-cache",
+        path_display: "%LOCALAPPDATA%\\Mozilla\\Firefox\\Profiles\\*\\cache2",
+        resolve_paths: firefox_cache_paths,
+        file_filter: None,
+        recurse_filter: None,
+    },
+    TargetPathRule {
+        target_id: "browser.residue.brave-cache",
+        path_display: "%LOCALAPPDATA%\\BraveSoftware\\Brave-Browser\\User Data\\Default\\Cache",
+        resolve_paths: brave_cache_paths,
+        file_filter: None,
+        recurse_filter: None,
+    },
+    TargetPathRule {
+        target_id: "windows.residue.delivery-optimization",
+        path_display: "%LOCALAPPDATA%\\Microsoft\\Windows\\DeliveryOptimization\\Cache",
+        resolve_paths: delivery_optimization_paths,
+        file_filter: None,
+        recurse_filter: None,
+    },
+    TargetPathRule {
+        target_id: "windows.residue.powershell-history",
+        path_display: "%APPDATA%\\Microsoft\\Windows\\PowerShell\\PSReadLine\\ConsoleHost_history.txt",
+        resolve_paths: powershell_history_paths,
         file_filter: None,
         recurse_filter: None,
     },

@@ -1899,6 +1899,17 @@ fn run_with_check_context(
                 let _ = write!(out, "{}", crate::explain::render_residue_explanation(&ui));
                 return 0;
             }
+            if matches!(
+                topic_or_id.to_ascii_lowercase().as_str(),
+                "shell" | "history" | "psreadline" | "bash" | "zsh"
+            ) {
+                let _ = write!(
+                    out,
+                    "{}",
+                    crate::explain::render_shell_history_explanation(&ui)
+                );
+                return 0;
+            }
             match crate::explain::find(topic_or_id) {
                 Ok(control) => {
                     let host = crate::platform::discover();
@@ -2262,232 +2273,203 @@ Run privr explain without arguments for the posture overview, or privr list to s
             accept_risks,
             trim,
         } => {
-            #[cfg(not(windows))]
-            {
-                let _ = (
-                    polite,
-                    preview,
-                    dry_run,
-                    yes,
-                    categories,
-                    controls,
-                    accept_risks,
-                    trim,
-                );
-                let _ = writeln!(
-                    err,
-                    "privr: disposable residue cleanup is currently implemented for Windows only."
-                );
-                0
+            let is_preview_mode = preview || dry_run;
+            let mode = if polite {
+                crate::model::residue::PurgeMode::Polite
+            } else {
+                crate::model::residue::PurgeMode::Aggressive
+            };
+
+            let trim_status = if trim {
+                Some(crate::platform::check_volume_trim_support())
+            } else {
+                None
+            };
+
+            let target_specs =
+                crate::catalog::residue::select_residue_targets(mode, &controls, &categories);
+            if target_specs.is_empty() && !trim {
+                let _ = writeln!(err, "privr: no matching residue targets found.");
+                return 2;
             }
 
-            #[cfg(windows)]
-            {
-                let is_preview_mode = preview || dry_run;
-                let mode = if polite {
-                    crate::model::residue::PurgeMode::Polite
-                } else {
-                    crate::model::residue::PurgeMode::Aggressive
-                };
-
-                let sys_drive = crate::platform::windows::residue::system_drive_letter();
-                let trim_status = if trim {
-                    Some(crate::platform::windows::residue::check_volume_trim_support(sys_drive))
-                } else {
-                    None
-                };
-
-                let target_specs =
-                    crate::catalog::residue::select_residue_targets(mode, &controls, &categories);
-                if target_specs.is_empty() && !trim {
-                    let _ = writeln!(err, "privr: no matching residue targets found.");
+            // Check for required risk acknowledgements
+            for (spec, selected, _) in &target_specs {
+                if *selected && spec.requires_risk_ack && !accept_risks.contains(&spec.id) {
+                    let _ = writeln!(
+                        err,
+                        "privr: target '{}' requires explicit acknowledgement via --accept-risk {}",
+                        spec.id, spec.id
+                    );
                     return 2;
                 }
+            }
 
-                // Check for required risk acknowledgements
-                for (spec, selected, _) in &target_specs {
-                    if *selected && spec.requires_risk_ack && !accept_risks.contains(&spec.id) {
-                        let _ = writeln!(
-                            err,
-                            "privr: target '{}' requires explicit acknowledgement via --accept-risk {}",
-                            spec.id, spec.id
-                        );
-                        return 2;
-                    }
-                }
+            // Inspect all targets
+            let mut preview_items = Vec::new();
+            for (spec, selected, reason) in &target_specs {
+                let preview_item =
+                    crate::platform::inspect_residue_target(spec, *selected, reason.clone());
+                preview_items.push(preview_item);
+            }
 
-                // Inspect all targets
-                let mut preview_items = Vec::new();
-                for (spec, selected, reason) in &target_specs {
-                    let preview_item = crate::platform::windows::residue::inspect_target(
-                        spec,
-                        *selected,
-                        reason.clone(),
-                    );
-                    preview_items.push(preview_item);
-                }
+            let ui = crate::ui::Ui::for_stdout(cli.color.into());
 
-                let ui = crate::ui::Ui::for_stdout(cli.color.into());
+            // If preview requested or noninteractive without --yes
+            let is_terminal = std::io::stdin().is_terminal();
+            let is_dry_run = is_preview_mode || (!yes && !is_terminal);
 
-                // If preview requested or noninteractive without --yes
-                let is_terminal = std::io::stdin().is_terminal();
-                let is_dry_run = is_preview_mode || (!yes && !is_terminal);
-
-                if is_dry_run {
-                    match cli.format {
-                        OutputFormat::Json => {
-                            let report = crate::model::residue::PurgeReport {
-                                schema: 1,
-                                mode,
-                                dry_run: true,
-                                total_files_affected: preview_items
-                                    .iter()
-                                    .filter(|i| i.selected)
-                                    .map(|i| i.file_count)
-                                    .sum(),
-                                total_bytes_affected: preview_items
-                                    .iter()
-                                    .filter(|i| i.selected)
-                                    .map(|i| i.size_bytes)
-                                    .sum(),
-                                items: preview_items
-                                    .iter()
-                                    .filter(|i| i.selected)
-                                    .map(|i| crate::model::residue::ResiduePurgeItem {
-                                        id: i.id.clone(),
-                                        title: i.title.clone(),
-                                        category: i.category,
-                                        files_removed: i.file_count,
-                                        bytes_reclaimed: i.size_bytes,
-                                        files_retained: 0,
-                                        error: None,
-                                    })
-                                    .collect(),
-                                trim: trim_status,
-                            };
-                            let json = serde_json::to_string_pretty(&report).unwrap_or_default();
-                            let _ = writeln!(out, "{}", json);
-                        }
-                        OutputFormat::Text => {
-                            let rendered = crate::report::render_purge_preview(
-                                &ui,
-                                mode,
-                                &preview_items,
-                                trim_status.as_ref(),
-                            );
-                            let _ = write!(out, "{}", rendered);
-                            if !is_preview_mode {
-                                let _ = writeln!(
-                                    out,
-                                    "\nRun with --yes to execute clean, or confirm interactively."
-                                );
-                            }
-                        }
-                    }
-                    return 0;
-                }
-
-                // Interactive confirmation if not --yes
-                if !yes && is_terminal {
-                    let rendered = crate::report::render_purge_preview(
-                        &ui,
-                        mode,
-                        &preview_items,
-                        trim_status.as_ref(),
-                    );
-                    let _ = write!(out, "{}", rendered);
-
-                    let selected_count = preview_items.iter().filter(|i| i.selected).count();
-                    if selected_count == 0 && !trim {
-                        let _ = writeln!(out, "Nothing to clean in selected scope.");
-                        return 0;
-                    }
-
-                    let prompt_text = if selected_count == 0 && trim {
-                        "\nIssue hardware TRIM to SSD? [y/N]: "
-                    } else if trim {
-                        "\nClean selected residue and issue hardware TRIM? [y/N]: "
-                    } else {
-                        "\nClean selected residue? [y/N]: "
-                    };
-                    let _ = write!(out, "{}", prompt_text);
-                    let _ = out.flush();
-
-                    let mut input = String::new();
-                    if std::io::stdin().read_line(&mut input).is_err()
-                        || !interpret_confirmation(Ok(input)).unwrap_or(false)
-                    {
-                        let _ = writeln!(out, "Cleaning cancelled.");
-                        return 0;
-                    }
-                    let _ = writeln!(out);
-                }
-
-                // Verify journal storage is writable before mutating
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default();
-                let timestamp = format!("{}.{:03}", now.as_secs(), now.subsec_millis());
-                let tx_id = format!("clean-{}-{}", now.as_secs(), now.subsec_millis());
-
-                let journal = crate::journal::TransactionJournal {
-                    schema: crate::journal::JOURNAL_SCHEMA,
-                    transaction_id: tx_id.clone(),
-                    timestamp: timestamp.clone(),
-                    platform: "windows".to_owned(),
-                    profile: format!("clean:{}", mode.as_str()),
-                    operations: Vec::new(),
-                };
-
-                if let Err(e) = crate::journal::save_transaction_in(journal_dir, &journal) {
-                    let _ = writeln!(err, "privr: cannot write transaction journal: {e}");
-                    return 1;
-                }
-
-                // Execute purge for selected targets
-                let mut purge_results = Vec::new();
-                for (spec, selected, _) in &target_specs {
-                    if *selected {
-                        let result = crate::platform::windows::residue::purge_target(spec);
-                        purge_results.push(result);
-                    }
-                }
-
-                let executed_trim = if trim {
-                    Some(crate::platform::windows::residue::execute_volume_trim(
-                        sys_drive,
-                    ))
-                } else {
-                    None
-                };
-
-                let total_removed: usize = purge_results.iter().map(|r| r.files_removed).sum();
-                let total_reclaimed: u64 = purge_results.iter().map(|r| r.bytes_reclaimed).sum();
-
-                let report = crate::model::residue::PurgeReport {
-                    schema: 1,
-                    mode,
-                    dry_run: false,
-                    total_files_affected: total_removed,
-                    total_bytes_affected: total_reclaimed,
-                    items: purge_results,
-                    trim: executed_trim,
-                };
-
+            if is_dry_run {
                 match cli.format {
                     OutputFormat::Json => {
+                        let report = crate::model::residue::PurgeReport {
+                            schema: 1,
+                            mode,
+                            dry_run: true,
+                            total_files_affected: preview_items
+                                .iter()
+                                .filter(|i| i.selected)
+                                .map(|i| i.file_count)
+                                .sum(),
+                            total_bytes_affected: preview_items
+                                .iter()
+                                .filter(|i| i.selected)
+                                .map(|i| i.size_bytes)
+                                .sum(),
+                            items: preview_items
+                                .iter()
+                                .filter(|i| i.selected)
+                                .map(|i| crate::model::residue::ResiduePurgeItem {
+                                    id: i.id.clone(),
+                                    title: i.title.clone(),
+                                    category: i.category,
+                                    files_removed: i.file_count,
+                                    bytes_reclaimed: i.size_bytes,
+                                    files_retained: 0,
+                                    error: None,
+                                })
+                                .collect(),
+                            trim: trim_status,
+                        };
                         let json = serde_json::to_string_pretty(&report).unwrap_or_default();
                         let _ = writeln!(out, "{}", json);
                     }
                     OutputFormat::Text => {
-                        let rendered =
-                            crate::report::render_purge_report(&ui, &report, Some(&tx_id));
+                        let rendered = crate::report::render_purge_preview(
+                            &ui,
+                            mode,
+                            &preview_items,
+                            trim_status.as_ref(),
+                        );
                         let _ = write!(out, "{}", rendered);
+                        if !is_preview_mode {
+                            let _ = writeln!(
+                                out,
+                                "\nRun with --yes to execute clean, or confirm interactively."
+                            );
+                        }
                     }
                 }
-
-                0
+                return 0;
             }
+
+            // Interactive confirmation if not --yes
+            if !yes && is_terminal {
+                let rendered = crate::report::render_purge_preview(
+                    &ui,
+                    mode,
+                    &preview_items,
+                    trim_status.as_ref(),
+                );
+                let _ = write!(out, "{}", rendered);
+
+                let selected_count = preview_items.iter().filter(|i| i.selected).count();
+                if selected_count == 0 && !trim {
+                    let _ = writeln!(out, "Nothing to clean in selected scope.");
+                    return 0;
+                }
+
+                let prompt_text = if selected_count == 0 && trim {
+                    "\nIssue hardware TRIM to SSD? [y/N]: "
+                } else if trim {
+                    "\nClean selected residue and issue hardware TRIM? [y/N]: "
+                } else {
+                    "\nClean selected residue? [y/N]: "
+                };
+                let _ = write!(out, "{}", prompt_text);
+                let _ = out.flush();
+
+                let mut input = String::new();
+                if std::io::stdin().read_line(&mut input).is_err()
+                    || !interpret_confirmation(Ok(input)).unwrap_or(false)
+                {
+                    let _ = writeln!(out, "Cleaning cancelled.");
+                    return 0;
+                }
+                let _ = writeln!(out);
+            }
+
+            // Verify journal storage is writable before mutating
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default();
+            let timestamp = format!("{}.{:03}", now.as_secs(), now.subsec_millis());
+            let tx_id = format!("clean-{}-{}", now.as_secs(), now.subsec_millis());
+
+            let journal = crate::journal::TransactionJournal {
+                schema: crate::journal::JOURNAL_SCHEMA,
+                transaction_id: tx_id.clone(),
+                timestamp: timestamp.clone(),
+                platform: crate::model::host::Platform::current().as_str().to_owned(),
+                profile: format!("clean:{}", mode.as_str()),
+                operations: Vec::new(),
+            };
+
+            if let Err(e) = crate::journal::save_transaction_in(journal_dir, &journal) {
+                let _ = writeln!(err, "privr: cannot write transaction journal: {e}");
+                return 1;
+            }
+
+            // Execute purge for selected targets
+            let mut purge_results = Vec::new();
+            for (spec, selected, _) in &target_specs {
+                if *selected {
+                    let result = crate::platform::purge_residue_target(spec);
+                    purge_results.push(result);
+                }
+            }
+
+            let executed_trim = if trim {
+                Some(crate::platform::execute_volume_trim())
+            } else {
+                None
+            };
+
+            let total_removed: usize = purge_results.iter().map(|r| r.files_removed).sum();
+            let total_reclaimed: u64 = purge_results.iter().map(|r| r.bytes_reclaimed).sum();
+
+            let report = crate::model::residue::PurgeReport {
+                schema: 1,
+                mode,
+                dry_run: false,
+                total_files_affected: total_removed,
+                total_bytes_affected: total_reclaimed,
+                items: purge_results,
+                trim: executed_trim,
+            };
+
+            match cli.format {
+                OutputFormat::Json => {
+                    let json = serde_json::to_string_pretty(&report).unwrap_or_default();
+                    let _ = writeln!(out, "{}", json);
+                }
+                OutputFormat::Text => {
+                    let rendered = crate::report::render_purge_report(&ui, &report, Some(&tx_id));
+                    let _ = write!(out, "{}", rendered);
+                }
+            }
+
+            0
         }
     }
 }

@@ -601,6 +601,151 @@ pub fn render_storage_explanation(ui: &Ui) -> String {
     out
 }
 
+/// Render the shell command history privacy and forensic explainability walkthrough.
+pub fn render_shell_history_explanation(ui: &Ui) -> String {
+    let mut out = String::new();
+    out.push_str(&format!(
+        "{}\n\n",
+        ui.paint(
+            style::HEADING,
+            "privr Shell Command History Privacy Architecture"
+        )
+    ));
+
+    out.push_str(&format!(
+        "{}\n",
+        ui.paint(
+            style::HEADING,
+            "1. Physical Retention: How Shells Record Commands"
+        )
+    ));
+    out.push_str(&ui.wrap(
+        "Interactive shells use line-editing engines to provide recall across commands. In modern \
+         environments, these engines record every entered command into an unencrypted plaintext file \
+         in the user profile:",
+        2,
+    ));
+    out.push('\n');
+    out.push_str(&ui.wrap(
+        "- PowerShell (PSReadLine): Writes to ConsoleHost_history.txt in the user profile (%APPDATA% \
+         on Windows, $XDG_DATA_HOME/powershell on Linux, ~/Library/Application Support/powershell on macOS).",
+        4,
+    ));
+    out.push('\n');
+    out.push_str(&ui.wrap(
+        "- Bash (GNU Readline): Appends session history to ~/.bash_history upon shell termination \
+         or explicit history sync.",
+        4,
+    ));
+    out.push('\n');
+    out.push_str(&ui.wrap(
+        "- Zsh: Appends command lines to ~/.zsh_history according to HISTFILE configuration.",
+        4,
+    ));
+    out.push('\n');
+    out.push_str(&ui.wrap(
+        "These files persist indefinitely across reboots and account sessions. Anyone with read access \
+         to the user directory, or any script running with user privileges, can read the entire historical timeline.",
+        2,
+    ));
+    out.push_str("\n\n");
+
+    out.push_str(&format!(
+        "{}\n",
+        ui.paint(
+            style::HEADING,
+            "2. High-Risk Exposure: Credential Leakage in CLI Arguments"
+        )
+    ));
+    out.push_str(&ui.wrap(
+        "Command-line arguments are the single largest source of accidental credential exposure in developer workstations:",
+        2,
+    ));
+    out.push('\n');
+    out.push_str(&ui.wrap(
+        "- API tokens and Authorization headers passed via curl, git, or httpie flags.",
+        4,
+    ));
+    out.push('\n');
+    out.push_str(&ui.wrap(
+        "- Passwords passed via CLI options (such as docker login -p, mysql -p, or sshpass).",
+        4,
+    ));
+    out.push('\n');
+    out.push_str(&ui.wrap(
+        "- Accidental multi-line pastes of secret keys, private SSH certificates, or internal tokens.",
+        4,
+    ));
+    out.push('\n');
+    out.push_str(&ui.wrap(
+        "While PSReadLine includes heuristic password scrubbers, they match only known parameter names \
+         (e.g. -Password) and fail on custom environment variables, subcommands, or API authorization headers.",
+        2,
+    ));
+    out.push_str("\n\n");
+
+    out.push_str(&format!(
+        "{}\n",
+        ui.paint(
+            style::HEADING,
+            "3. Recommended Posture: Session-Only Command History"
+        )
+    ));
+    out.push_str(&ui.wrap(
+        "The recommended privacy posture is session-only command recall: keeping command recall in the \
+         current open shell window while halting persistent disk writes.",
+        2,
+    ));
+    out.push('\n');
+    out.push_str(&ui.wrap(
+        "- In PowerShell: Add 'Set-PSReadLineOption -HistorySaveStyle SaveNothing' to your profile ($PROFILE). \
+         This retains up-arrow recall and reverse search (Ctrl+R) in the running terminal without writing to disk.",
+        4,
+    ));
+    out.push('\n');
+    out.push_str(&ui.wrap(
+        "- In Bash: Add 'export HISTCONTROL=ignorespace' to ~/.bashrc and precede sensitive commands with a space, \
+         or configure 'export HISTFILE=/dev/null' for fully ephemeral terminals.",
+        4,
+    ));
+    out.push('\n');
+    out.push_str(&ui.wrap(
+        "- In Zsh: Configure 'setopt HIST_IGNORE_SPACE' or disable persistent file storage via 'unset HISTFILE'.",
+        4,
+    ));
+    out.push_str("\n\n");
+
+    out.push_str(&format!(
+        "{}\n",
+        ui.paint(
+            style::HEADING,
+            "4. Operational Trade-offs & Security Log Distinction"
+        )
+    ));
+    out.push_str(&ui.wrap(
+        "- Trade-off: Cross-session recall (pressing up-arrow after opening a new shell tab or rebooting) \
+         is eliminated. Within the active shell, recall remains fully functional.",
+        2,
+    ));
+    out.push('\n');
+    out.push_str(&ui.wrap(
+        "- Security Log Distinction: Shell command history is a user convenience feature, not an \
+         operating system security audit trail. System-level audit facilities (such as Windows PowerShell Script \
+         Block Logging Event 4104, Linux auditd, or macOS unified logging) are separate, tamper-resistant, \
+         and intentionally never modified or suppressed by privr.",
+        2,
+    ));
+    out.push('\n');
+    out.push_str(&ui.wrap(
+        "- Residue Purge: Running 'privr clean -c recent' safely targets existing PSReadLine history files \
+         while preserving user profile configurations, functions, and environment variables.",
+        2,
+    ));
+    out.push('\n');
+
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -785,6 +930,19 @@ mod tests {
         assert!(text.contains("3. Scientific Sanitization vs Legacy Cleaner Antipatterns"));
         assert!(text.contains("4. AI Agent & Developer Workspace Hygiene"));
         assert!(text.contains("ConnectedDevicesPlatform"));
+        assert!(!text.contains('\u{1b}'));
+    }
+
+    #[test]
+    fn shell_history_explanation_renders_walkthrough() {
+        let plain_ui = Ui::plain();
+        let text = render_shell_history_explanation(&plain_ui);
+        assert!(text.contains("privr Shell Command History Privacy Architecture"));
+        assert!(text.contains("1. Physical Retention: How Shells Record Commands"));
+        assert!(text.contains("2. High-Risk Exposure: Credential Leakage in CLI Arguments"));
+        assert!(text.contains("3. Recommended Posture: Session-Only Command History"));
+        assert!(text.contains("4. Operational Trade-offs & Security Log Distinction"));
+        assert!(text.contains("ConsoleHost_history.txt"));
         assert!(!text.contains('\u{1b}'));
     }
 

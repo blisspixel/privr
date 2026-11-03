@@ -3,4 +3,5 @@
 pub mod discovery;
 pub mod evidence;
 pub mod exposure;
+pub mod residue;
 pub mod systemd;

@@ -1337,134 +1337,102 @@ fn handle_tools_call_with_check_context(
                 }
             }
 
-            #[cfg(windows)]
-            {
-                let mode = if polite {
-                    crate::model::residue::PurgeMode::Polite
-                } else {
-                    crate::model::residue::PurgeMode::Aggressive
-                };
+            let mode = if polite {
+                crate::model::residue::PurgeMode::Polite
+            } else {
+                crate::model::residue::PurgeMode::Aggressive
+            };
 
-                let sys_drive = crate::platform::windows::residue::system_drive_letter();
-                let trim_status = if trim {
-                    if dry_run {
-                        Some(
-                            crate::platform::windows::residue::check_volume_trim_support(sys_drive),
-                        )
-                    } else {
-                        Some(crate::platform::windows::residue::execute_volume_trim(
-                            sys_drive,
-                        ))
-                    }
-                } else {
-                    None
-                };
-
-                let target_specs = crate::catalog::residue::select_residue_targets(
-                    mode,
-                    &control_filter,
-                    &category_filter,
-                );
-
+            let trim_status = if trim {
                 if dry_run {
-                    let mut preview_items = Vec::new();
-                    for (spec, selected, reason) in &target_specs {
-                        let item = crate::platform::windows::residue::inspect_target(
-                            spec,
-                            *selected,
-                            reason.clone(),
-                        );
-                        preview_items.push(item);
-                    }
-                    let report = crate::model::residue::PurgeReport {
-                        schema: 1,
-                        mode,
-                        dry_run: true,
-                        total_files_affected: preview_items
-                            .iter()
-                            .filter(|i| i.selected)
-                            .map(|i| i.file_count)
-                            .sum(),
-                        total_bytes_affected: preview_items
-                            .iter()
-                            .filter(|i| i.selected)
-                            .map(|i| i.size_bytes)
-                            .sum(),
-                        items: preview_items
-                            .into_iter()
-                            .filter(|i| i.selected)
-                            .map(|i| crate::model::residue::ResiduePurgeItem {
-                                id: i.id,
-                                title: i.title,
-                                category: i.category,
-                                files_removed: i.file_count,
-                                bytes_reclaimed: i.size_bytes,
-                                files_retained: 0,
-                                error: None,
-                            })
-                            .collect(),
-                        trim: trim_status,
-                    };
-                    tool_success(serde_json::to_string_pretty(&report).unwrap_or_default())
+                    Some(crate::platform::check_volume_trim_support())
                 } else {
-                    let now = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default();
-                    let timestamp = format!("{}.{:03}", now.as_secs(), now.subsec_millis());
-                    let tx_id = format!("clean-{}-{}", now.as_secs(), now.subsec_millis());
-
-                    let journal = crate::journal::TransactionJournal {
-                        schema: crate::journal::JOURNAL_SCHEMA,
-                        transaction_id: tx_id,
-                        timestamp,
-                        platform: "windows".to_owned(),
-                        profile: format!("clean:{}", mode.as_str()),
-                        operations: Vec::new(),
-                    };
-
-                    if let Err(e) = crate::journal::save_transaction(&journal) {
-                        return Err((-32603, format!("Cannot write transaction journal: {e}")));
-                    }
-
-                    let mut purge_results = Vec::new();
-                    for (spec, selected, _) in &target_specs {
-                        if *selected {
-                            let result = crate::platform::windows::residue::purge_target(spec);
-                            purge_results.push(result);
-                        }
-                    }
-                    let total_removed: usize = purge_results.iter().map(|r| r.files_removed).sum();
-                    let total_reclaimed: u64 =
-                        purge_results.iter().map(|r| r.bytes_reclaimed).sum();
-                    let report = crate::model::residue::PurgeReport {
-                        schema: 1,
-                        mode,
-                        dry_run: false,
-                        total_files_affected: total_removed,
-                        total_bytes_affected: total_reclaimed,
-                        items: purge_results,
-                        trim: trim_status,
-                    };
-                    tool_success(serde_json::to_string_pretty(&report).unwrap_or_default())
+                    Some(crate::platform::execute_volume_trim())
                 }
-            }
+            } else {
+                None
+            };
 
-            #[cfg(not(windows))]
-            {
-                let _ = (dry_run, polite, trim, category_filter, control_filter);
-                let mode = if polite {
-                    crate::model::residue::PurgeMode::Polite
-                } else {
-                    crate::model::residue::PurgeMode::Aggressive
-                };
+            let target_specs = crate::catalog::residue::select_residue_targets(
+                mode,
+                &control_filter,
+                &category_filter,
+            );
+
+            if dry_run {
+                let mut preview_items = Vec::new();
+                for (spec, selected, reason) in &target_specs {
+                    let item =
+                        crate::platform::inspect_residue_target(spec, *selected, reason.clone());
+                    preview_items.push(item);
+                }
                 let report = crate::model::residue::PurgeReport {
                     schema: 1,
                     mode,
-                    dry_run,
-                    total_files_affected: 0,
-                    total_bytes_affected: 0,
-                    items: Vec::new(),
-                    trim: None,
+                    dry_run: true,
+                    total_files_affected: preview_items
+                        .iter()
+                        .filter(|i| i.selected)
+                        .map(|i| i.file_count)
+                        .sum(),
+                    total_bytes_affected: preview_items
+                        .iter()
+                        .filter(|i| i.selected)
+                        .map(|i| i.size_bytes)
+                        .sum(),
+                    items: preview_items
+                        .into_iter()
+                        .filter(|i| i.selected)
+                        .map(|i| crate::model::residue::ResiduePurgeItem {
+                            id: i.id,
+                            title: i.title,
+                            category: i.category,
+                            files_removed: i.file_count,
+                            bytes_reclaimed: i.size_bytes,
+                            files_retained: 0,
+                            error: None,
+                        })
+                        .collect(),
+                    trim: trim_status,
+                };
+                tool_success(serde_json::to_string_pretty(&report).unwrap_or_default())
+            } else {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default();
+                let timestamp = format!("{}.{:03}", now.as_secs(), now.subsec_millis());
+                let tx_id = format!("clean-{}-{}", now.as_secs(), now.subsec_millis());
+
+                let journal = crate::journal::TransactionJournal {
+                    schema: crate::journal::JOURNAL_SCHEMA,
+                    transaction_id: tx_id,
+                    timestamp,
+                    platform: crate::model::host::Platform::current().as_str().to_owned(),
+                    profile: format!("clean:{}", mode.as_str()),
+                    operations: Vec::new(),
+                };
+
+                if let Err(e) = crate::journal::save_transaction(&journal) {
+                    return Err((-32603, format!("Cannot write transaction journal: {e}")));
+                }
+
+                let mut purge_results = Vec::new();
+                for (spec, selected, _) in &target_specs {
+                    if *selected {
+                        let result = crate::platform::purge_residue_target(spec);
+                        purge_results.push(result);
+                    }
+                }
+                let total_removed: usize = purge_results.iter().map(|r| r.files_removed).sum();
+                let total_reclaimed: u64 = purge_results.iter().map(|r| r.bytes_reclaimed).sum();
+                let report = crate::model::residue::PurgeReport {
+                    schema: 1,
+                    mode,
+                    dry_run: false,
+                    total_files_affected: total_removed,
+                    total_bytes_affected: total_reclaimed,
+                    items: purge_results,
+                    trim: trim_status,
                 };
                 tool_success(serde_json::to_string_pretty(&report).unwrap_or_default())
             }

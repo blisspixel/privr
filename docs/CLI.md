@@ -113,6 +113,23 @@ Running `privr explain` without arguments (or with topic keywords `score`, `post
 - the five most critical Windows privacy and security controls (`llmnr`, `wpad`, `error-reporting`, `inventory-collector`, `delivery-optimization`);
 - recommended next commands (`privr diff`, `privr fix`).
 
+Running `privr explain storage` (or aliases `trim`, `wipe`, `sanitization`, `ssd`) details:
+- solid-state flash physics vs magnetic platters (why multi-pass overwrites wear out flash and fail to erase data due to FTL wear leveling);
+- hardware TRIM and unallocated space deallocation (zero flash wear, active Deterministic Zeroes After TRIM / DZAT);
+- high-assurance defense against chip-off physical flash acquisition;
+- ATA Secure Erase and NVMe Block Erase standards under NIST SP 800-88 Revision 1.
+
+Running `privr explain shell` (or aliases `history`, `psreadline`, `bash`, `zsh`) details:
+- physical retention mechanics of PSReadLine, GNU Readline, and Zsh history;
+- accidental credential leakage in CLI flags and multi-line pastes;
+- recommended session-only command recall configuration (`Set-PSReadLineOption -HistorySaveStyle SaveNothing` in PowerShell, `HISTCONTROL=ignorespace` or `HISTFILE=/dev/null` in Bash/Zsh);
+- operational tradeoffs and the boundary between user command recall and operating system security audit logging.
+
+Running `privr explain residue` (or aliases `clean`, `purge`, `forensics`, `cache`) details:
+- local forensic artifact generation across Windows, Linux, and macOS;
+- polite retention mode versus aggressive forensic purge;
+- safe handling of locks, in-use files, and strict preservation of cookies, passwords, and sessions.
+
 Passing an exact control identifier (e.g. `privr explain windows.security.llmnr`) inspects deep technical evidence:
 - current and desired semantic values;
 - data involved and likely destination;
@@ -226,12 +243,15 @@ all five posture dimensions (`behavioral-commercial`, `forensic-residue`,
 `network-exposure`, `diagnostic-crash`, `ambient-sensor`), distinguishing automated
 remediation candidates from unautomated drift.
 
-## `purge`
+## `clean` (alias: `purge`)
 
-Status: planned, not implemented.
+Status: implemented across Windows, Linux, and macOS.
 
-`purge` removes local privacy residue by invoking documented vendor erasure
-mechanisms. It never deletes files directly.
+`clean` (or `purge`) removes local privacy residue by inspecting and safely clearing
+reviewed disposable caches and temporary files across native locations ($XDG_CACHE_HOME on Linux,
+~/Library/Caches on macOS, %LOCALAPPDATA% on Windows). It strictly preserves cookies,
+login sessions, passwords, history, and active databases. Optional hardware SSD TRIM (`--trim`)
+safely deallocates unallocated clusters on solid-state drives without flash wear.
 
 It is a separate verb precisely because it is irreversible. It is never part of
 `apply`, never included in a default profile, and never reachable from `--yes`.

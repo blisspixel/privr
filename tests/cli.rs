@@ -408,7 +408,24 @@ fn explain_known_control_shows_evidence_and_rationale() {
         .stdout(predicate::str::contains("Evidence"));
 }
 
-#[cfg(windows)]
+#[test]
+fn explain_shell_topic_shows_history_architecture() {
+    let mut command = Command::cargo_bin("privr").expect("binary");
+    command
+        .args(["explain", "shell"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "privr Shell Command History Privacy Architecture",
+        ))
+        .stdout(predicate::str::contains(
+            "1. Physical Retention: How Shells Record Commands",
+        ))
+        .stdout(predicate::str::contains(
+            "3. Recommended Posture: Session-Only Command History",
+        ));
+}
+
 #[test]
 fn clean_preview_defaults_to_dry_run_and_shows_plan() {
     let mut command = Command::cargo_bin("privr").expect("binary");
@@ -420,7 +437,6 @@ fn clean_preview_defaults_to_dry_run_and_shows_plan() {
         .stdout(predicate::str::contains("Plan:"));
 }
 
-#[cfg(windows)]
 #[test]
 fn clean_dry_run_alias_works() {
     let mut command = Command::cargo_bin("privr").expect("binary");
@@ -432,7 +448,6 @@ fn clean_dry_run_alias_works() {
         .stdout(predicate::str::contains("Plan:"));
 }
 
-#[cfg(windows)]
 #[test]
 fn clean_category_filter_scopes_selection() {
     let mut command = Command::cargo_bin("privr").expect("binary");
@@ -444,7 +459,6 @@ fn clean_category_filter_scopes_selection() {
         .stdout(predicate::str::contains("Plan: 2 to clean"));
 }
 
-#[cfg(windows)]
 #[test]
 fn clean_help_shows_examples_and_categories() {
     let mut command = Command::cargo_bin("privr").expect("binary");
@@ -457,7 +471,6 @@ fn clean_help_shows_examples_and_categories() {
         .stdout(predicate::str::contains("privr clean --category"));
 }
 
-#[cfg(windows)]
 #[test]
 fn purge_alias_still_works() {
     let mut command = Command::cargo_bin("privr").expect("binary");
@@ -468,7 +481,6 @@ fn purge_alias_still_works() {
         .stdout(predicate::str::contains("privr clean (preview"));
 }
 
-#[cfg(windows)]
 #[test]
 fn purge_preview_json_is_valid() {
     let mut command = Command::cargo_bin("privr").expect("binary");
@@ -484,7 +496,6 @@ fn purge_preview_json_is_valid() {
     assert!(parsed["items"].is_array());
 }
 
-#[cfg(windows)]
 #[test]
 fn purge_polite_retains_thumbnail_cache() {
     let mut command = Command::cargo_bin("privr").expect("binary");
@@ -493,22 +504,26 @@ fn purge_polite_retains_thumbnail_cache() {
         .assert()
         .success()
         .stdout(predicate::str::contains("retained"))
-        .stdout(predicate::str::contains("File Explorer thumbnail cache"));
+        .stdout(predicate::str::contains("thumbnail"));
 }
 
-#[cfg(windows)]
 #[test]
 fn purge_with_control_filter_scopes_selection() {
+    let ctrl_id = if cfg!(windows) {
+        "windows.residue.temp"
+    } else if cfg!(target_os = "linux") {
+        "linux.residue.mesa-shader"
+    } else {
+        "browser.residue.safari-cache"
+    };
     let mut command = Command::cargo_bin("privr").expect("binary");
     command
-        .args(["clean", "--preview", "--control", "windows.residue.temp"])
+        .args(["clean", "--preview", "--control", ctrl_id])
         .assert()
         .success()
-        .stdout(predicate::str::contains("User temporary files"))
         .stdout(predicate::str::contains("Plan: 1 to clean"));
 }
 
-#[cfg(windows)]
 #[test]
 fn clean_preview_with_trim_shows_hardware_maintenance() {
     let mut command = Command::cargo_bin("privr").expect("binary");
@@ -516,13 +531,9 @@ fn clean_preview_with_trim_shows_hardware_maintenance() {
         .args(["clean", "--preview", "--trim"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Hardware Storage Maintenance"))
-        .stdout(predicate::str::contains(
-            "Solid-state drive free space TRIM",
-        ));
+        .stdout(predicate::str::contains("Hardware Storage Maintenance"));
 }
 
-#[cfg(windows)]
 #[test]
 fn clean_preview_with_trim_json_contains_trim_status() {
     let mut command = Command::cargo_bin("privr").expect("binary");

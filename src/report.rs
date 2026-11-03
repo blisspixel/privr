@@ -756,8 +756,6 @@ pub fn humanize_section(section: &str) -> &str {
 }
 
 /// Format raw byte sizes into human-readable notation.
-/// Stated reason: allow dead_code on non-Windows targets where residue cleanup rendering is currently disabled.
-#[cfg_attr(not(windows), allow(dead_code))]
 pub fn format_byte_size(bytes: u64) -> String {
     if bytes == 0 {
         return "0 B".to_owned();
@@ -778,8 +776,6 @@ pub fn format_byte_size(bytes: u64) -> String {
 }
 
 /// Render the preview table and summary for disposable residue cleanup.
-/// Stated reason: allow dead_code on non-Windows targets where residue cleanup rendering is currently disabled.
-#[cfg_attr(not(windows), allow(dead_code))]
 pub fn render_purge_preview(
     ui: &Ui,
     mode: crate::model::residue::PurgeMode,
@@ -900,8 +896,6 @@ pub fn render_purge_preview(
 }
 
 /// Render the completion report for executed residue purge transactions.
-/// Stated reason: allow dead_code on non-Windows targets where residue cleanup rendering is currently disabled.
-#[cfg_attr(not(windows), allow(dead_code))]
 pub fn render_purge_report(
     ui: &Ui,
     report: &crate::model::residue::PurgeReport,

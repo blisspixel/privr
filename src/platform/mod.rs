@@ -17,6 +17,7 @@ pub mod windows;
 pub mod elevation;
 
 use crate::model::host::HostFacts;
+use crate::model::residue::{ResiduePreviewItem, ResiduePurgeItem, ResidueSpec, TrimStatus};
 
 /// Discover the facts this host presents.
 ///
@@ -39,6 +40,122 @@ pub fn discover() -> HostFacts {
     #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
     {
         HostFacts::unknown(crate::model::host::Platform::current())
+    }
+}
+
+/// Inspect a residue target and return its preview item.
+pub fn inspect_residue_target(
+    spec: &ResidueSpec,
+    selected: bool,
+    retained_reason: Option<String>,
+) -> ResiduePreviewItem {
+    #[cfg(windows)]
+    {
+        windows::residue::inspect_target(spec, selected, retained_reason)
+    }
+    #[cfg(target_os = "linux")]
+    {
+        linux::residue::inspect_target(spec, selected, retained_reason)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        macos::residue::inspect_target(spec, selected, retained_reason)
+    }
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
+    {
+        ResiduePreviewItem {
+            id: spec.id.clone(),
+            title: spec.title.clone(),
+            category: spec.category,
+            path_display: "(unsupported platform)".to_owned(),
+            file_count: 0,
+            size_bytes: 0,
+            selected,
+            retained_reason,
+            requires_risk_ack: spec.requires_risk_ack,
+        }
+    }
+}
+
+/// Execute purge for a residue target and return its result item.
+pub fn purge_residue_target(spec: &ResidueSpec) -> ResiduePurgeItem {
+    #[cfg(windows)]
+    {
+        windows::residue::purge_target(spec)
+    }
+    #[cfg(target_os = "linux")]
+    {
+        linux::residue::purge_target(spec)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        macos::residue::purge_target(spec)
+    }
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
+    {
+        ResiduePurgeItem {
+            id: spec.id.clone(),
+            title: spec.title.clone(),
+            category: spec.category,
+            files_removed: 0,
+            bytes_reclaimed: 0,
+            files_retained: 0,
+            error: Some("Platform does not support residue purge".to_owned()),
+        }
+    }
+}
+
+/// Query hardware TRIM capability for the volume containing user data.
+pub fn check_volume_trim_support() -> TrimStatus {
+    #[cfg(windows)]
+    {
+        let drive = windows::residue::system_drive_letter();
+        windows::residue::check_volume_trim_support(drive)
+    }
+    #[cfg(target_os = "linux")]
+    {
+        linux::residue::check_volume_trim_support()
+    }
+    #[cfg(target_os = "macos")]
+    {
+        macos::residue::check_volume_trim_support()
+    }
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
+    {
+        TrimStatus {
+            volume: "unknown".to_owned(),
+            media_type: "Unknown".to_owned(),
+            supported: false,
+            executed: false,
+            message: "Hardware TRIM is not supported on this platform".to_owned(),
+        }
+    }
+}
+
+/// Execute hardware TRIM / unmap across unallocated space.
+pub fn execute_volume_trim() -> TrimStatus {
+    #[cfg(windows)]
+    {
+        let drive = windows::residue::system_drive_letter();
+        windows::residue::execute_volume_trim(drive)
+    }
+    #[cfg(target_os = "linux")]
+    {
+        linux::residue::execute_volume_trim()
+    }
+    #[cfg(target_os = "macos")]
+    {
+        macos::residue::execute_volume_trim()
+    }
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
+    {
+        TrimStatus {
+            volume: "unknown".to_owned(),
+            media_type: "Unknown".to_owned(),
+            supported: false,
+            executed: false,
+            message: "Hardware TRIM execution is not supported on this platform".to_owned(),
+        }
     }
 }
 

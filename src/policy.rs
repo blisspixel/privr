@@ -642,4 +642,16 @@ expires = "2027-06-01"
         let err = CustomPolicy::from_str(toml).unwrap_err();
         assert!(err.contains("duplicate exception"));
     }
+
+    #[test]
+    fn test_date_utc_format() {
+        let (y, m, d) = current_date_utc();
+        assert!(y >= 2026);
+        assert!((1..=12).contains(&m));
+        assert!((1..=31).contains(&d));
+        let iso = today_iso();
+        assert_eq!(iso.len(), 10);
+        assert_eq!(&iso[4..5], "-");
+        assert_eq!(&iso[7..8], "-");
+    }
 }

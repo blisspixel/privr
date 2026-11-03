@@ -691,3 +691,71 @@ fn apply_help_shows_accept_risk_and_force() {
         .stdout(predicate::str::contains("--accept-risk"))
         .stdout(predicate::str::contains("--force"));
 }
+
+#[test]
+fn clean_help_shows_accept_risk() {
+    let mut command = Command::cargo_bin("privr").expect("binary");
+    command
+        .args(["clean", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--accept-risk"));
+}
+
+#[test]
+fn rollback_refuses_cross_platform_transaction() {
+    let storage = DoctorStorage::new();
+    let tx_dir = storage.0.join("privr").join("state").join("transactions");
+    std::fs::create_dir_all(&tx_dir).expect("create tx dir");
+    let foreign_platform = if cfg!(windows) { "linux" } else { "windows" };
+    let tx = privr::journal::TransactionJournal {
+        schema: privr::journal::JOURNAL_SCHEMA,
+        transaction_id: "tx-foreign-99".to_owned(),
+        timestamp: "2026-11-03T01:00:00Z".to_owned(),
+        platform: foreign_platform.to_owned(),
+        profile: "baseline".to_owned(),
+        operations: vec![privr::journal::OperationJournal {
+            control_id: "fake.control".to_owned(),
+            target_key: "fake.key".to_owned(),
+            preimage: None,
+            postimage: privr::model::evidence::RawValue::new(
+                privr::model::evidence::ValueKind::U32,
+                vec![0, 0, 0, 0],
+            ),
+            verified: true,
+        }],
+    };
+    let content = serde_json::to_string_pretty(&tx).expect("serialize foreign tx");
+    std::fs::write(tx_dir.join("tx-foreign-99.json"), content).expect("write foreign tx");
+
+    let mut cmd = storage.command();
+    cmd.args(["rollback", "tx-foreign-99", "--yes"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("was recorded on"))
+        .stderr(predicate::str::contains("and cannot be rolled back on"));
+}
+
+#[test]
+fn simulate_cli_with_custom_policy() {
+    let toml = r#"
+schema = 1
+extends = "builtin:baseline@0.1"
+
+[controls."windows.advertising.id"]
+mode = "ignore"
+"#;
+    let temp_file =
+        std::env::temp_dir().join(format!("privr-sim-policy-test-{}.toml", std::process::id()));
+    std::fs::write(&temp_file, toml).expect("write policy");
+
+    let mut cmd = Command::cargo_bin("privr").expect("binary");
+    let assert = cmd
+        .args(["simulate", "--policy", temp_file.to_str().expect("path")])
+        .assert()
+        .success();
+
+    let _ = std::fs::remove_file(&temp_file);
+    let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf-8");
+    assert!(output.contains("custom (extends baseline)"));
+}

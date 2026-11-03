@@ -787,7 +787,7 @@ fn run_with_check_context(
                             title: c.title.to_owned(),
                             section: c.spec.section.clone(),
                             current: current_str,
-                            desired: c.spec.desired.0.clone(),
+                            desired: spec_clone.desired.0.clone(),
                             requires_elevation: c.spec.requires_elevation,
                             friction: c.spec.friction,
                             details,
@@ -800,7 +800,7 @@ fn run_with_check_context(
             progress.finish();
 
             let profile_name = if let Some(pol) = &loaded_policy {
-                format!("custom:extends-{}", pol.extends)
+                format!("custom (extends {})", pol.extends)
             } else if let Some(w) = workload {
                 format!("workload:{}", w.as_str())
             } else {
@@ -1698,7 +1698,7 @@ fn run_with_check_context(
             let timestamp = format!("{}.{:03}", now.as_secs(), now.subsec_millis());
             let tx_id = format!("tx-{}-{}", now.as_secs(), now.subsec_millis());
             let profile_name = if let Some(pol) = &loaded_policy {
-                format!("custom:extends-{}", pol.extends)
+                format!("custom (extends {})", pol.extends)
             } else if let Some(w) = workload {
                 format!("workload:{}", w.as_str())
             } else {
@@ -2056,6 +2056,15 @@ fn run_with_check_context(
             }
 
             let host = crate::platform::discover();
+            if journal.platform != host.platform.as_str() {
+                let _ = writeln!(
+                    err,
+                    "privr: transaction '{transaction_id}' was recorded on '{}' and cannot be rolled back on '{}'",
+                    journal.platform,
+                    host.platform.as_str()
+                );
+                return 2;
+            }
             let is_elevated = host.elevated == crate::model::host::Fact::Known(true);
             let context = crate::catalog::Context::live(&host);
             let all_controls = crate::catalog::all();

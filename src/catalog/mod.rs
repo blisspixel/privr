@@ -17,6 +17,9 @@ pub mod residue;
 #[cfg(windows)]
 mod windows;
 
+/// Schema version for compiled control definitions.
+pub const CATALOG_SCHEMA: u8 = 1;
+
 use crate::engine::evaluate::{ControlSpec, Resolution};
 use crate::model::host::HostFacts;
 

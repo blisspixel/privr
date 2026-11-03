@@ -70,7 +70,7 @@ impl PolicyException {
     }
 }
 
-/// Validate that a date string is formatted strictly as YYYY-MM-DD.
+/// Validate that a date string is formatted strictly as a valid calendar YYYY-MM-DD.
 pub fn validate_date(date: &str) -> bool {
     if date.len() != 10 {
         return false;
@@ -91,7 +91,23 @@ pub fn validate_date(date: &str) -> bool {
         Ok(val) => val,
         Err(_) => return false,
     };
-    if !(1970..=9999).contains(&y) || !(1..=12).contains(&m) || !(1..=31).contains(&d) {
+    if !(1970..=9999).contains(&y) || !(1..=12).contains(&m) {
+        return false;
+    }
+    let is_leap = (y.is_multiple_of(4) && !y.is_multiple_of(100)) || y.is_multiple_of(400);
+    let max_days = match m {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 => {
+            if is_leap {
+                29
+            } else {
+                28
+            }
+        }
+        _ => return false,
+    };
+    if d < 1 || d > max_days {
         return false;
     }
     true
@@ -736,5 +752,25 @@ expires = "2028-06-30" # expiration date
             "Required for ticket #1234 legacy proxy"
         );
         assert_eq!(policy.exceptions[0].expires, "2028-06-30");
+    }
+
+    #[test]
+    fn validate_date_handles_calendar_boundaries_and_leap_years() {
+        assert!(validate_date("2026-11-03"));
+        assert!(validate_date("2024-02-29")); // leap year
+        assert!(validate_date("2000-02-29")); // 400-year leap year
+        assert!(validate_date("2026-01-31"));
+        assert!(validate_date("2026-04-30"));
+
+        assert!(!validate_date("2026-02-29")); // non-leap year
+        assert!(!validate_date("1900-02-29")); // 100-year non-leap
+        assert!(!validate_date("2026-04-31")); // April has 30 days
+        assert!(!validate_date("2026-02-30"));
+        assert!(!validate_date("2026-13-01"));
+        assert!(!validate_date("2026-00-15"));
+        assert!(!validate_date("2026-01-00"));
+        assert!(!validate_date("2026-01-32"));
+        assert!(!validate_date("invalid-date"));
+        assert!(!validate_date("2026/01/01"));
     }
 }

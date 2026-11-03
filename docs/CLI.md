@@ -356,9 +356,12 @@ obtained through any tool call and originates from a terminal on the machine
 being changed, so a caller cannot approve on the operator's behalf.
 
 `privr` makes no network requests and never calls a language model. The server
-speaks over standard input and output only. `privr_check`, `privr_plan`, and `privr_simulate`
-accept an optional `policy` argument (file path or inline TOML/JSON) allowing autonomous agent
-workflows to audit and project posture against enterprise policies.
+speaks over standard input and output only. `privr_check`, `privr_plan`, `privr_simulate`,
+and `privr_apply` accept an optional `policy` argument (file path or inline TOML/JSON) allowing
+autonomous agent workflows to audit, plan, and apply settings against enterprise policies.
+`privr_apply` and `privr_clean` accept `accept_risk` for explicit authorization of high-friction
+or risk-acknowledged actions. `privr_rollback` validates host platform matches the transaction
+journal and supports `section` filtering.
 
 ## `doctor`
 

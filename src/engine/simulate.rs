@@ -46,8 +46,13 @@ pub fn simulate_profile(
 
     for control in controls {
         let spec = &control.spec;
+        let is_explicitly_targeted = !control_filter.is_empty()
+            && control_filter
+                .iter()
+                .any(|c| spec.id == *c || spec.id.starts_with(c));
+
         let resolution = control.observe(context);
-        let mode = if spec.min_profile <= profile {
+        let mode = if is_explicitly_targeted || spec.min_profile <= profile {
             Mode::Enforce
         } else {
             Mode::Ignore
@@ -56,10 +61,7 @@ pub fn simulate_profile(
 
         current_posture.record(spec.dimension, eval.outcome);
 
-        let matches_control = control_filter.is_empty()
-            || control_filter
-                .iter()
-                .any(|c| spec.id == *c || spec.id.starts_with(c));
+        let matches_control = control_filter.is_empty() || is_explicitly_targeted;
         let matches_section = section_filter.is_empty()
             || section_filter.iter().any(|s| {
                 spec.section.eq_ignore_ascii_case(s)
@@ -134,11 +136,16 @@ pub fn simulate_with_policy(
             spec_clone.desired = crate::engine::evaluate::SemanticState::new(desired_val);
         }
         let resolution = control.observe(context);
+        let is_explicitly_targeted = !control_filter.is_empty()
+            && control_filter
+                .iter()
+                .any(|c| control.spec.id == *c || control.spec.id.starts_with(c));
+
         let mode = if let Some(ov) = override_opt
             && let Some(m) = ov.mode
         {
             m
-        } else if !control_filter.is_empty() || control.spec.min_profile <= policy.extends {
+        } else if is_explicitly_targeted || control.spec.min_profile <= policy.extends {
             Mode::Enforce
         } else {
             Mode::Ignore
@@ -162,10 +169,7 @@ pub fn simulate_with_policy(
 
         current_posture.record(spec_clone.dimension, eval.outcome);
 
-        let matches_control = control_filter.is_empty()
-            || control_filter
-                .iter()
-                .any(|c| spec_clone.id == *c || spec_clone.id.starts_with(c));
+        let matches_control = control_filter.is_empty() || is_explicitly_targeted;
         let matches_section = section_filter.is_empty()
             || section_filter.iter().any(|s| {
                 spec_clone.section.eq_ignore_ascii_case(s)

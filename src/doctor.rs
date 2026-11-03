@@ -531,8 +531,8 @@ fn diagnose_with_storage_facts(
     };
 
     let schemas = DoctorSchemas {
-        catalog: 1,
-        policy: 1,
+        catalog: crate::catalog::CATALOG_SCHEMA,
+        policy: crate::policy::POLICY_SCHEMA as u8,
         report: crate::report::SCHEMA,
         journal: crate::journal::JOURNAL_SCHEMA,
     };

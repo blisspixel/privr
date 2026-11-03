@@ -400,6 +400,10 @@ fn handle_tools_list(allow_apply: bool) -> Value {
                     "yes": {
                         "type": "boolean",
                         "description": "Explicit confirmation to purge residue (required when dry_run is false)"
+                    },
+                    "accept_risk": {
+                        "type": "string",
+                        "description": "Optional comma-separated list of residue target IDs to accept risk"
                     }
                 }
             }
@@ -427,6 +431,14 @@ fn handle_tools_list(allow_apply: bool) -> Value {
                         "type": "string",
                         "description": "Optional maximum tolerable friction tier: tier0-transparent, tier1-cosmetic, tier2-workflow-altering, or tier3-incompatible-or-tradeoff",
                         "enum": ["tier0-transparent", "tier1-cosmetic", "tier2-workflow-altering", "tier3-incompatible-or-tradeoff"]
+                    },
+                    "policy": {
+                        "type": "string",
+                        "description": "Optional file path or TOML/JSON string of a custom policy"
+                    },
+                    "accept_risk": {
+                        "type": "string",
+                        "description": "Optional comma-separated list of control IDs or 'all' to accept risk for high-friction controls"
                     },
                     "yes": {
                         "type": "boolean",
@@ -458,6 +470,10 @@ fn handle_tools_list(allow_apply: bool) -> Value {
                     "transaction_id": {
                         "type": "string",
                         "description": "Transaction identifier recorded in history"
+                    },
+                    "section": {
+                        "type": "string",
+                        "description": "Optional section name or prefix to filter rollback operations"
                     },
                     "yes": {
                         "type": "boolean",
@@ -852,6 +868,28 @@ fn handle_tools_call_with_check_context(
                 .and_then(Value::as_bool)
                 .unwrap_or(false);
 
+            let loaded_policy = if let Some(pol_arg) =
+                arguments.get("policy").and_then(Value::as_str)
+            {
+                let pol = if pol_arg.trim_start().starts_with('{') || pol_arg.contains("schema =") {
+                    pol_arg
+                        .parse::<crate::policy::CustomPolicy>()
+                        .map_err(|e| (-32602, e))?
+                } else {
+                    let path = std::path::Path::new(pol_arg);
+                    crate::policy::CustomPolicy::from_file(path).map_err(|e| (-32602, e))?
+                };
+                Some(pol)
+            } else {
+                None
+            };
+
+            let accept_risk: Vec<String> = arguments
+                .get("accept_risk")
+                .and_then(Value::as_str)
+                .map(|s| s.split(',').map(|r| r.trim().to_owned()).collect())
+                .unwrap_or_default();
+
             let has_profile_arg = arguments.get("profile").is_some();
             let has_workload_arg = arguments.get("workload").is_some();
 
@@ -864,20 +902,35 @@ fn handle_tools_call_with_check_context(
                 None => None,
             };
 
-            let (workload, max_friction) = if !has_profile_arg && !has_workload_arg {
-                (
-                    Some(WorkloadPersona::General),
-                    Some(FrictionTier::Tier1Cosmetic),
-                )
+            let (workload, max_friction) =
+                if !has_profile_arg && !has_workload_arg && loaded_policy.is_none() {
+                    (
+                        Some(WorkloadPersona::General),
+                        Some(FrictionTier::Tier1Cosmetic),
+                    )
+                } else {
+                    (workload, max_friction)
+                };
+
+            let profile_val = if let Some(pol) = &loaded_policy {
+                pol.extends
             } else {
-                (workload, max_friction)
+                let profile_str = arguments
+                    .get("profile")
+                    .and_then(Value::as_str)
+                    .unwrap_or("baseline");
+                parse_profile(profile_str)?
             };
 
-            let profile_str = arguments
-                .get("profile")
-                .and_then(Value::as_str)
-                .unwrap_or("baseline");
-            let profile = parse_profile(profile_str)?;
+            let profile_name = if let Some(pol) = &loaded_policy {
+                format!("custom (extends {})", pol.extends)
+            } else if let Some(w) = workload {
+                format!("workload:{}", w.as_str())
+            } else {
+                profile_val.as_str().to_owned()
+            };
+
+            let today = crate::policy::today_iso();
 
             let recommended_ids: Option<std::collections::BTreeSet<String>> = workload.map(|w| {
                 crate::engine::recommend::generate_recommendations(
@@ -918,23 +971,50 @@ fn handle_tools_call_with_check_context(
                 if !c.spec.requires_elevation || c.apply.is_none() {
                     return false;
                 }
+                let override_opt = loaded_policy
+                    .as_ref()
+                    .and_then(|pol| pol.controls.get(&c.spec.id));
+                let mut spec_clone = c.spec.clone();
+                if let Some(ov) = override_opt
+                    && let Some(desired_val) = &ov.desired
+                {
+                    spec_clone.desired = crate::engine::evaluate::SemanticState::new(desired_val);
+                }
                 let resolution = c.observe(&context);
-                let mode = if filter.is_some()
+                let mode = if let Some(ov) = override_opt
+                    && let Some(m) = ov.mode
+                {
+                    m
+                } else if filter.is_some()
                     || recommended_ids.is_some()
-                    || c.spec.min_profile <= profile
+                    || c.spec.min_profile <= profile_val
                 {
                     crate::engine::evaluate::Mode::Enforce
                 } else {
                     crate::engine::evaluate::Mode::Ignore
                 };
+                let exception = if let Some(pol) = &loaded_policy {
+                    if let Some(ex) = pol.exceptions.iter().find(|e| e.control == c.spec.id) {
+                        if resolution.state.as_ref().map(|s| s.0.as_str()) == Some(&ex.accepted) {
+                            ex.status(&today)
+                        } else {
+                            crate::model::outcome::Exception::None
+                        }
+                    } else {
+                        crate::model::outcome::Exception::None
+                    }
+                } else {
+                    crate::model::outcome::Exception::None
+                };
                 let eval = crate::engine::evaluate::evaluate(
-                    &c.spec,
+                    &spec_clone,
                     mode,
                     &resolution,
                     &host,
-                    crate::model::outcome::Exception::None,
+                    exception,
                 );
                 eval.outcome == crate::model::outcome::Outcome::Drift
+                    && eval.exception != crate::model::outcome::Exception::Active
                     && eval.remediation == crate::model::outcome::Remediation::Automatic
             });
 
@@ -961,9 +1041,16 @@ fn handle_tools_call_with_check_context(
                     friction_str = f.as_str().to_owned();
                     child_args.push(&friction_str);
                 }
-                if has_profile_arg {
+                if let Some(p_arg) = arguments.get("policy").and_then(Value::as_str) {
+                    child_args.push("--policy");
+                    child_args.push(p_arg);
+                } else if has_profile_arg {
                     child_args.push("--profile");
-                    child_args.push(profile_str);
+                    child_args.push(profile_val.as_str());
+                }
+                for r in &accept_risk {
+                    child_args.push("--accept-risk");
+                    child_args.push(r);
                 }
                 if let Some(f) = filter {
                     child_args.push("--control");
@@ -1000,11 +1087,6 @@ fn handle_tools_call_with_check_context(
                 .unwrap_or_default();
             let timestamp = format!("{}.{:03}", now.as_secs(), now.subsec_millis());
             let tx_id = format!("tx-{}-{}", now.as_secs(), now.subsec_millis());
-            let profile_name = if let Some(w) = workload {
-                format!("workload:{}", w.as_str())
-            } else {
-                profile.as_str().to_owned()
-            };
             let mut journal = crate::journal::TransactionJournal {
                 schema: crate::journal::JOURNAL_SCHEMA,
                 transaction_id: tx_id.clone(),
@@ -1044,71 +1126,108 @@ fn handle_tools_call_with_check_context(
                 {
                     continue;
                 }
+                let override_opt = loaded_policy
+                    .as_ref()
+                    .and_then(|pol| pol.controls.get(&c.spec.id));
+                let mut spec_clone = c.spec.clone();
+                if let Some(ov) = override_opt
+                    && let Some(desired_val) = &ov.desired
+                {
+                    spec_clone.desired = crate::engine::evaluate::SemanticState::new(desired_val);
+                }
                 let resolution = c.observe(&context);
-                let mode = if filter.is_some()
+                let mode = if let Some(ov) = override_opt
+                    && let Some(m) = ov.mode
+                {
+                    m
+                } else if filter.is_some()
                     || recommended_ids.is_some()
-                    || c.spec.min_profile <= profile
+                    || c.spec.min_profile <= profile_val
                 {
                     crate::engine::evaluate::Mode::Enforce
                 } else {
                     crate::engine::evaluate::Mode::Ignore
                 };
+                let exception = if let Some(pol) = &loaded_policy {
+                    if let Some(ex) = pol.exceptions.iter().find(|e| e.control == c.spec.id) {
+                        if resolution.state.as_ref().map(|s| s.0.as_str()) == Some(&ex.accepted) {
+                            ex.status(&today)
+                        } else {
+                            crate::model::outcome::Exception::None
+                        }
+                    } else {
+                        crate::model::outcome::Exception::None
+                    }
+                } else {
+                    crate::model::outcome::Exception::None
+                };
                 let eval = crate::engine::evaluate::evaluate(
-                    &c.spec,
+                    &spec_clone,
                     mode,
                     &resolution,
                     &host,
-                    crate::model::outcome::Exception::None,
+                    exception,
                 );
-                if eval.outcome == crate::model::outcome::Outcome::Drift
-                    && eval.remediation == crate::model::outcome::Remediation::Automatic
-                    && c.apply.is_some()
-                {
-                    match automatic_elevation_decision(c, &eval, is_elevated, filter.is_some()) {
-                        ElevationDecision::Refuse => {
-                            let initial_path =
-                                crate::journal::transactions_dir().join(format!("{tx_id}.json"));
-                            let _ = std::fs::remove_file(initial_path);
-                            return tool_error(format!(
-                                "Control '{}' requires administrative privileges (run privr as Administrator).",
-                                c.spec.id
-                            ));
-                        }
-                        ElevationDecision::Defer => {
-                            requires_elevation_drift += 1;
-                            continue;
-                        }
-                        ElevationDecision::NotRequired => {}
+                if eval.outcome == crate::model::outcome::Outcome::Drift {
+                    if eval.exception == crate::model::outcome::Exception::Active {
+                        continue;
                     }
-
-                    match c.apply(&context) {
-                        Some(Ok(op)) => {
-                            journal.operations.push(crate::journal::OperationJournal {
-                                control_id: c.spec.id.clone(),
-                                target_key: op.target_key,
-                                preimage: op.preimage,
-                                postimage: op.postimage,
-                                verified: true,
-                            });
-                            if let Err(e) = crate::journal::save_transaction(&journal) {
+                    let is_risk_accepted =
+                        accept_risk.iter().any(|r| r == "all" || r == &c.spec.id);
+                    if c.spec.friction >= FrictionTier::Tier2WorkflowAltering && !is_risk_accepted {
+                        unautomated_drift += 1;
+                        continue;
+                    }
+                    if eval.remediation == crate::model::outcome::Remediation::Automatic
+                        && c.apply.is_some()
+                    {
+                        match automatic_elevation_decision(c, &eval, is_elevated, filter.is_some())
+                        {
+                            ElevationDecision::Refuse => {
+                                let initial_path = crate::journal::transactions_dir()
+                                    .join(format!("{tx_id}.json"));
+                                let _ = std::fs::remove_file(initial_path);
                                 return tool_error(format!(
-                                    "Fatal error writing transaction journal: {e}. Applied {} change(s). Halting apply.",
-                                    journal.operations.len()
+                                    "Control '{}' requires administrative privileges (run privr as Administrator).",
+                                    c.spec.id
                                 ));
                             }
+                            ElevationDecision::Defer => {
+                                requires_elevation_drift += 1;
+                                continue;
+                            }
+                            ElevationDecision::NotRequired => {}
                         }
-                        Some(Err(e)) => {
-                            return tool_error(format!(
-                                "Failed to apply {}: {e}. Applied {} prior changes (tx: {}).",
-                                c.spec.id,
-                                journal.operations.len(),
-                                tx_id
-                            ));
+
+                        match c.apply(&context) {
+                            Some(Ok(op)) => {
+                                journal.operations.push(crate::journal::OperationJournal {
+                                    control_id: c.spec.id.clone(),
+                                    target_key: op.target_key,
+                                    preimage: op.preimage,
+                                    postimage: op.postimage,
+                                    verified: true,
+                                });
+                                if let Err(e) = crate::journal::save_transaction(&journal) {
+                                    return tool_error(format!(
+                                        "Fatal error writing transaction journal: {e}. Applied {} change(s). Halting apply.",
+                                        journal.operations.len()
+                                    ));
+                                }
+                            }
+                            Some(Err(e)) => {
+                                return tool_error(format!(
+                                    "Failed to apply {}: {e}. Applied {} prior changes (tx: {}).",
+                                    c.spec.id,
+                                    journal.operations.len(),
+                                    tx_id
+                                ));
+                            }
+                            None => {}
                         }
-                        None => {}
+                    } else {
+                        unautomated_drift += 1;
                     }
-                } else if eval.outcome == crate::model::outcome::Outcome::Drift {
-                    unautomated_drift += 1;
                 }
             }
 
@@ -1149,6 +1268,7 @@ fn handle_tools_call_with_check_context(
                 .get("transaction_id")
                 .and_then(Value::as_str)
                 .ok_or((-32602, "Missing transaction_id".to_owned()))?;
+            let section_filter = arguments.get("section").and_then(Value::as_str);
 
             if !crate::journal::is_valid_transaction_id(tx_id) {
                 return tool_error(format!("Invalid transaction identifier '{tx_id}'."));
@@ -1173,11 +1293,50 @@ fn handle_tools_call_with_check_context(
             }
 
             let host = crate::platform::discover();
+            if journal.platform != host.platform.as_str() {
+                return tool_error(format!(
+                    "Transaction '{tx_id}' was recorded on '{}' and cannot be rolled back on '{}'.",
+                    journal.platform,
+                    host.platform.as_str()
+                ));
+            }
             let context = crate::catalog::Context::live(&host);
             let all_controls = crate::catalog::all();
+
+            let matching_ops: Vec<&crate::journal::OperationJournal> =
+                if let Some(sec) = section_filter {
+                    journal
+                        .operations
+                        .iter()
+                        .filter(|op| {
+                            all_controls
+                                .iter()
+                                .find(|c| c.spec.id == op.control_id)
+                                .map(|c| {
+                                    c.spec.section.eq_ignore_ascii_case(sec)
+                                        || c.spec
+                                            .section
+                                            .to_ascii_lowercase()
+                                            .starts_with(&sec.to_ascii_lowercase())
+                                })
+                                .unwrap_or(false)
+                        })
+                        .collect()
+                } else {
+                    journal.operations.iter().collect()
+                };
+
+            if matching_ops.is_empty()
+                && let Some(sec) = section_filter
+            {
+                return tool_error(format!(
+                    "No operations in transaction '{tx_id}' match section '{sec}'."
+                ));
+            }
+
             let mut restored = 0;
 
-            for op in journal.operations.iter().rev() {
+            for op in matching_ops.iter().rev() {
                 if let Some(c) = all_controls
                     .iter()
                     .find(|item| item.spec.id == op.control_id)
@@ -1197,11 +1356,14 @@ fn handle_tools_call_with_check_context(
                 }
             }
 
-            let report = json!({
+            let mut report = json!({
                 "schema": 1,
                 "transaction_id": tx_id,
                 "restored_changes": restored
             });
+            if let Some(sec) = section_filter {
+                report["section"] = json!(sec);
+            }
             tool_success(serde_json::to_string_pretty(&report).unwrap_or_default())
         }
         "privr_recommend" => {
@@ -1428,6 +1590,11 @@ fn handle_tools_call_with_check_context(
                 .and_then(Value::as_str)
                 .map(|s| s.split(',').map(|c| c.trim().to_owned()).collect())
                 .unwrap_or_default();
+            let accept_risks: Vec<String> = arguments
+                .get("accept_risk")
+                .and_then(Value::as_str)
+                .map(|s| s.split(',').map(|r| r.trim().to_owned()).collect())
+                .unwrap_or_default();
 
             if !dry_run {
                 if !allow_apply {
@@ -1510,6 +1677,15 @@ fn handle_tools_call_with_check_context(
                 };
                 tool_success(serde_json::to_string_pretty(&report).unwrap_or_default())
             } else {
+                for (spec, selected, _) in &target_specs {
+                    if *selected && spec.requires_risk_ack && !accept_risks.contains(&spec.id) {
+                        return tool_error(format!(
+                            "Target '{}' requires explicit acknowledgement via 'accept_risk'",
+                            spec.id
+                        ));
+                    }
+                }
+
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default();
@@ -2591,5 +2767,33 @@ expires = "2029-01-01"
         let parsed: Value = serde_json::from_str(text).expect("valid comparison json");
         assert!(parsed.get("regressions").is_some());
         assert_eq!(parsed["platform_upgraded"], true);
+    }
+
+    #[test]
+    fn test_privr_apply_and_rollback_schemas_have_parity_options() {
+        let tools_val = handle_tools_list(true);
+        let tools_arr = tools_val["tools"].as_array().expect("tools array");
+
+        let apply_tool = tools_arr
+            .iter()
+            .find(|t| t["name"] == "privr_apply")
+            .expect("privr_apply tool");
+        let apply_props = &apply_tool["inputSchema"]["properties"];
+        assert!(apply_props.get("policy").is_some());
+        assert!(apply_props.get("accept_risk").is_some());
+
+        let rollback_tool = tools_arr
+            .iter()
+            .find(|t| t["name"] == "privr_rollback")
+            .expect("privr_rollback tool");
+        let rollback_props = &rollback_tool["inputSchema"]["properties"];
+        assert!(rollback_props.get("section").is_some());
+
+        let clean_tool = tools_arr
+            .iter()
+            .find(|t| t["name"] == "privr_clean")
+            .expect("privr_clean tool");
+        let clean_props = &clean_tool["inputSchema"]["properties"];
+        assert!(clean_props.get("accept_risk").is_some());
     }
 }

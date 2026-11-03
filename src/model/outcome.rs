@@ -399,12 +399,21 @@ pub struct Summary {
     pub not_selected: usize,
     pub not_checked: usize,
     pub error: usize,
+    #[serde(default)]
+    pub active_exceptions: usize,
+    #[serde(default)]
+    pub expired_exceptions: usize,
 }
 
 impl Summary {
     pub fn of<'a>(results: impl IntoIterator<Item = &'a ControlResult>) -> Self {
         let mut summary = Self::default();
         for result in results {
+            if result.exception == Exception::Active {
+                summary.active_exceptions += 1;
+            } else if result.exception == Exception::Expired {
+                summary.expired_exceptions += 1;
+            }
             let slot = match result.outcome {
                 Outcome::Pass => &mut summary.pass,
                 Outcome::Drift => &mut summary.drift,

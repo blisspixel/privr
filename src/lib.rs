@@ -17,6 +17,7 @@ mod manifest;
 pub mod mcp;
 pub mod model;
 pub mod platform;
+pub mod policy;
 mod report;
 pub mod ui;
 

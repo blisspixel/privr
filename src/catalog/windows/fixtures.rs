@@ -686,13 +686,137 @@ fn wpad_fixtures_replay_the_real_probe_and_evaluator() {
     replay(wpad_control, WPAD_FIXTURES, WPAD_POLICY, WPAD_POLICY);
 }
 
+const TAILORED: &[(&str, &str)] = &[
+    (
+        "absent-default",
+        include_str!("../../../tests/fixtures/windows.experience.tailored/absent-default.json"),
+    ),
+    (
+        "disabled-compliant",
+        include_str!("../../../tests/fixtures/windows.experience.tailored/disabled-compliant.json"),
+    ),
+    (
+        "enabled-drift",
+        include_str!("../../../tests/fixtures/windows.experience.tailored/enabled-drift.json"),
+    ),
+    (
+        "policy-denied",
+        include_str!("../../../tests/fixtures/windows.experience.tailored/policy-denied.json"),
+    ),
+    (
+        "policy-malformed",
+        include_str!("../../../tests/fixtures/windows.experience.tailored/policy-malformed.json"),
+    ),
+];
+
+#[test]
+fn tailored_fixtures_replay_the_real_probe_and_evaluator() {
+    let tailored_control = controls()
+        .into_iter()
+        .find(|c| c.spec.id == "windows.experience.tailored")
+        .expect("tailored control");
+    replay(
+        tailored_control,
+        TAILORED,
+        TAILORED_EXPERIENCES.target,
+        TAILORED_EXPERIENCES.target,
+    );
+}
+
+const WEB_SEARCH_FIXTURES: &[(&str, &str)] = &[
+    (
+        "absent-default",
+        include_str!("../../../tests/fixtures/windows.search.web/absent-default.json"),
+    ),
+    (
+        "disabled-compliant",
+        include_str!("../../../tests/fixtures/windows.search.web/disabled-compliant.json"),
+    ),
+    (
+        "enabled-drift",
+        include_str!("../../../tests/fixtures/windows.search.web/enabled-drift.json"),
+    ),
+    (
+        "policy-denied",
+        include_str!("../../../tests/fixtures/windows.search.web/policy-denied.json"),
+    ),
+    (
+        "policy-malformed",
+        include_str!("../../../tests/fixtures/windows.search.web/policy-malformed.json"),
+    ),
+];
+
+#[test]
+fn web_search_fixtures_replay_the_real_probe_and_evaluator() {
+    let search_control = controls()
+        .into_iter()
+        .find(|c| c.spec.id == "windows.search.web")
+        .expect("web search control");
+    replay(
+        search_control,
+        WEB_SEARCH_FIXTURES,
+        WEB_SEARCH.target,
+        WEB_SEARCH.target,
+    );
+}
+
+const DELIVERY_FIXTURES: &[(&str, &str)] = &[
+    (
+        "absent-default",
+        include_str!(
+            "../../../tests/fixtures/windows.delivery-optimization.mode/absent-default.json"
+        ),
+    ),
+    (
+        "disabled-compliant",
+        include_str!(
+            "../../../tests/fixtures/windows.delivery-optimization.mode/disabled-compliant.json"
+        ),
+    ),
+    (
+        "enabled-drift",
+        include_str!(
+            "../../../tests/fixtures/windows.delivery-optimization.mode/enabled-drift.json"
+        ),
+    ),
+    (
+        "policy-denied",
+        include_str!(
+            "../../../tests/fixtures/windows.delivery-optimization.mode/policy-denied.json"
+        ),
+    ),
+    (
+        "policy-malformed",
+        include_str!(
+            "../../../tests/fixtures/windows.delivery-optimization.mode/policy-malformed.json"
+        ),
+    ),
+];
+
+#[test]
+fn delivery_optimization_fixtures_replay_the_real_probe_and_evaluator() {
+    let delivery_control = controls()
+        .into_iter()
+        .find(|c| c.spec.id == "windows.delivery-optimization.mode")
+        .expect("delivery optimization control");
+    replay(
+        delivery_control,
+        DELIVERY_FIXTURES,
+        DELIVERY_OPTIMIZATION_POLICY,
+        DELIVERY_OPTIMIZATION_POLICY,
+    );
+}
+
 #[test]
 fn every_fixture_file_is_replayed() {
     for (control, files) in [
         ("windows.advertising.id", ADVERTISING),
         ("windows.ai.copilot-shell", COPILOT),
         ("windows.ai.recall-snapshot", RECALL),
+        ("windows.delivery-optimization.mode", DELIVERY_FIXTURES),
         ("windows.diagnostics.level", DIAGNOSTICS),
+        ("windows.experience.tailored", TAILORED),
+        ("windows.search.web", WEB_SEARCH_FIXTURES),
         ("windows.security.llmnr", LLMNR),
         ("windows.security.wpad", WPAD_FIXTURES),
         ("windows.storage.thumbnail-cache", THUMBNAIL),

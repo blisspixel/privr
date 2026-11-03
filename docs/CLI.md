@@ -74,6 +74,14 @@ rejected by `apply`, `purge`, and `rollback` without exception.
 the selected policy. It does not mutate, and it does not request elevation
 merely to turn an unreadable result green.
 
+Options:
+- `--profile <baseline|strict|restrictive>`: Built-in target profile (default: `baseline`).
+- `--policy <path>`: Custom policy file in TOML or JSON format extending a profile with per-control overrides and expiring exceptions.
+- `--all`: Include every passing control in text output.
+- `--compare <saved-check.json>`: Compare live evaluation against a historical JSON report to detect regression drift and OS platform updates.
+- `-s, --section <name>`: Evaluate only the specified posture section(s).
+- `-c, --control <id>`: Evaluate only the specified control(s).
+
 Default text output shows drift, review, unknown, and error results grouped by
 section, then counts passing controls. `--all` includes every passing control.
 
@@ -193,6 +201,7 @@ Consent is split rather than blanket:
 
 | Flag | Authorizes |
 |---|---|
+| `--policy <path>` | Load a custom policy file (TOML/JSON) extending a profile with overrides and exceptions. |
 | `-e, --elevate` | Request native in-place elevation (UAC on Windows, sudo on Unix) to apply machine-scope changes without switching terminals. |
 | `-i, --interactive-sections` | Step through planned changes section by section with interactive approval. |
 | `--yes` | Standard-risk changes in noninteractive use. Nothing else. |

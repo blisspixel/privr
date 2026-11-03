@@ -74,7 +74,7 @@ fn a_custom_policy_file_is_refused_rather_than_substituted() {
         .args(["check", "--policy", "nonexistent.toml"])
         .assert()
         .code(2)
-        .stderr(predicate::str::contains("not implemented"));
+        .stderr(predicate::str::contains("failed to read policy file"));
 }
 
 #[test]
@@ -631,4 +631,63 @@ fn check_compare_format_json_emits_structured_comparison() {
     assert!(parsed["regressions"].is_array());
     assert!(parsed["remediations"].is_array());
     assert!(parsed["newly_applicable"].is_array());
+}
+
+#[test]
+fn check_with_valid_custom_toml_policy_evaluates_overrides_and_exceptions() {
+    let toml = r#"
+schema = 1
+extends = "builtin:baseline@0.1"
+
+[controls."windows.advertising.id"]
+mode = "ignore"
+
+[[exceptions]]
+control = "windows.security.wpad"
+accepted = "enabled"
+reason = "Intranet proxy routing required"
+expires = "2029-01-01"
+"#;
+    let temp_file = std::env::temp_dir().join(format!(
+        "privr-custom-policy-test-{}.toml",
+        std::process::id()
+    ));
+    std::fs::write(&temp_file, toml).expect("write custom policy");
+
+    let mut cmd = Command::cargo_bin("privr").expect("binary");
+    let assert = cmd
+        .args([
+            "check",
+            "--policy",
+            temp_file.to_str().expect("str"),
+            "--all",
+        ])
+        .assert();
+
+    let _ = std::fs::remove_file(&temp_file);
+
+    let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf-8");
+    assert!(output.contains("custom (extends baseline)"));
+}
+
+#[test]
+fn rollback_help_shows_section_filter() {
+    let mut command = Command::cargo_bin("privr").expect("binary");
+    command
+        .args(["rollback", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--section"))
+        .stdout(predicate::str::contains("-s"));
+}
+
+#[test]
+fn apply_help_shows_accept_risk_and_force() {
+    let mut command = Command::cargo_bin("privr").expect("binary");
+    command
+        .args(["apply", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--accept-risk"))
+        .stdout(predicate::str::contains("--force"));
 }

@@ -160,6 +160,12 @@ pub enum Command {
         /// Interactively review and approve planned changes section by section.
         #[arg(short = 'i', long = "interactive-sections", alias = "step")]
         interactive_sections: bool,
+        /// Accept risk for specific high-friction or tradeoff controls in noninteractive apply. Repeatable.
+        #[arg(long = "accept-risk", value_name = "CONTROL_ID")]
+        accept_risk: Vec<String>,
+        /// Force apply all eligible controls regardless of friction tier in noninteractive apply.
+        #[arg(long)]
+        force: bool,
         /// Apply only an exact control ID or documented ID prefix. Repeatable.
         #[arg(long = "control")]
         controls: Vec<String>,
@@ -190,6 +196,9 @@ pub enum Command {
     Rollback {
         /// Internal transaction ID shown by `privr history` (defaults to most recent transaction).
         transaction_id: Option<String>,
+        /// Roll back only controls in a specific section. Repeatable.
+        #[arg(short = 's', long = "section")]
+        sections: Vec<String>,
         /// Confirm that settings may be restored.
         #[arg(short = 'y', long)]
         yes: bool,

@@ -1161,6 +1161,9 @@ fn probe_delivery_optimization(ctx: &Context) -> Resolution {
         Evidence::Denied { .. } => {
             Resolution::uncertain(Uncertainty::Denied, ManagementSource::LocalPolicy)
         }
+        Evidence::Malformed { .. } => {
+            Resolution::uncertain(Uncertainty::Malformed, ManagementSource::LocalPolicy)
+        }
         _ => Resolution::uncertain(Uncertainty::Undetermined, ManagementSource::LocalPolicy),
     }
 }
@@ -1203,6 +1206,9 @@ fn probe_crash_dump_scope(ctx: &Context) -> Resolution {
         Evidence::Absent { .. } => Resolution::determined(enabled(), ManagementSource::Default),
         Evidence::Denied { .. } => {
             Resolution::uncertain(Uncertainty::Denied, ManagementSource::LocalPolicy)
+        }
+        Evidence::Malformed { .. } => {
+            Resolution::uncertain(Uncertainty::Malformed, ManagementSource::LocalPolicy)
         }
         _ => Resolution::uncertain(Uncertainty::Undetermined, ManagementSource::LocalPolicy),
     }
@@ -1270,6 +1276,9 @@ fn probe_ncsi_probing(ctx: &Context) -> Resolution {
         Evidence::Absent { .. } => Resolution::determined(enabled(), ManagementSource::Default),
         Evidence::Denied { .. } => {
             Resolution::uncertain(Uncertainty::Denied, ManagementSource::LocalPolicy)
+        }
+        Evidence::Malformed { .. } => {
+            Resolution::uncertain(Uncertainty::Malformed, ManagementSource::LocalPolicy)
         }
         _ => Resolution::uncertain(Uncertainty::Undetermined, ManagementSource::LocalPolicy),
     }

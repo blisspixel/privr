@@ -52,7 +52,8 @@ designed to be driven by an agent harness as readily as by a person.
   confidence) and the compiled source table. It does not keep raw evidence.
   `explain` is a fresh read and says so. Plan, apply, rollback, recommend,
   simulate, and journal records stay schema 1.
-- **File-based probe replay covers Windows controls** (advertising ID, Copilot shell integration, Recall snapshots, diagnostic data, LLMNR name resolution, WPAD auto-discovery, and thumbnail caching) across 81 synthetic observation states. Synthetic observations exercise the compiled probes and evaluator; native captures and full per-control coverage remain release blockers.
+- **File-based probe replay covers Windows controls** (advertising ID, Copilot shell integration, Recall snapshots, diagnostic data, LLMNR name resolution, WPAD auto-discovery, thumbnail caching, tailored experiences, web search, and delivery optimization) across 96 synthetic observation states. Synthetic observations exercise the compiled probes and evaluator; native captures and full per-control coverage remain release blockers.
+- **Custom policy engine is implemented**: `check`, `plan`, and `apply` accept `--policy <FILE>` supporting schema 1 TOML and JSON formats. Policies extend built-in profiles (`baseline`, `strict`, `restrictive`), allow per-control mode and desired-state overrides, and support ISO-dated exceptions (`[[exceptions]]`). Active exceptions are distinguished from absent risk in posture reports and safely excluded from automated remediation until expiry.
 - **Agent integration (`privr mcp`) is implemented**, providing a stdio Model Context Protocol (MCP) server exposing `privr_check` (with post-update regression comparison), `privr_plan`, `privr_apply`, `privr_recommend`, `privr_simulate`, `privr_explain`, `privr_clean`, `privr_history`, and `privr_doctor` with Agent Plugins v1.0.0 packaging.
 
 The full state, including known defects, is in
@@ -79,13 +80,15 @@ checker that interprets only that configured value could report telemetry as
 disabled. It is not. The `pass` above means the effective required-only level
 matches the selected policy; it does not mean diagnostic transmission is off.
 
-What is designed but not built: custom policy files, complete per-control fixtures,
-and signed releases. Interactive section approval is implemented (`privr apply -i`,
+What is designed but not built: complete per-control fixtures and signed releases.
+Interactive section approval is implemented (`privr apply -i`,
 `--interactive-sections`, or `[s]` in the interactive prompt), treating an intentional stop
-after approving sections as verified success. PowerShell session-only history
-is implemented as a guided review control (`windows.shell.history-persistence`) and
-architectural walkthrough (`privr explain shell`), with [its scope and tradeoffs](docs/PRIVACY_RESIDUE.md#shell-command-histories)
-documented.
+after approving sections as verified success. Rollback supports section-granular
+reversion (`privr rollback --section <section>`). Noninteractive batch runs require
+explicit risk acceptance (`--accept-risk <id>` or `--force`) for high-friction controls.
+PowerShell session-only history is implemented as a guided review control
+(`windows.shell.history-persistence`) and architectural walkthrough (`privr explain shell`),
+with [its scope and tradeoffs](docs/PRIVACY_RESIDUE.md#shell-command-histories) documented.
 Cache and disposable-temp cleanup is implemented (`privr clean`, alias `privr purge`),
 thorough by default, with `--polite` retaining disruptive caches. Both modes
 protect OS operation, recovery, and active work; login state, history, and

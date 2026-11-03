@@ -297,19 +297,20 @@ fn run_with_check_context(
             all,
             compare,
         } => {
-            // A custom policy file is not implemented, and silently evaluating
-            // the built-in profile instead would answer a question the operator
-            // did not ask.
-            if policy.is_some() {
-                let _ = writeln!(
-                    err,
-                    "privr: custom policy files are not implemented yet; \
-                     omit --policy to use a built-in profile or workload persona"
-                );
-                return 2;
-            }
+            let loaded_policy = match policy {
+                Some(ref p) => match crate::policy::CustomPolicy::from_file(p) {
+                    Ok(pol) => Some(pol),
+                    Err(e) => {
+                        let _ = writeln!(err, "{e}");
+                        return 2;
+                    }
+                },
+                None => None,
+            };
 
-            let profile_str = if profile.is_none() && workload.is_none() {
+            let profile_str = if let Some(pol) = &loaded_policy {
+                Some(pol.extends.as_str())
+            } else if profile.is_none() && workload.is_none() {
                 Some(Profile::Baseline.as_str())
             } else {
                 profile.map(|p| p.as_str())
@@ -322,7 +323,25 @@ fn run_with_check_context(
                 let msg =
                     format!("Scanning {total_controls} controls across 5 posture dimensions...");
                 let _progress = ui.spinner_for(&msg, format);
-                if let Some(context) = check_context {
+                if let Some(custom_policy) = &loaded_policy {
+                    if let Some(context) = check_context {
+                        crate::report::Report::build_with_policy(
+                            context,
+                            custom_policy,
+                            &controls,
+                            &sections,
+                        )
+                    } else {
+                        let host = crate::platform::discover();
+                        let context = crate::catalog::Context::live(&host);
+                        crate::report::Report::build_with_policy(
+                            &context,
+                            custom_policy,
+                            &controls,
+                            &sections,
+                        )
+                    }
+                } else if let Some(context) = check_context {
                     crate::report::Report::build_with_context(
                         context,
                         profile_str,
@@ -439,6 +458,8 @@ fn run_with_check_context(
                                                 dry_run: false,
                                                 yes: false,
                                                 interactive_sections: false,
+                                                accept_risk: Vec::new(),
+                                                force: false,
                                                 controls,
                                                 sections,
                                                 elevate: false,
@@ -520,6 +541,8 @@ fn run_with_check_context(
                                                             dry_run: false,
                                                             yes: true,
                                                             interactive_sections: false,
+                                                            accept_risk: Vec::new(),
+                                                            force: false,
                                                             controls,
                                                             sections,
                                                             elevate: false,
@@ -627,14 +650,16 @@ fn run_with_check_context(
             controls,
             sections,
         } => {
-            if policy.is_some() {
-                let _ = writeln!(
-                    err,
-                    "privr: custom policy files are not implemented yet; \
-                     omit --policy to use a built-in profile or workload persona"
-                );
-                return 2;
-            }
+            let loaded_policy = match policy {
+                Some(ref p) => match crate::policy::CustomPolicy::from_file(p) {
+                    Ok(pol) => Some(pol),
+                    Err(e) => {
+                        let _ = writeln!(err, "{e}");
+                        return 2;
+                    }
+                },
+                None => None,
+            };
             let mut progress = ui.spinner_for(
                 "Evaluating posture and planning eligible remediations...",
                 format,
@@ -642,15 +667,20 @@ fn run_with_check_context(
             let host = crate::platform::discover();
             let context = crate::catalog::Context::live(&host);
             let all_controls = crate::catalog::all();
-            let (workload, max_friction) = if profile.is_none() && workload.is_none() {
-                (
-                    Some(WorkloadPersona::General),
-                    Some(FrictionTier::Tier1Cosmetic),
-                )
+            let (workload, max_friction) =
+                if profile.is_none() && workload.is_none() && loaded_policy.is_none() {
+                    (
+                        Some(WorkloadPersona::General),
+                        Some(FrictionTier::Tier1Cosmetic),
+                    )
+                } else {
+                    (workload, max_friction)
+                };
+            let profile_val = if let Some(pol) = &loaded_policy {
+                pol.extends
             } else {
-                (workload, max_friction)
+                profile.unwrap_or_default()
             };
-            let profile_val = profile.unwrap_or_default();
 
             let recommended_ids: Option<std::collections::BTreeSet<String>> = workload.map(|w| {
                 crate::engine::recommend::generate_recommendations(
@@ -691,8 +721,21 @@ fn run_with_check_context(
                 {
                     continue;
                 }
+                let override_opt = loaded_policy
+                    .as_ref()
+                    .and_then(|pol| pol.controls.get(&c.spec.id));
+                let mut spec_clone = c.spec.clone();
+                if let Some(ov) = override_opt
+                    && let Some(desired_val) = &ov.desired
+                {
+                    spec_clone.desired = crate::engine::evaluate::SemanticState::new(desired_val);
+                }
                 let resolution = c.observe(&context);
-                let mode = if !controls.is_empty()
+                let mode = if let Some(ov) = override_opt
+                    && let Some(m) = ov.mode
+                {
+                    m
+                } else if !controls.is_empty()
                     || recommended_ids.is_some()
                     || c.spec.min_profile <= profile_val
                 {
@@ -700,14 +743,32 @@ fn run_with_check_context(
                 } else {
                     crate::engine::evaluate::Mode::Ignore
                 };
+                let today = crate::policy::today_iso();
+                let exception = if let Some(pol) = &loaded_policy {
+                    if let Some(ex) = pol.exceptions.iter().find(|e| e.control == c.spec.id) {
+                        if resolution.state.as_ref().map(|s| s.0.as_str()) == Some(&ex.accepted) {
+                            ex.status(&today)
+                        } else {
+                            crate::model::outcome::Exception::None
+                        }
+                    } else {
+                        crate::model::outcome::Exception::None
+                    }
+                } else {
+                    crate::model::outcome::Exception::None
+                };
                 let eval = crate::engine::evaluate::evaluate(
-                    &c.spec,
+                    &spec_clone,
                     mode,
                     &resolution,
                     &host,
-                    crate::model::outcome::Exception::None,
+                    exception,
                 );
                 if eval.outcome == crate::model::outcome::Outcome::Drift {
+                    // Active policy exception suppresses planning remediation
+                    if eval.exception == crate::model::outcome::Exception::Active {
+                        continue;
+                    }
                     if eval.remediation == crate::model::outcome::Remediation::Automatic
                         && c.apply.is_some()
                     {
@@ -738,7 +799,9 @@ fn run_with_check_context(
             }
             progress.finish();
 
-            let profile_name = if let Some(w) = workload {
+            let profile_name = if let Some(pol) = &loaded_policy {
+                format!("custom:extends-{}", pol.extends)
+            } else if let Some(w) = workload {
                 format!("workload:{}", w.as_str())
             } else {
                 profile_val.as_str().to_owned()
@@ -889,6 +952,8 @@ fn run_with_check_context(
             dry_run,
             yes,
             interactive_sections,
+            accept_risk,
+            force,
             controls,
             sections,
             elevate,
@@ -913,23 +978,26 @@ fn run_with_check_context(
                     journal_dir,
                 );
             }
-            if policy.is_some() {
-                let _ = writeln!(
-                    err,
-                    "privr: custom policy files are not implemented yet; \
-                     omit --policy to use a built-in profile or workload persona"
-                );
-                return 2;
-            }
-
-            let (workload, max_friction) = if profile.is_none() && workload.is_none() {
-                (
-                    Some(WorkloadPersona::General),
-                    Some(FrictionTier::Tier1Cosmetic),
-                )
-            } else {
-                (workload, max_friction)
+            let loaded_policy = match policy {
+                Some(ref p) => match crate::policy::CustomPolicy::from_file(p) {
+                    Ok(pol) => Some(pol),
+                    Err(e) => {
+                        let _ = writeln!(err, "{e}");
+                        return 2;
+                    }
+                },
+                None => None,
             };
+
+            let (workload, max_friction) =
+                if profile.is_none() && workload.is_none() && loaded_policy.is_none() {
+                    (
+                        Some(WorkloadPersona::General),
+                        Some(FrictionTier::Tier1Cosmetic),
+                    )
+                } else {
+                    (workload, max_friction)
+                };
 
             let mut eval_progress =
                 ui.spinner_for("Evaluating controls and posture state...", format);
@@ -937,7 +1005,11 @@ fn run_with_check_context(
             let is_elevated = host.elevated == crate::model::host::Fact::Known(true);
             let context = crate::catalog::Context::live(&host);
             let all_controls = crate::catalog::all();
-            let profile_val = profile.unwrap_or_default();
+            let profile_val = if let Some(pol) = &loaded_policy {
+                pol.extends
+            } else {
+                profile.unwrap_or_default()
+            };
             let mut approved_sections: Option<std::collections::BTreeSet<String>> = None;
 
             let recommended_ids: Option<std::collections::BTreeSet<String>> = workload.map(|w| {
@@ -992,8 +1064,22 @@ fn run_with_check_context(
                     {
                         continue;
                     }
+                    let override_opt = loaded_policy
+                        .as_ref()
+                        .and_then(|pol| pol.controls.get(&c.spec.id));
+                    let mut spec_clone = c.spec.clone();
+                    if let Some(ov) = override_opt
+                        && let Some(desired_val) = &ov.desired
+                    {
+                        spec_clone.desired =
+                            crate::engine::evaluate::SemanticState::new(desired_val);
+                    }
                     let resolution = c.observe(&context);
-                    let mode = if !controls.is_empty()
+                    let mode = if let Some(ov) = override_opt
+                        && let Some(m) = ov.mode
+                    {
+                        m
+                    } else if !controls.is_empty()
                         || recommended_ids.is_some()
                         || c.spec.min_profile <= profile_val
                     {
@@ -1001,14 +1087,32 @@ fn run_with_check_context(
                     } else {
                         crate::engine::evaluate::Mode::Ignore
                     };
+                    let today = crate::policy::today_iso();
+                    let exception = if let Some(pol) = &loaded_policy {
+                        if let Some(ex) = pol.exceptions.iter().find(|e| e.control == c.spec.id) {
+                            if resolution.state.as_ref().map(|s| s.0.as_str()) == Some(&ex.accepted)
+                            {
+                                ex.status(&today)
+                            } else {
+                                crate::model::outcome::Exception::None
+                            }
+                        } else {
+                            crate::model::outcome::Exception::None
+                        }
+                    } else {
+                        crate::model::outcome::Exception::None
+                    };
                     let eval = crate::engine::evaluate::evaluate(
-                        &c.spec,
+                        &spec_clone,
                         mode,
                         &resolution,
                         &host,
-                        crate::model::outcome::Exception::None,
+                        exception,
                     );
                     if eval.outcome == crate::model::outcome::Outcome::Drift {
+                        if eval.exception == crate::model::outcome::Exception::Active {
+                            continue;
+                        }
                         if eval.remediation == crate::model::outcome::Remediation::Automatic
                             && c.apply.is_some()
                         {
@@ -1025,7 +1129,7 @@ fn run_with_check_context(
                                 title: c.title.to_owned(),
                                 section: c.spec.section.clone(),
                                 current: current_str,
-                                desired: c.spec.desired.0.clone(),
+                                desired: spec_clone.desired.0.clone(),
                                 requires_elevation: c.spec.requires_elevation,
                                 friction: c.spec.friction,
                                 details,
@@ -1404,8 +1508,21 @@ fn run_with_check_context(
                 if !c.spec.requires_elevation || c.apply.is_none() {
                     continue;
                 }
+                let override_opt = loaded_policy
+                    .as_ref()
+                    .and_then(|pol| pol.controls.get(&c.spec.id));
+                let mut spec_clone = c.spec.clone();
+                if let Some(ov) = override_opt
+                    && let Some(desired_val) = &ov.desired
+                {
+                    spec_clone.desired = crate::engine::evaluate::SemanticState::new(desired_val);
+                }
                 let resolution = c.observe(&context);
-                let mode = if !controls.is_empty()
+                let mode = if let Some(ov) = override_opt
+                    && let Some(m) = ov.mode
+                {
+                    m
+                } else if !controls.is_empty()
                     || recommended_ids.is_some()
                     || c.spec.min_profile <= profile_val
                 {
@@ -1413,14 +1530,29 @@ fn run_with_check_context(
                 } else {
                     crate::engine::evaluate::Mode::Ignore
                 };
+                let today = crate::policy::today_iso();
+                let exception = if let Some(pol) = &loaded_policy {
+                    if let Some(ex) = pol.exceptions.iter().find(|e| e.control == c.spec.id) {
+                        if resolution.state.as_ref().map(|s| s.0.as_str()) == Some(&ex.accepted) {
+                            ex.status(&today)
+                        } else {
+                            crate::model::outcome::Exception::None
+                        }
+                    } else {
+                        crate::model::outcome::Exception::None
+                    }
+                } else {
+                    crate::model::outcome::Exception::None
+                };
                 let eval = crate::engine::evaluate::evaluate(
-                    &c.spec,
+                    &spec_clone,
                     mode,
                     &resolution,
                     &host,
-                    crate::model::outcome::Exception::None,
+                    exception,
                 );
                 if eval.outcome == crate::model::outcome::Outcome::Drift
+                    && eval.exception != crate::model::outcome::Exception::Active
                     && eval.remediation == crate::model::outcome::Remediation::Automatic
                 {
                     requires_elevation_drift += 1;
@@ -1499,6 +1631,19 @@ fn run_with_check_context(
                         child_args.push(s_arg);
                     }
                 }
+                let policy_str_val;
+                if let Some(p) = &policy {
+                    child_args.push("--policy");
+                    policy_str_val = p.to_string_lossy().to_string();
+                    child_args.push(&policy_str_val);
+                }
+                for r in &accept_risk {
+                    child_args.push("--accept-risk");
+                    child_args.push(r);
+                }
+                if force {
+                    child_args.push("--force");
+                }
 
                 let mut elev_progress = ui.spinner_for(
                     "Requesting administrative elevation (UAC prompt)...",
@@ -1552,7 +1697,9 @@ fn run_with_check_context(
                 .unwrap_or_default();
             let timestamp = format!("{}.{:03}", now.as_secs(), now.subsec_millis());
             let tx_id = format!("tx-{}-{}", now.as_secs(), now.subsec_millis());
-            let profile_name = if let Some(w) = workload {
+            let profile_name = if let Some(pol) = &loaded_policy {
+                format!("custom:extends-{}", pol.extends)
+            } else if let Some(w) = workload {
                 format!("workload:{}", w.as_str())
             } else {
                 profile_val.as_str().to_owned()
@@ -1606,8 +1753,21 @@ fn run_with_check_context(
                 {
                     continue;
                 }
+                let override_opt = loaded_policy
+                    .as_ref()
+                    .and_then(|pol| pol.controls.get(&c.spec.id));
+                let mut spec_clone = c.spec.clone();
+                if let Some(ov) = override_opt
+                    && let Some(desired_val) = &ov.desired
+                {
+                    spec_clone.desired = crate::engine::evaluate::SemanticState::new(desired_val);
+                }
                 let resolution = c.observe(&context);
-                let mode = if !controls.is_empty()
+                let mode = if let Some(ov) = override_opt
+                    && let Some(m) = ov.mode
+                {
+                    m
+                } else if !controls.is_empty()
                     || recommended_ids.is_some()
                     || c.spec.min_profile <= profile_val
                 {
@@ -1615,14 +1775,45 @@ fn run_with_check_context(
                 } else {
                     crate::engine::evaluate::Mode::Ignore
                 };
+                let today = crate::policy::today_iso();
+                let exception = if let Some(pol) = &loaded_policy {
+                    if let Some(ex) = pol.exceptions.iter().find(|e| e.control == c.spec.id) {
+                        if resolution.state.as_ref().map(|s| s.0.as_str()) == Some(&ex.accepted) {
+                            ex.status(&today)
+                        } else {
+                            crate::model::outcome::Exception::None
+                        }
+                    } else {
+                        crate::model::outcome::Exception::None
+                    }
+                } else {
+                    crate::model::outcome::Exception::None
+                };
                 let eval = crate::engine::evaluate::evaluate(
-                    &c.spec,
+                    &spec_clone,
                     mode,
                     &resolution,
                     &host,
-                    crate::model::outcome::Exception::None,
+                    exception,
                 );
                 if eval.outcome == crate::model::outcome::Outcome::Drift {
+                    if eval.exception == crate::model::outcome::Exception::Active {
+                        continue;
+                    }
+                    let is_risk_accepted =
+                        force || accept_risk.iter().any(|r| r == "all" || r == &c.spec.id);
+                    if !is_interactive
+                        && yes
+                        && c.spec.friction >= FrictionTier::Tier2WorkflowAltering
+                        && !is_risk_accepted
+                    {
+                        let _ = writeln!(
+                            err,
+                            "privr: deferring high-friction control '{}': pass --accept-risk {} or --force to apply",
+                            c.spec.id, c.spec.id
+                        );
+                        continue;
+                    }
                     if eval.remediation == crate::model::outcome::Remediation::Automatic
                         && c.apply.is_some()
                     {
@@ -1770,6 +1961,7 @@ fn run_with_check_context(
         }
         Command::Rollback {
             transaction_id,
+            sections,
             yes,
             elevate,
             elevated_output: _,
@@ -1868,7 +2060,47 @@ fn run_with_check_context(
             let context = crate::catalog::Context::live(&host);
             let all_controls = crate::catalog::all();
 
-            let has_machine_scope = journal.operations.iter().any(|op| {
+            let matching_ops: Vec<&crate::journal::OperationJournal> = if sections.is_empty() {
+                journal.operations.iter().collect()
+            } else {
+                journal
+                    .operations
+                    .iter()
+                    .filter(|op| {
+                        all_controls
+                            .iter()
+                            .find(|c| c.spec.id == op.control_id)
+                            .map(|c| {
+                                sections.iter().any(|sec| {
+                                    c.spec.section.eq_ignore_ascii_case(sec)
+                                        || c.spec
+                                            .section
+                                            .to_ascii_lowercase()
+                                            .starts_with(&sec.to_ascii_lowercase())
+                                })
+                            })
+                            .unwrap_or(false)
+                    })
+                    .collect()
+            };
+
+            if matching_ops.is_empty() {
+                if !sections.is_empty() {
+                    let _ = writeln!(
+                        err,
+                        "privr: no operations in transaction '{transaction_id}' match section(s) '{}'",
+                        sections.join(", ")
+                    );
+                } else {
+                    let _ = writeln!(
+                        err,
+                        "privr: transaction '{transaction_id}' contains no operations to roll back."
+                    );
+                }
+                return 2;
+            }
+
+            let has_machine_scope = matching_ops.iter().any(|op| {
                 all_controls
                     .iter()
                     .find(|c| c.spec.id == op.control_id)
@@ -1901,7 +2133,7 @@ fn run_with_check_context(
                         ColorWhen::Always => "always",
                         ColorWhen::Never => "never",
                     };
-                    let child_args = [
+                    let mut child_args = vec![
                         "rollback",
                         &transaction_id,
                         "--yes",
@@ -1910,6 +2142,10 @@ fn run_with_check_context(
                         "--color",
                         color_str,
                     ];
+                    for sec in &sections {
+                        child_args.push("--section");
+                        child_args.push(sec);
+                    }
 
                     let mut elev_progress = ui.spinner_for(
                         "Requesting administrative elevation for rollback (UAC prompt)...",
@@ -1967,7 +2203,7 @@ fn run_with_check_context(
             let mut restore_progress =
                 ui.spinner_for("Restoring previous privacy settings...", format);
 
-            for op in journal.operations.iter().rev() {
+            for op in matching_ops.iter().rev() {
                 if let Some(c) = all_controls
                     .iter()
                     .find(|item| item.spec.id == op.control_id)
@@ -1998,11 +2234,21 @@ fn run_with_check_context(
 
             match format {
                 OutputFormat::Text => {
-                    let _ = writeln!(
-                        out,
-                        "Restored {} changes from transaction {}.",
-                        rep.restored_changes, rep.transaction_id
-                    );
+                    if sections.is_empty() {
+                        let _ = writeln!(
+                            out,
+                            "Restored {} changes from transaction {}.",
+                            rep.restored_changes, rep.transaction_id
+                        );
+                    } else {
+                        let _ = writeln!(
+                            out,
+                            "Restored {} changes in section(s) [{}] from transaction {}.",
+                            rep.restored_changes,
+                            sections.join(", "),
+                            rep.transaction_id
+                        );
+                    }
                 }
                 OutputFormat::Json => {
                     if serde_json::to_writer_pretty(&mut *out, &rep).is_ok() {
@@ -3039,7 +3285,7 @@ mod tests {
         }));
         assert_eq!(code, 2);
         assert!(stdout.is_empty());
-        assert!(stderr.contains("not implemented"));
+        assert!(stderr.contains("failed to read policy file"));
     }
 
     #[test]
@@ -3052,6 +3298,8 @@ mod tests {
             dry_run: false,
             yes: false,
             interactive_sections: false,
+            accept_risk: Vec::new(),
+            force: false,
             controls: Vec::new(),
             sections: Vec::new(),
             elevate: false,
@@ -3088,6 +3336,8 @@ mod tests {
             dry_run: true,
             yes: false,
             interactive_sections: false,
+            accept_risk: Vec::new(),
+            force: false,
             controls: Vec::new(),
             sections: Vec::new(),
             elevate: false,
@@ -3196,6 +3446,8 @@ mod tests {
             dry_run: true,
             yes: true,
             interactive_sections: false,
+            accept_risk: Vec::new(),
+            force: false,
             controls: Vec::new(),
             sections: Vec::new(),
             elevate: false,
@@ -3209,6 +3461,7 @@ mod tests {
     fn rollback_requires_confirmation() {
         let (code, stdout, stderr) = run_for_test(Some(Command::Rollback {
             transaction_id: Some("tx-123".to_owned()),
+            sections: Vec::new(),
             yes: false,
             elevate: false,
             elevated_output: None,
@@ -3223,6 +3476,7 @@ mod tests {
     fn rollback_reports_missing_transaction_honestly() {
         let (code, stdout, stderr) = run_for_test(Some(Command::Rollback {
             transaction_id: Some("tx-nonexistent-999".to_owned()),
+            sections: Vec::new(),
             yes: true,
             elevate: false,
             elevated_output: None,
@@ -3236,6 +3490,7 @@ mod tests {
     fn rollback_rejects_invalid_transaction_id() {
         let (code, stdout, stderr) = run_for_test(Some(Command::Rollback {
             transaction_id: Some("../escaped".to_owned()),
+            sections: Vec::new(),
             yes: true,
             elevate: false,
             elevated_output: None,
@@ -3514,6 +3769,7 @@ mod tests {
     fn rollback_without_transaction_id_reports_empty_isolated_history() {
         let (code, stdout, stderr) = run_for_test(Some(Command::Rollback {
             transaction_id: None,
+            sections: Vec::new(),
             yes: true,
             elevate: false,
             elevated_output: None,
@@ -3559,6 +3815,7 @@ mod tests {
                 format: OutputFormat::Text,
                 command: Some(Command::Rollback {
                     transaction_id: Some("clean-123-456".to_owned()),
+                    sections: Vec::new(),
                     yes: true,
                     elevate: false,
                     elevated_output: None,
@@ -3615,6 +3872,7 @@ mod tests {
                 format: OutputFormat::Text,
                 command: Some(Command::Rollback {
                     transaction_id: None,
+                    sections: Vec::new(),
                     yes: true,
                     elevate: false,
                     elevated_output: None,
@@ -3658,6 +3916,8 @@ mod tests {
             dry_run: true,
             yes: false,
             interactive_sections: false,
+            accept_risk: Vec::new(),
+            force: false,
             controls: Vec::new(),
             sections: Vec::new(),
             elevate: false,
@@ -3677,6 +3937,8 @@ mod tests {
             dry_run: true,
             yes: true,
             interactive_sections: false,
+            accept_risk: Vec::new(),
+            force: false,
             controls: Vec::new(),
             sections: Vec::new(),
             elevate: false,
@@ -3752,6 +4014,7 @@ mod tests {
                     format: OutputFormat::Text,
                     command: Some(Command::Rollback {
                         transaction_id: Some("tx-requested".to_owned()),
+                        sections: Vec::new(),
                         yes: true,
                         elevate: false,
                         elevated_output: None,

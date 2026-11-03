@@ -282,6 +282,115 @@ impl Report {
         }
     }
 
+    pub fn build_with_policy(
+        context: &catalog::Context,
+        policy: &crate::policy::CustomPolicy,
+        control_filter: &[String],
+        section_filter: &[String],
+    ) -> Self {
+        let host = context.host;
+        let selected_profile = policy.extends;
+        let all_controls = catalog::all();
+        let today = crate::policy::today_iso();
+
+        let mut sources = Vec::new();
+        let mut results: Vec<ControlResult> = all_controls
+            .into_iter()
+            .filter(|c| {
+                let matches_control = control_filter.is_empty()
+                    || control_filter
+                        .iter()
+                        .any(|sel| c.spec.id == *sel || c.spec.id.starts_with(sel));
+                let matches_section = section_filter.is_empty()
+                    || section_filter.iter().any(|sec| {
+                        c.spec.section.eq_ignore_ascii_case(sec)
+                            || c.spec
+                                .section
+                                .to_ascii_lowercase()
+                                .starts_with(&sec.to_ascii_lowercase())
+                    });
+                matches_control && matches_section
+            })
+            .map(|mut control| {
+                let override_opt = policy.controls.get(&control.spec.id);
+                let mode = if let Some(ov) = override_opt
+                    && let Some(m) = ov.mode
+                {
+                    m
+                } else if !control_filter.is_empty() || control.spec.min_profile <= selected_profile
+                {
+                    Mode::Enforce
+                } else {
+                    Mode::Ignore
+                };
+
+                if let Some(ov) = override_opt
+                    && let Some(desired_val) = &ov.desired
+                {
+                    control.spec.desired = crate::engine::evaluate::SemanticState::new(desired_val);
+                }
+
+                let resolution = if mode == Mode::Ignore
+                    || control.spec.applicability.resolve(host).applies != Applies::Yes
+                {
+                    Resolution::skipped()
+                } else {
+                    control.observe(context)
+                };
+
+                let exception = if let Some(ex) = policy
+                    .exceptions
+                    .iter()
+                    .find(|e| e.control == control.spec.id)
+                {
+                    if resolution.state.as_ref().map(|s| s.0.as_str()) == Some(&ex.accepted) {
+                        ex.status(&today)
+                    } else {
+                        Exception::None
+                    }
+                } else {
+                    Exception::None
+                };
+
+                let mut result = evaluate(&control.spec, mode, &resolution, host, exception);
+                result.source_refs = source_refs(&mut sources, control.sources);
+                result
+            })
+            .collect();
+
+        results.sort_by(|a, b| (&a.section, &a.id).cmp(&(&b.section, &b.id)));
+
+        let summary = Summary::of(&results);
+        let mut posture = PostureVector::new();
+        for r in &results {
+            posture.record(r.dimension, r.outcome);
+        }
+
+        let profile_str = format!("custom (extends {})", selected_profile.as_str());
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default();
+        let timestamp = format!("{}.{:03}", now.as_secs(), now.subsec_millis());
+
+        Self {
+            schema: SCHEMA,
+            complete: summary.is_complete(),
+            truncated: false,
+            profile: profile_str,
+            platform: host.platform.as_str().to_owned(),
+            timestamp,
+            tool_version: env!("CARGO_PKG_VERSION").to_owned(),
+            os_version: host.version.known().map(|v| v.display.clone()),
+            edition: host.edition.known().cloned(),
+            summary,
+            posture,
+            carried: catalog::all().len(),
+            sources,
+            results,
+        }
+    }
+
     /// The process exit code this report implies.
     pub fn exit_code(&self) -> i32 {
         // Incomplete wins over drift: something is hidden, and reporting a
@@ -352,6 +461,14 @@ impl Report {
             if count > 0 {
                 counts.push(format!("{count} {label}"));
             }
+        }
+        if self.summary.active_exceptions > 0 {
+            let noun = if self.summary.active_exceptions == 1 {
+                "active exception"
+            } else {
+                "active exceptions"
+            };
+            counts.push(format!("{} {noun}", self.summary.active_exceptions));
         }
         let breakdown = format!("({})", counts.join(", "));
 
@@ -716,6 +833,17 @@ fn write_result_row(
         let wrapped = ui.wrap(note, 15);
         out.push_str(&ui.paint_lines(note_style, &wrapped));
         out.push('\n');
+    }
+    if result.exception == Exception::Active {
+        out.push_str(&format!(
+            "               {}\n",
+            ui.paint(style::INFO, "accepted policy exception active")
+        ));
+    } else if result.exception == Exception::Expired {
+        out.push_str(&format!(
+            "               {}\n",
+            ui.paint(style::CAVEAT, "policy exception expired")
+        ));
     }
     if let Some(reason) = result.observation_reason {
         let reason_line = ui.wrap(&format!("reason: {}", uncertainty_word(reason)), 15);
@@ -2229,6 +2357,7 @@ mod tests {
             not_checked: 6,
             not_applicable: 7,
             not_selected: 8,
+            ..Summary::default()
         };
         report.complete = false;
         let text = report.to_text(&Ui::plain(), false);

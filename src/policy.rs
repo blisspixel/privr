@@ -205,6 +205,39 @@ impl std::str::FromStr for CustomPolicy {
     }
 }
 
+fn parse_toml_value(raw: &str) -> Result<String, String> {
+    let trimmed = raw.trim();
+    if let Some(rest) = trimmed.strip_prefix('"') {
+        if let Some(end_idx) = rest.find('"') {
+            let val = &rest[..end_idx];
+            let after = rest[end_idx + 1..].trim();
+            if !after.is_empty() && !after.starts_with('#') {
+                return Err(format!("unexpected characters after string: '{after}'"));
+            }
+            Ok(val.to_string())
+        } else {
+            Err("unterminated double-quoted string".to_string())
+        }
+    } else if let Some(rest) = trimmed.strip_prefix('\'') {
+        if let Some(end_idx) = rest.find('\'') {
+            let val = &rest[..end_idx];
+            let after = rest[end_idx + 1..].trim();
+            if !after.is_empty() && !after.starts_with('#') {
+                return Err(format!("unexpected characters after string: '{after}'"));
+            }
+            Ok(val.to_string())
+        } else {
+            Err("unterminated single-quoted string".to_string())
+        }
+    } else {
+        let clean = match trimmed.split_once('#') {
+            Some((before, _comment)) => before.trim(),
+            None => trimmed,
+        };
+        Ok(clean.to_string())
+    }
+}
+
 impl CustomPolicy {
     fn from_json_str(content: &str) -> Result<Self, String> {
         let raw: PolicyJson = serde_json::from_str(content)
@@ -298,7 +331,25 @@ impl CustomPolicy {
                 continue;
             }
 
-            if line == "[[exceptions]]" {
+            let (line_clean, is_header) = if line.starts_with('[') {
+                if let Some(end_bracket) = line.rfind(']') {
+                    let header_content = &line[..=end_bracket];
+                    let after = line[end_bracket + 1..].trim();
+                    if !after.is_empty() && !after.starts_with('#') {
+                        return Err(format!(
+                            "privr: line {}: unexpected characters after header: '{after}'",
+                            line_no + 1
+                        ));
+                    }
+                    (header_content, true)
+                } else {
+                    (line, false)
+                }
+            } else {
+                (line, false)
+            };
+
+            if is_header && line_clean == "[[exceptions]]" {
                 match current_section {
                     Section::Control(ref id) => {
                         flush_control(id, &current_override, &mut controls);
@@ -318,7 +369,7 @@ impl CustomPolicy {
                 continue;
             }
 
-            if line.starts_with('[') && line.ends_with(']') {
+            if is_header && line_clean.starts_with('[') && line_clean.ends_with(']') {
                 match current_section {
                     Section::Control(ref id) => {
                         flush_control(id, &current_override, &mut controls);
@@ -329,7 +380,7 @@ impl CustomPolicy {
                     Section::TopLevel => {}
                 }
 
-                let inner = &line[1..line.len() - 1].trim();
+                let inner = line_clean[1..line_clean.len() - 1].trim();
                 if let Some(rest) = inner.strip_prefix("controls.") {
                     let id = rest.trim().trim_matches('"').to_string();
                     if id.is_empty() {
@@ -360,7 +411,8 @@ impl CustomPolicy {
                 ));
             };
             let key = key_raw.trim();
-            let val = val_raw.trim().trim_matches('"').trim_matches('\'');
+            let val = parse_toml_value(val_raw)
+                .map_err(|e| format!("privr: line {}: {e}", line_no + 1))?;
 
             match current_section {
                 Section::TopLevel => {
@@ -373,7 +425,7 @@ impl CustomPolicy {
                         })?;
                         schema = Some(parsed);
                     } else if key == "extends" {
-                        extends = Some(val.to_string());
+                        extends = Some(val);
                     } else {
                         return Err(format!(
                             "privr: line {}: unknown top-level field '{key}'",
@@ -383,9 +435,9 @@ impl CustomPolicy {
                 }
                 Section::Control(_) => {
                     if key == "mode" {
-                        current_override.mode = Some(parse_mode(val)?);
+                        current_override.mode = Some(parse_mode(&val)?);
                     } else if key == "desired" {
-                        current_override.desired = Some(val.to_string());
+                        current_override.desired = Some(val);
                     } else {
                         return Err(format!(
                             "privr: line {}: unknown control field '{key}'",
@@ -395,13 +447,13 @@ impl CustomPolicy {
                 }
                 Section::Exception => {
                     if key == "control" {
-                        current_ex.control = val.to_string();
+                        current_ex.control = val;
                     } else if key == "accepted" {
-                        current_ex.accepted = val.to_string();
+                        current_ex.accepted = val;
                     } else if key == "reason" {
-                        current_ex.reason = val.to_string();
+                        current_ex.reason = val;
                     } else if key == "expires" {
-                        current_ex.expires = val.to_string();
+                        current_ex.expires = val;
                     } else {
                         return Err(format!(
                             "privr: line {}: unknown exception field '{key}'",
@@ -653,5 +705,36 @@ expires = "2027-06-01"
         assert_eq!(iso.len(), 10);
         assert_eq!(&iso[4..5], "-");
         assert_eq!(&iso[7..8], "-");
+    }
+
+    #[test]
+    fn parse_toml_with_inline_comments_and_hashes_in_strings() {
+        let toml = r#"
+# Global policy comment
+schema = 1 # schema version
+extends = "builtin:baseline@0.1" # base profile
+
+[controls."windows.advertising.id"] # disable ad id
+mode = "review" # review mode
+
+[[exceptions]] # exception table
+control = "windows.security.wpad" # target control
+accepted = "enabled" # keep enabled
+reason = "Required for ticket #1234 legacy proxy" # contains hash inside string
+expires = "2028-06-30" # expiration date
+"#;
+        let policy = CustomPolicy::from_str(toml).expect("parse toml with comments");
+        assert_eq!(policy.schema, 1);
+        assert_eq!(policy.extends, Profile::Baseline);
+        assert_eq!(
+            policy.controls.get("windows.advertising.id").unwrap().mode,
+            Some(Mode::Review)
+        );
+        assert_eq!(policy.exceptions.len(), 1);
+        assert_eq!(
+            policy.exceptions[0].reason,
+            "Required for ticket #1234 legacy proxy"
+        );
+        assert_eq!(policy.exceptions[0].expires, "2028-06-30");
     }
 }

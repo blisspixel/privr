@@ -248,10 +248,17 @@ workload personas:
 vector transitions, friction tier breakdowns, and pending restart or signout
 requirements without modifying machine state.
 
+Options:
+- `--profile <baseline|strict|restrictive>`: Target policy profile to simulate (default: `baseline`).
+- `--policy <path>`: Simulate applying a custom local policy (TOML/JSON) with overrides and active exceptions.
+- `-s, --section <name>`: Simulate changes only in specific posture section(s).
+- `-c, --control <id>`: Simulate changes only for specific control(s).
+
 It computes the exact transition from current posture to simulated posture across
 all five posture dimensions (`behavioral-commercial`, `forensic-residue`,
 `network-exposure`, `diagnostic-crash`, `ambient-sensor`), distinguishing automated
-remediation candidates from unautomated drift.
+remediation candidates from unautomated drift. Active policy exceptions remain respected
+and are excluded from counterfactual remediation.
 
 ## `clean` (alias: `purge`)
 
@@ -349,7 +356,9 @@ obtained through any tool call and originates from a terminal on the machine
 being changed, so a caller cannot approve on the operator's behalf.
 
 `privr` makes no network requests and never calls a language model. The server
-speaks over standard input and output only.
+speaks over standard input and output only. `privr_check`, `privr_plan`, and `privr_simulate`
+accept an optional `policy` argument (file path or inline TOML/JSON) allowing autonomous agent
+workflows to audit and project posture against enterprise policies.
 
 ## `doctor`
 

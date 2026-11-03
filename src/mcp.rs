@@ -238,6 +238,10 @@ fn handle_tools_list(allow_apply: bool) -> Value {
                         "type": "string",
                         "description": "Optional section filter"
                     },
+                    "policy": {
+                        "type": "string",
+                        "description": "Optional file path or TOML/JSON string of a custom policy"
+                    },
                     "compare": {
                         "type": "string",
                         "description": "Optional file path or JSON string of a saved prior report to compare against and detect update regressions"
@@ -287,6 +291,10 @@ fn handle_tools_list(allow_apply: bool) -> Value {
                     "section": {
                         "type": "string",
                         "description": "Optional section filter"
+                    },
+                    "policy": {
+                        "type": "string",
+                        "description": "Optional file path or TOML/JSON string of a custom policy"
                     }
                 }
             }
@@ -326,6 +334,10 @@ fn handle_tools_list(allow_apply: bool) -> Value {
                         "type": "string",
                         "description": "Policy profile to simulate (baseline, standard, strict; default is baseline)",
                         "default": "baseline"
+                    },
+                    "policy": {
+                        "type": "string",
+                        "description": "Optional file path or TOML/JSON string of a custom policy"
                     },
                     "control": {
                         "type": "string",
@@ -523,7 +535,26 @@ fn handle_tools_call_with_check_context(
                 .and_then(Value::as_str)
                 .map(|s| vec![s.to_owned()])
                 .unwrap_or_default();
-            let mut report = if let Some(context) = check_context {
+            let loaded_policy = if let Some(pol_arg) =
+                arguments.get("policy").and_then(Value::as_str)
+            {
+                let pol = if pol_arg.trim_start().starts_with('{') || pol_arg.contains("schema =") {
+                    pol_arg
+                        .parse::<crate::policy::CustomPolicy>()
+                        .map_err(|e| (-32602, e))?
+                } else {
+                    let path = std::path::Path::new(pol_arg);
+                    crate::policy::CustomPolicy::from_file(path).map_err(|e| (-32602, e))?
+                };
+                Some(pol)
+            } else {
+                None
+            };
+            let mut report = if let Some(pol) = &loaded_policy {
+                let host = crate::platform::discover();
+                let context = crate::catalog::Context::live(&host);
+                crate::report::Report::build_with_policy(&context, pol, &controls, &sections)
+            } else if let Some(context) = check_context {
                 crate::report::Report::build_with_context(
                     context,
                     Some(profile.as_str()),
@@ -653,6 +684,28 @@ fn handle_tools_call_with_check_context(
                 .collect()
             });
 
+            let loaded_policy = if let Some(pol_arg) =
+                arguments.get("policy").and_then(Value::as_str)
+            {
+                let pol = if pol_arg.trim_start().starts_with('{') || pol_arg.contains("schema =") {
+                    pol_arg
+                        .parse::<crate::policy::CustomPolicy>()
+                        .map_err(|e| (-32602, e))?
+                } else {
+                    let path = std::path::Path::new(pol_arg);
+                    crate::policy::CustomPolicy::from_file(path).map_err(|e| (-32602, e))?
+                };
+                Some(pol)
+            } else {
+                None
+            };
+            let plan_profile = if let Some(pol) = &loaded_policy {
+                pol.extends
+            } else {
+                profile
+            };
+            let today = crate::policy::today_iso();
+
             let mut planned = Vec::new();
             let mut unautomated_drift = 0;
             let mut requires_elevation_drift = 0;
@@ -678,23 +731,54 @@ fn handle_tools_call_with_check_context(
                 {
                     continue;
                 }
+                let mut spec_clone = c.spec.clone();
+                let override_opt = loaded_policy
+                    .as_ref()
+                    .and_then(|pol| pol.controls.get(&c.spec.id));
+                if let Some(ov) = override_opt
+                    && let Some(desired_val) = &ov.desired
+                {
+                    spec_clone.desired = crate::engine::evaluate::SemanticState::new(desired_val);
+                }
                 let resolution = c.observe(&context);
-                let mode = if filter.is_some()
+                let mode = if let Some(ov) = override_opt
+                    && let Some(m) = ov.mode
+                {
+                    m
+                } else if filter.is_some()
                     || recommended_ids.is_some()
-                    || c.spec.min_profile <= profile
+                    || c.spec.min_profile <= plan_profile
                 {
                     crate::engine::evaluate::Mode::Enforce
                 } else {
                     crate::engine::evaluate::Mode::Ignore
                 };
+
+                let exception = if let Some(pol) = &loaded_policy {
+                    if let Some(ex) = pol.exceptions.iter().find(|e| e.control == c.spec.id) {
+                        if resolution.state.as_ref().map(|s| s.0.as_str()) == Some(&ex.accepted) {
+                            ex.status(&today)
+                        } else {
+                            crate::model::outcome::Exception::None
+                        }
+                    } else {
+                        crate::model::outcome::Exception::None
+                    }
+                } else {
+                    crate::model::outcome::Exception::None
+                };
+
                 let eval = crate::engine::evaluate::evaluate(
-                    &c.spec,
+                    &spec_clone,
                     mode,
                     &resolution,
                     &host,
-                    crate::model::outcome::Exception::None,
+                    exception,
                 );
                 if eval.outcome == crate::model::outcome::Outcome::Drift {
+                    if eval.exception == crate::model::outcome::Exception::Active {
+                        continue;
+                    }
                     if eval.remediation == crate::model::outcome::Remediation::Automatic
                         && c.apply.is_some()
                     {
@@ -712,7 +796,7 @@ fn handle_tools_call_with_check_context(
                             "title": c.title,
                             "section": c.spec.section,
                             "current": current_str,
-                            "desired": c.spec.desired.0,
+                            "desired": spec_clone.desired.0,
                             "requires_elevation": c.spec.requires_elevation
                         }));
                     } else {
@@ -721,7 +805,9 @@ fn handle_tools_call_with_check_context(
                 }
             }
 
-            let profile_name = if let Some(w) = workload {
+            let profile_name = if let Some(pol) = &loaded_policy {
+                format!("custom (extends {})", pol.extends)
+            } else if let Some(w) = workload {
                 format!("workload:{}", w.as_str())
             } else {
                 profile.as_str().to_owned()
@@ -1227,17 +1313,44 @@ fn handle_tools_call_with_check_context(
                 .map(|s| vec![s.to_owned()])
                 .unwrap_or_default();
 
+            let loaded_policy = if let Some(pol_arg) =
+                arguments.get("policy").and_then(Value::as_str)
+            {
+                let pol = if pol_arg.trim_start().starts_with('{') || pol_arg.contains("schema =") {
+                    pol_arg
+                        .parse::<crate::policy::CustomPolicy>()
+                        .map_err(|e| (-32602, e))?
+                } else {
+                    let path = std::path::Path::new(pol_arg);
+                    crate::policy::CustomPolicy::from_file(path).map_err(|e| (-32602, e))?
+                };
+                Some(pol)
+            } else {
+                None
+            };
+
             let host = crate::platform::discover();
             let context = crate::catalog::Context::live(&host);
             let all_controls = crate::catalog::all();
-            let simulation = crate::engine::simulate::simulate_profile(
-                &all_controls,
-                &context,
-                &host,
-                profile,
-                &control_filter,
-                &section_filter,
-            );
+            let simulation = if let Some(pol) = &loaded_policy {
+                crate::engine::simulate::simulate_with_policy(
+                    &all_controls,
+                    &context,
+                    &host,
+                    pol,
+                    &control_filter,
+                    &section_filter,
+                )
+            } else {
+                crate::engine::simulate::simulate_profile(
+                    &all_controls,
+                    &context,
+                    &host,
+                    profile,
+                    &control_filter,
+                    &section_filter,
+                )
+            };
 
             let report = json!({
                 "schema": 1,
@@ -2327,6 +2440,62 @@ mod tests {
             panic!("Got error: {err:?}");
         }
         assert_eq!(res["result"]["isError"], false);
+    }
+
+    #[test]
+    fn test_privr_check_and_plan_with_custom_policy_via_mcp() {
+        let toml_policy = r#"
+schema = 1
+extends = "baseline"
+
+[controls."windows.advertising.id"]
+mode = "enforce"
+desired = "disabled"
+
+[[exceptions]]
+control = "windows.advertising.id"
+accepted = "enabled"
+reason = "Accepted risk for test"
+expires = "2029-01-01"
+"#;
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 100,
+            "method": "tools/call",
+            "params": {
+                "name": "privr_check",
+                "arguments": {
+                    "policy": toml_policy
+                }
+            }
+        });
+        let res = super::handle_message(&req, false, &mut Vec::new()).expect("response");
+        assert_eq!(res["result"]["isError"], false);
+        let text = res["result"]["content"][0]["text"].as_str().expect("text");
+        let parsed: serde_json::Value = serde_json::from_str(text).expect("valid json report");
+        assert_eq!(parsed["profile"], "custom (extends baseline)");
+
+        // Plan with policy
+        let plan_req = json!({
+            "jsonrpc": "2.0",
+            "id": 101,
+            "method": "tools/call",
+            "params": {
+                "name": "privr_plan",
+                "arguments": {
+                    "policy": toml_policy
+                }
+            }
+        });
+        let plan_res =
+            super::handle_message(&plan_req, false, &mut Vec::new()).expect("plan response");
+        assert_eq!(plan_res["result"]["isError"], false);
+        let plan_text = plan_res["result"]["content"][0]["text"]
+            .as_str()
+            .expect("plan text");
+        let plan_parsed: serde_json::Value =
+            serde_json::from_str(plan_text).expect("valid json plan");
+        assert_eq!(plan_parsed["profile"], "custom (extends baseline)");
     }
 
     #[test]

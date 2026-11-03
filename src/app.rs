@@ -2618,22 +2618,46 @@ Run privr explain without arguments for the posture overview, or privr list to s
         }
         Command::Simulate {
             profile,
+            policy,
             controls,
             sections,
         } => {
+            let loaded_policy = if let Some(path) = &policy {
+                match crate::policy::CustomPolicy::from_file(path) {
+                    Ok(p) => Some(p),
+                    Err(e) => {
+                        let _ = writeln!(err, "{e}");
+                        return 2;
+                    }
+                }
+            } else {
+                None
+            };
+
             let mut sim_progress =
                 ui.spinner_for("Simulating counterfactual posture changes...", format);
             let host = crate::platform::discover();
             let context = crate::catalog::Context::live(&host);
             let all_controls = crate::catalog::all();
-            let simulation = crate::engine::simulate::simulate_profile(
-                &all_controls,
-                &context,
-                &host,
-                profile,
-                &controls,
-                &sections,
-            );
+            let simulation = if let Some(pol) = &loaded_policy {
+                crate::engine::simulate::simulate_with_policy(
+                    &all_controls,
+                    &context,
+                    &host,
+                    pol,
+                    &controls,
+                    &sections,
+                )
+            } else {
+                crate::engine::simulate::simulate_profile(
+                    &all_controls,
+                    &context,
+                    &host,
+                    profile.unwrap_or(Profile::Baseline),
+                    &controls,
+                    &sections,
+                )
+            };
             sim_progress.finish();
 
             #[derive(Serialize)]
@@ -3635,7 +3659,8 @@ mod tests {
     #[test]
     fn simulate_command_renders_text_and_json() {
         let (code, stdout, stderr) = run_for_test(Some(Command::Simulate {
-            profile: Profile::Baseline,
+            profile: Some(Profile::Baseline),
+            policy: None,
             controls: Vec::new(),
             sections: Vec::new(),
         }));
@@ -3651,7 +3676,8 @@ mod tests {
                 color: crate::cli::ColorWhen::Never,
                 format: OutputFormat::Json,
                 command: Some(Command::Simulate {
-                    profile: Profile::Strict,
+                    profile: Some(Profile::Strict),
+                    policy: None,
                     controls: Vec::new(),
                     sections: Vec::new(),
                 }),
@@ -3663,6 +3689,31 @@ mod tests {
         let val: serde_json::Value = serde_json::from_slice(&out).expect("json");
         assert_eq!(val["schema"], 1);
         assert_eq!(val["profile"], "strict");
+    }
+
+    #[test]
+    fn simulate_command_with_custom_policy_evaluates_overrides() {
+        let toml = r#"
+schema = 1
+extends = "baseline"
+
+[controls."windows.advertising.id"]
+mode = "enforce"
+desired = "disabled"
+"#;
+        let temp_file =
+            std::env::temp_dir().join(format!("privr-sim-policy-test-{}.toml", std::process::id()));
+        std::fs::write(&temp_file, toml).expect("write policy");
+
+        let (code, stdout, stderr) = run_for_test(Some(Command::Simulate {
+            profile: None,
+            policy: Some(temp_file.clone()),
+            controls: Vec::new(),
+            sections: Vec::new(),
+        }));
+        let _ = std::fs::remove_file(&temp_file);
+        assert_eq!(code, 0, "stderr: {stderr}");
+        assert!(stdout.contains("custom (extends baseline)"));
     }
 
     #[test]

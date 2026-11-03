@@ -267,8 +267,11 @@ pub enum Command {
     )]
     Simulate {
         /// Target policy profile to simulate.
-        #[arg(long, value_enum, default_value_t = Profile::Baseline)]
-        profile: Profile,
+        #[arg(long, value_enum, conflicts_with = "policy")]
+        profile: Option<Profile>,
+        /// Simulate applying a custom local policy.
+        #[arg(long, conflicts_with = "profile")]
+        policy: Option<PathBuf>,
         /// Simulate only an exact control ID or documented ID prefix. Repeatable.
         #[arg(long = "control")]
         controls: Vec<String>,

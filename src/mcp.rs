@@ -1770,7 +1770,13 @@ mod tests {
         );
         let (_, mcp) = recorded_check(json!({"control": "fedora", "all": true}), &context);
         let cli: Value = serde_json::from_str(&serde_json::to_string(&report).unwrap()).unwrap();
-        assert_eq!(mcp, cli);
+        let mut mcp_no_ts = mcp.clone();
+        let mut cli_no_ts = cli.clone();
+        mcp_no_ts["timestamp"] = Value::Null;
+        cli_no_ts["timestamp"] = Value::Null;
+        assert_eq!(mcp_no_ts, cli_no_ts);
+        assert!(mcp["timestamp"].is_string());
+        assert!(cli["timestamp"].is_string());
         assert_eq!(mcp["schema"], 2);
         assert_eq!(mcp["complete"], true);
         assert_eq!(mcp["results"][0]["observed"], "enabled");

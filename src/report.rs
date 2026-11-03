@@ -2185,7 +2185,7 @@ mod tests {
             profile: "baseline".to_owned(),
             platform: "linux".to_owned(),
             timestamp: "2026-10-20.000".to_owned(),
-            tool_version: "0.1.6".to_owned(),
+            tool_version: env!("CARGO_PKG_VERSION").to_owned(),
             os_version: None,
             edition: None,
             carried: 0,

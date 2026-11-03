@@ -270,7 +270,7 @@ fn windows_targets() -> Vec<ResidueSpec> {
 }
 
 pub fn matches_category_filter(category: ResidueCategory, filter: &str) -> bool {
-    let f = filter.to_lowercase();
+    let f = filter.trim().to_lowercase();
     match f.as_str() {
         "system" => matches!(
             category,
@@ -279,6 +279,10 @@ pub fn matches_category_filter(category: ResidueCategory, filter: &str) -> bool 
                 | ResidueCategory::ThumbnailCache
                 | ResidueCategory::ShaderCache
         ),
+        "temp" | "temporary" => matches!(category, ResidueCategory::TemporaryFiles),
+        "crash" | "dumps" => matches!(category, ResidueCategory::CrashDumps),
+        "thumbnail" | "thumbnails" => matches!(category, ResidueCategory::ThumbnailCache),
+        "shader" | "shaders" => matches!(category, ResidueCategory::ShaderCache),
         "browser" | "browsers" => matches!(category, ResidueCategory::BrowserCache),
         "app" | "apps" => matches!(category, ResidueCategory::AppCache),
         "ai" | "agent" | "agents" => matches!(category, ResidueCategory::AgentResidue),

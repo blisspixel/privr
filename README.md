@@ -52,7 +52,7 @@ designed to be driven by an agent harness as readily as by a person.
   confidence) and the compiled source table. It does not keep raw evidence.
   `explain` is a fresh read and says so. Plan, apply, rollback, recommend,
   simulate, and journal records stay schema 1.
-- **File-based probe replay covers Windows controls** (advertising ID, diagnostic data, LLMNR name resolution, and thumbnail caching) across 65 synthetic observation states. Synthetic observations exercise the compiled probes and evaluator; native captures and full per-control coverage remain release blockers.
+- **File-based probe replay covers Windows controls** (advertising ID, Copilot shell integration, Recall snapshots, diagnostic data, LLMNR name resolution, WPAD auto-discovery, and thumbnail caching) across 81 synthetic observation states. Synthetic observations exercise the compiled probes and evaluator; native captures and full per-control coverage remain release blockers.
 - **Agent integration (`privr mcp`) is implemented**, providing a stdio Model Context Protocol (MCP) server exposing `privr_check` (with post-update regression comparison), `privr_plan`, `privr_apply`, `privr_recommend`, `privr_simulate`, `privr_explain`, `privr_clean`, `privr_history`, and `privr_doctor` with Agent Plugins v1.0.0 packaging.
 
 The full state, including known defects, is in
@@ -79,8 +79,10 @@ checker that interprets only that configured value could report telemetry as
 disabled. It is not. The `pass` above means the effective required-only level
 matches the selected policy; it does not mean diagnostic transmission is off.
 
-What is designed but not built: custom policy files, sectioned approval,
-complete per-control fixtures, and signed releases. PowerShell session-only history
+What is designed but not built: custom policy files, complete per-control fixtures,
+and signed releases. Interactive section approval is implemented (`privr apply -i`,
+`--interactive-sections`, or `[s]` in the interactive prompt), treating an intentional stop
+after approving sections as verified success. PowerShell session-only history
 is implemented as a guided review control (`windows.shell.history-persistence`) and
 architectural walkthrough (`privr explain shell`), with [its scope and tradeoffs](docs/PRIVACY_RESIDUE.md#shell-command-histories)
 documented.
@@ -211,7 +213,7 @@ privr clean (or privr purge)
   evidence and excluded controls cannot establish compliance.
 - `simulate` performs a dry-run counterfactual posture vector projection without mutating host state, reporting transition deltas, friction counts, and reboot or signout requirements.
 - `plan` (alias: `diff`) is read-only and shows the exact eligible change set. Running `privr plan` without arguments defaults to the daily-driver general persona and cosmetic friction ceiling.
-- `apply` (aliases: `fix`, `harden`) executes safe, verified remediation with transaction journaling, interactive plan review, and native in-place elevation (`-e, --elevate`). Running `privr apply` without arguments is limited to Tier 0 and Tier 1 (transparent and cosmetic) daily-driver controls. Confirmation defaults to no, and one answer covers the whole selection. Per-section approval is not available yet; use `--section` to limit the set. A non-interactive shell must pass `--yes` after `privr plan`.
+- `apply` (aliases: `fix`, `harden`) executes safe, verified remediation with transaction journaling, interactive plan review, section-by-section approval (`-i, --interactive-sections`), and native in-place elevation (`-e, --elevate`). Running `privr apply` without arguments is limited to Tier 0 and Tier 1 (transparent and cosmetic) daily-driver controls. Confirmation defaults to no; interactive mode offers whole-batch approval (`[y]`), section-by-section review (`[s]`), detailed diff (`[d]`), or cancelling (`[q]`). Stopping partway is treated as verified success (`stopped X sections applied, Y deferred`). A non-interactive shell must pass `--yes` after `privr plan`.
 - `history` (alias: `log`) lists previous transactions, timestamps, applied control counts, and profiles. Running `privr history --purge` (with `-y / --yes`) permanently purges and destroys transaction records from disk.
 - `rollback` (aliases: `restore`, `undo`) restores exact prior values. Running `privr undo` without arguments automatically targets the most recent transaction recorded on disk.
 - `clean` (alias: `purge`) safely inspects and purges disposable temporary files, crash dumps, browser caches, AI agent residue, developer caches, and recent activity residue. Logins, credentials, session databases, and browser cookies are strictly preserved. Optional hardware TRIM (`--trim`) safely informs solid-state drive (SSD/NVMe) controllers of unallocated blocks to eliminate flash wear and restore peak write performance. Running in an interactive terminal displays an organized dashboard preview and prompts before deleting anything (`privr clean --preview` forces read-only preview; `--polite` retains disruptive caches like thumbnails and recent items; `-c/--category` targets specific categories like `ai`, `browsers`, `dev`, `recent`, `system`).

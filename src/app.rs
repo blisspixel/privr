@@ -67,12 +67,9 @@ fn explicit_elevation_required(
             .any(|id| control.spec.id == *id || control.spec.id.starts_with(id))
 }
 
-/// One answer covers every selected section. Per-section approval is not built.
-const APPROVAL_SCOPE: &str =
-    "(all sections; per-section approval isn't available yet; use --section to limit)";
+/// Scope of approval when confirming all sections at once.
+const APPROVAL_SCOPE: &str = "(y: all sections, s: section-by-section, d: details, q: quit) [N]";
 
-/// Wording reserved for a future per-section stop. Not a live apply path.
-#[cfg(test)]
 fn section_stop_line(applied: usize, deferred: usize) -> String {
     format!("stopped {applied} sections applied, {deferred} deferred")
 }
@@ -83,6 +80,57 @@ fn interpret_confirmation(read: std::io::Result<String>) -> Result<bool, i32> {
     let input = read.map_err(|_| 2)?;
     let trimmed = input.trim();
     Ok(trimmed.eq_ignore_ascii_case("y") || trimmed.eq_ignore_ascii_case("yes"))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ApprovalChoice {
+    All,
+    Step,
+    Diff,
+    Cancel,
+}
+
+fn interpret_approval(read: std::io::Result<String>) -> Result<ApprovalChoice, i32> {
+    let input = read.map_err(|_| 2)?;
+    let trimmed = input.trim();
+    if trimmed.eq_ignore_ascii_case("y") || trimmed.eq_ignore_ascii_case("yes") {
+        Ok(ApprovalChoice::All)
+    } else if trimmed.eq_ignore_ascii_case("s")
+        || trimmed.eq_ignore_ascii_case("step")
+        || trimmed.eq_ignore_ascii_case("section")
+        || trimmed.eq_ignore_ascii_case("sections")
+    {
+        Ok(ApprovalChoice::Step)
+    } else if trimmed.eq_ignore_ascii_case("d")
+        || trimmed.eq_ignore_ascii_case("diff")
+        || trimmed.eq_ignore_ascii_case("details")
+    {
+        Ok(ApprovalChoice::Diff)
+    } else {
+        Ok(ApprovalChoice::Cancel)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SectionChoice {
+    Approve,
+    Skip,
+    StopAndApply,
+}
+
+fn interpret_section_choice(read: std::io::Result<String>) -> Result<SectionChoice, i32> {
+    let input = read.map_err(|_| 2)?;
+    let trimmed = input.trim();
+    if trimmed.eq_ignore_ascii_case("y") || trimmed.eq_ignore_ascii_case("yes") {
+        Ok(SectionChoice::Approve)
+    } else if trimmed.eq_ignore_ascii_case("q")
+        || trimmed.eq_ignore_ascii_case("quit")
+        || trimmed.eq_ignore_ascii_case("stop")
+    {
+        Ok(SectionChoice::StopAndApply)
+    } else {
+        Ok(SectionChoice::Skip)
+    }
 }
 
 fn uncertainty_word(reason: crate::engine::evaluate::Uncertainty) -> &'static str {
@@ -390,6 +438,7 @@ fn run_with_check_context(
                                                 max_friction: None,
                                                 dry_run: false,
                                                 yes: false,
+                                                interactive_sections: false,
                                                 controls,
                                                 sections,
                                                 elevate: false,
@@ -470,6 +519,7 @@ fn run_with_check_context(
                                                             max_friction: None,
                                                             dry_run: false,
                                                             yes: true,
+                                                            interactive_sections: false,
                                                             controls,
                                                             sections,
                                                             elevate: false,
@@ -838,6 +888,7 @@ fn run_with_check_context(
             max_friction,
             dry_run,
             yes,
+            interactive_sections,
             controls,
             sections,
             elevate,
@@ -887,6 +938,7 @@ fn run_with_check_context(
             let context = crate::catalog::Context::live(&host);
             let all_controls = crate::catalog::all();
             let profile_val = profile.unwrap_or_default();
+            let mut approved_sections: Option<std::collections::BTreeSet<String>> = None;
 
             let recommended_ids: Option<std::collections::BTreeSet<String>> = workload.map(|w| {
                 crate::engine::recommend::generate_recommendations(
@@ -1091,28 +1143,232 @@ fn run_with_check_context(
                     );
                 }
 
-                let prompt_msg = format!(
-                    "\nApply these {} change(s)? [y/N] {APPROVAL_SCOPE}: ",
-                    planned_items.len()
-                );
-                let _ = write!(out, "{prompt_msg}");
-                let _ = out.flush();
+                let mut unique_sections: Vec<String> = Vec::new();
+                for item in &planned_items {
+                    if !unique_sections.contains(&item.section) {
+                        unique_sections.push(item.section.clone());
+                    }
+                }
 
-                let mut input = String::new();
-                match interpret_confirmation(
-                    std::io::stdin()
-                        .read_line(&mut input)
-                        .map(|_| input.clone()),
-                ) {
-                    Ok(true) => {}
-                    Ok(false) => {
+                let choice = if interactive_sections {
+                    ApprovalChoice::Step
+                } else {
+                    loop {
+                        let prompt_msg = format!(
+                            "\nApply these {} change(s)? [y/s/d/q] {APPROVAL_SCOPE}: ",
+                            planned_items.len()
+                        );
+                        let _ = write!(out, "{prompt_msg}");
+                        let _ = out.flush();
+
+                        let mut input = String::new();
+                        let read_res = std::io::stdin()
+                            .read_line(&mut input)
+                            .map(|_| input.clone());
+                        match interpret_approval(read_res) {
+                            Ok(ApprovalChoice::Diff) => {
+                                let _ = writeln!(
+                                    out,
+                                    "\n{}",
+                                    ui.paint(
+                                        crate::ui::style::HEADING,
+                                        "Planned Remediations (Detailed Diff):"
+                                    )
+                                );
+                                for item in &planned_items {
+                                    let elev_tag = if item.requires_elevation && !is_elevated {
+                                        format!(
+                                            " {}",
+                                            ui.paint(
+                                                crate::ui::style::CAVEAT,
+                                                "[requires elevation]"
+                                            )
+                                        )
+                                    } else {
+                                        String::new()
+                                    };
+                                    let _ = writeln!(
+                                        out,
+                                        "  {} [{}]{}",
+                                        ui.paint(crate::ui::style::IDENT, &item.title),
+                                        ui.paint(crate::ui::style::MUTED, &item.id),
+                                        elev_tag
+                                    );
+                                    let arrow = ui.paint(crate::ui::style::MUTED, "->");
+                                    let cur = ui.paint(
+                                        crate::ui::style::outcome_style(
+                                            crate::model::outcome::Outcome::Drift,
+                                        ),
+                                        &item.current,
+                                    );
+                                    let des = ui.paint(
+                                        crate::ui::style::outcome_style(
+                                            crate::model::outcome::Outcome::Pass,
+                                        ),
+                                        &item.desired,
+                                    );
+                                    let _ = writeln!(
+                                        out,
+                                        "    Section:  {}",
+                                        crate::report::humanize_section(&item.section)
+                                    );
+                                    let _ = writeln!(out, "    Change:   {cur} {arrow} {des}");
+                                    let _ = writeln!(
+                                        out,
+                                        "    Friction: {}",
+                                        item.friction.display_name()
+                                    );
+                                    if let Some(details) = &item.details {
+                                        let _ = writeln!(out, "    Details:  {details}");
+                                    }
+                                }
+                                continue;
+                            }
+                            Ok(c) => break c,
+                            Err(code) => {
+                                let _ = writeln!(err, "privr: failed to read confirmation input");
+                                return code;
+                            }
+                        }
+                    }
+                };
+
+                match choice {
+                    ApprovalChoice::Cancel => {
                         let _ = writeln!(out, "privr: apply cancelled by user.");
                         return 0;
                     }
-                    Err(code) => {
-                        let _ = writeln!(err, "privr: failed to read confirmation input");
-                        return code;
+                    ApprovalChoice::All => {
+                        approved_sections = Some(unique_sections.into_iter().collect());
                     }
+                    ApprovalChoice::Step => {
+                        let mut approved = std::collections::BTreeSet::new();
+                        let mut deferred = std::collections::BTreeSet::new();
+                        let mut stopped_early = false;
+
+                        for sec in &unique_sections {
+                            if stopped_early {
+                                deferred.insert(sec.clone());
+                                continue;
+                            }
+                            let sec_items: Vec<_> =
+                                planned_items.iter().filter(|i| i.section == *sec).collect();
+                            let humanized = crate::report::humanize_section(sec);
+                            let _ = writeln!(
+                                out,
+                                "\n{}",
+                                ui.paint(
+                                    crate::ui::style::HEADING,
+                                    &format!(
+                                        "Section '{}' ({} change(s)):",
+                                        humanized,
+                                        sec_items.len()
+                                    )
+                                )
+                            );
+                            for item in &sec_items {
+                                let elev_tag = if item.requires_elevation && !is_elevated {
+                                    format!(
+                                        " {}",
+                                        ui.paint(crate::ui::style::CAVEAT, "[requires elevation]")
+                                    )
+                                } else {
+                                    String::new()
+                                };
+                                let _ = writeln!(
+                                    out,
+                                    "  {}{}",
+                                    ui.paint(crate::ui::style::IDENT, &item.title),
+                                    elev_tag
+                                );
+                                let arrow = ui.paint(crate::ui::style::MUTED, "->");
+                                let cur_display = ui.paint(
+                                    crate::ui::style::outcome_style(
+                                        crate::model::outcome::Outcome::Drift,
+                                    ),
+                                    &item.current,
+                                );
+                                let des_display = ui.paint(
+                                    crate::ui::style::outcome_style(
+                                        crate::model::outcome::Outcome::Pass,
+                                    ),
+                                    &item.desired,
+                                );
+                                let _ = writeln!(
+                                    out,
+                                    "    Change:   {cur_display} {arrow} {des_display}"
+                                );
+                                let _ = writeln!(
+                                    out,
+                                    "    Friction: {}",
+                                    ui.paint(crate::ui::style::MUTED, item.friction.display_name())
+                                );
+                                if let Some(details) = &item.details {
+                                    let wrapped = ui.wrap_after(details, 14);
+                                    let _ = writeln!(
+                                        out,
+                                        "    Details:  {}",
+                                        ui.paint_lines(crate::ui::style::MUTED, &wrapped)
+                                    );
+                                }
+                            }
+                            let prompt = format!(
+                                "Apply section '{}'? [y/n/q] (q to stop and apply approved) [N]: ",
+                                humanized
+                            );
+                            let _ = write!(out, "{}", ui.paint(crate::ui::style::HEADING, &prompt));
+                            let _ = out.flush();
+
+                            let mut sec_input = String::new();
+                            match interpret_section_choice(
+                                std::io::stdin()
+                                    .read_line(&mut sec_input)
+                                    .map(|_| sec_input),
+                            ) {
+                                Ok(SectionChoice::Approve) => {
+                                    approved.insert(sec.clone());
+                                }
+                                Ok(SectionChoice::Skip) => {
+                                    deferred.insert(sec.clone());
+                                }
+                                Ok(SectionChoice::StopAndApply) => {
+                                    stopped_early = true;
+                                    deferred.insert(sec.clone());
+                                }
+                                Err(code) => {
+                                    let _ =
+                                        writeln!(err, "privr: failed to read section confirmation");
+                                    return code;
+                                }
+                            }
+                        }
+
+                        if approved.is_empty() {
+                            let _ = writeln!(
+                                out,
+                                "privr: apply cancelled by user (0 sections approved)."
+                            );
+                            return 0;
+                        }
+
+                        if !deferred.is_empty() {
+                            let _ = writeln!(
+                                out,
+                                "\n{}",
+                                ui.paint(
+                                    crate::ui::style::MUTED,
+                                    &section_stop_line(approved.len(), deferred.len())
+                                )
+                            );
+                        }
+
+                        approved_sections = Some(approved);
+                    }
+                    ApprovalChoice::Diff => unreachable!(),
+                }
+
+                if let Some(appr) = &approved_sections {
+                    planned_items.retain(|item| appr.contains(&item.section));
                 }
             }
             eval_progress.finish();
@@ -1133,6 +1389,11 @@ fn run_with_check_context(
                                 .starts_with(&sec.to_ascii_lowercase())
                     });
                 if !matches_control || !matches_section {
+                    continue;
+                }
+                if let Some(appr) = &approved_sections
+                    && !appr.contains(&c.spec.section)
+                {
                     continue;
                 }
                 if let Some(recs) = &recommended_ids
@@ -1227,9 +1488,16 @@ fn run_with_check_context(
                     child_args.push("--control");
                     child_args.push(c_arg);
                 }
-                for s_arg in &sections {
-                    child_args.push("--section");
-                    child_args.push(s_arg);
+                if let Some(appr) = &approved_sections {
+                    for sec in appr {
+                        child_args.push("--section");
+                        child_args.push(sec);
+                    }
+                } else {
+                    for s_arg in &sections {
+                        child_args.push("--section");
+                        child_args.push(s_arg);
+                    }
                 }
 
                 let mut elev_progress = ui.spinner_for(
@@ -1326,6 +1594,11 @@ fn run_with_check_context(
                                 .starts_with(&sec.to_ascii_lowercase())
                     });
                 if !matches_control || !matches_section {
+                    continue;
+                }
+                if let Some(appr) = &approved_sections
+                    && !appr.contains(&c.spec.section)
+                {
                     continue;
                 }
                 if let Some(recs) = &recommended_ids
@@ -2778,6 +3051,7 @@ mod tests {
             policy: None,
             dry_run: false,
             yes: false,
+            interactive_sections: false,
             controls: Vec::new(),
             sections: Vec::new(),
             elevate: false,
@@ -2813,6 +3087,7 @@ mod tests {
             policy: None,
             dry_run: true,
             yes: false,
+            interactive_sections: false,
             controls: Vec::new(),
             sections: Vec::new(),
             elevate: false,
@@ -2920,6 +3195,7 @@ mod tests {
             policy: None,
             dry_run: true,
             yes: true,
+            interactive_sections: false,
             controls: Vec::new(),
             sections: Vec::new(),
             elevate: false,
@@ -3381,6 +3657,7 @@ mod tests {
             policy: None,
             dry_run: true,
             yes: false,
+            interactive_sections: false,
             controls: Vec::new(),
             sections: Vec::new(),
             elevate: false,
@@ -3399,6 +3676,7 @@ mod tests {
             policy: None,
             dry_run: true,
             yes: true,
+            interactive_sections: false,
             controls: Vec::new(),
             sections: Vec::new(),
             elevate: false,
@@ -3503,6 +3781,51 @@ mod tests {
         assert_eq!(
             interpret_confirmation(Err(std::io::Error::other("closed"))),
             Err(2)
+        );
+        assert_eq!(
+            interpret_approval(Ok("y\n".to_owned())).expect("all"),
+            ApprovalChoice::All
+        );
+        assert_eq!(
+            interpret_approval(Ok("s\n".to_owned())).expect("step"),
+            ApprovalChoice::Step
+        );
+        assert_eq!(
+            interpret_approval(Ok("step\n".to_owned())).expect("step word"),
+            ApprovalChoice::Step
+        );
+        assert_eq!(
+            interpret_approval(Ok("d\n".to_owned())).expect("diff"),
+            ApprovalChoice::Diff
+        );
+        assert_eq!(
+            interpret_approval(Ok("diff\n".to_owned())).expect("diff word"),
+            ApprovalChoice::Diff
+        );
+        assert_eq!(
+            interpret_approval(Ok("q\n".to_owned())).expect("cancel"),
+            ApprovalChoice::Cancel
+        );
+        assert_eq!(
+            interpret_approval(Ok("\n".to_owned())).expect("cancel empty"),
+            ApprovalChoice::Cancel
+        );
+
+        assert_eq!(
+            interpret_section_choice(Ok("y\n".to_owned())).expect("approve"),
+            SectionChoice::Approve
+        );
+        assert_eq!(
+            interpret_section_choice(Ok("n\n".to_owned())).expect("skip"),
+            SectionChoice::Skip
+        );
+        assert_eq!(
+            interpret_section_choice(Ok("q\n".to_owned())).expect("stop"),
+            SectionChoice::StopAndApply
+        );
+        assert_eq!(
+            interpret_section_choice(Ok("\n".to_owned())).expect("skip default"),
+            SectionChoice::Skip
         );
         assert_eq!(
             section_stop_line(2, 1),

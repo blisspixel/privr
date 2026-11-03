@@ -320,6 +320,17 @@ fn apply_help_shows_elevate_flag() {
 }
 
 #[test]
+fn apply_help_shows_interactive_sections_flag() {
+    let mut command = Command::cargo_bin("privr").expect("binary");
+    command
+        .args(["apply", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--interactive-sections"))
+        .stdout(predicate::str::contains("-i"));
+}
+
+#[test]
 fn explain_without_arguments_shows_scoring_and_critical_controls() {
     let mut command = Command::cargo_bin("privr").expect("binary");
     command

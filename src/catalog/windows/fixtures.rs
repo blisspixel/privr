@@ -425,6 +425,13 @@ fn replay(control: Control, files: &[(&str, &str)], setting: Target, policy: Tar
                 "{name}: observation reason"
             );
             assert!(!result.confident, "{name}: uncertain result was confident");
+        } else if expected.outcome == Outcome::NotApplicable {
+            assert_eq!(
+                result.observation_basis,
+                crate::model::outcome::ObservationBasis::NotApplicable,
+                "{name}: basis"
+            );
+            assert!(result.observed.is_none(), "{name}: invented observation");
         } else if expected.state.is_some() {
             assert_eq!(
                 result.observation_basis,
@@ -566,12 +573,128 @@ fn thumbnail_fixtures_replay_the_real_probe_and_evaluator() {
     );
 }
 
+const COPILOT: &[(&str, &str)] = &[
+    (
+        "absent-default",
+        include_str!("../../../tests/fixtures/windows.ai.copilot-shell/absent-default.json"),
+    ),
+    (
+        "disabled-compliant",
+        include_str!("../../../tests/fixtures/windows.ai.copilot-shell/disabled-compliant.json"),
+    ),
+    (
+        "enabled-drift",
+        include_str!("../../../tests/fixtures/windows.ai.copilot-shell/enabled-drift.json"),
+    ),
+    (
+        "policy-denied",
+        include_str!("../../../tests/fixtures/windows.ai.copilot-shell/policy-denied.json"),
+    ),
+    (
+        "policy-malformed",
+        include_str!("../../../tests/fixtures/windows.ai.copilot-shell/policy-malformed.json"),
+    ),
+];
+
+#[test]
+fn copilot_fixtures_replay_the_real_probe_and_evaluator() {
+    let copilot_control = controls()
+        .into_iter()
+        .find(|c| c.spec.id == "windows.ai.copilot-shell")
+        .expect("copilot control");
+    replay(
+        copilot_control,
+        COPILOT,
+        COPILOT_SHELL.target,
+        COPILOT_SHELL.target,
+    );
+}
+
+const RECALL: &[(&str, &str)] = &[
+    (
+        "build-22631-disabled",
+        include_str!(
+            "../../../tests/fixtures/windows.ai.recall-snapshot/build-22631-disabled.json"
+        ),
+    ),
+    (
+        "build-26100-absent-default",
+        include_str!(
+            "../../../tests/fixtures/windows.ai.recall-snapshot/build-26100-absent-default.json"
+        ),
+    ),
+    (
+        "build-26100-disabled-compliant",
+        include_str!(
+            "../../../tests/fixtures/windows.ai.recall-snapshot/build-26100-disabled-compliant.json"
+        ),
+    ),
+    (
+        "build-26100-enabled-drift",
+        include_str!(
+            "../../../tests/fixtures/windows.ai.recall-snapshot/build-26100-enabled-drift.json"
+        ),
+    ),
+    (
+        "policy-denied",
+        include_str!("../../../tests/fixtures/windows.ai.recall-snapshot/policy-denied.json"),
+    ),
+    (
+        "policy-malformed",
+        include_str!("../../../tests/fixtures/windows.ai.recall-snapshot/policy-malformed.json"),
+    ),
+];
+
+#[test]
+fn recall_fixtures_replay_the_real_probe_and_evaluator() {
+    let recall_control = controls()
+        .into_iter()
+        .find(|c| c.spec.id == "windows.ai.recall-snapshot")
+        .expect("recall control");
+    replay(recall_control, RECALL, RECALL_POLICY, RECALL_POLICY);
+}
+
+const WPAD_FIXTURES: &[(&str, &str)] = &[
+    (
+        "absent-default",
+        include_str!("../../../tests/fixtures/windows.security.wpad/absent-default.json"),
+    ),
+    (
+        "disabled-compliant",
+        include_str!("../../../tests/fixtures/windows.security.wpad/disabled-compliant.json"),
+    ),
+    (
+        "enabled-drift",
+        include_str!("../../../tests/fixtures/windows.security.wpad/enabled-drift.json"),
+    ),
+    (
+        "policy-denied",
+        include_str!("../../../tests/fixtures/windows.security.wpad/policy-denied.json"),
+    ),
+    (
+        "policy-malformed",
+        include_str!("../../../tests/fixtures/windows.security.wpad/policy-malformed.json"),
+    ),
+];
+
+#[test]
+fn wpad_fixtures_replay_the_real_probe_and_evaluator() {
+    let wpad_control = controls()
+        .into_iter()
+        .find(|c| c.spec.id == "windows.security.wpad")
+        .expect("wpad control");
+    replay(wpad_control, WPAD_FIXTURES, WPAD_POLICY, WPAD_POLICY);
+}
+
 #[test]
 fn every_fixture_file_is_replayed() {
     for (control, files) in [
         ("windows.advertising.id", ADVERTISING),
+        ("windows.ai.copilot-shell", COPILOT),
+        ("windows.ai.recall-snapshot", RECALL),
         ("windows.diagnostics.level", DIAGNOSTICS),
         ("windows.security.llmnr", LLMNR),
+        ("windows.security.wpad", WPAD_FIXTURES),
         ("windows.storage.thumbnail-cache", THUMBNAIL),
     ] {
         let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

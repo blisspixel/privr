@@ -157,6 +157,9 @@ pub enum Command {
         /// Confirm the displayed standard-risk plan in noninteractive use.
         #[arg(short = 'y', long)]
         yes: bool,
+        /// Interactively review and approve planned changes section by section.
+        #[arg(short = 'i', long = "interactive-sections", alias = "step")]
+        interactive_sections: bool,
         /// Apply only an exact control ID or documented ID prefix. Repeatable.
         #[arg(long = "control")]
         controls: Vec<String>,

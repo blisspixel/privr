@@ -194,6 +194,7 @@ Consent is split rather than blanket:
 | Flag | Authorizes |
 |---|---|
 | `-e, --elevate` | Request native in-place elevation (UAC on Windows, sudo on Unix) to apply machine-scope changes without switching terminals. |
+| `-i, --interactive-sections` | Step through planned changes section by section with interactive approval. |
 | `--yes` | Standard-risk changes in noninteractive use. Nothing else. |
 | `--workload <persona>` | Tailor candidate remediations to a persona (`general`, `developer`, `creative`, `mobile`, `high-assurance`). |
 | `--max-friction <tier>` | Cap remediation candidate friction (`tier0-transparent`, `tier1-cosmetic`, `tier2-workflow-altering`, `tier3-incompatible-or-tradeoff`). |

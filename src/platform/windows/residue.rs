@@ -214,14 +214,16 @@ fn npm_cache_paths() -> Vec<PathBuf> {
     v
 }
 
+fn local_low_app_data() -> Option<PathBuf> {
+    local_app_data()
+        .and_then(|p| p.parent().map(|appdata| appdata.join("LocalLow")))
+        .or_else(|| user_profile().map(|p| p.join("AppData").join("LocalLow")))
+}
+
 fn cryptnet_cache_paths() -> Vec<PathBuf> {
     let mut v = Vec::new();
-    if let Some(up) = user_profile() {
-        let base = up
-            .join("AppData")
-            .join("LocalLow")
-            .join("Microsoft")
-            .join("CryptnetUrlCache");
+    if let Some(ll) = local_low_app_data() {
+        let base = ll.join("Microsoft").join("CryptnetUrlCache");
         v.push(base.join("Content"));
         v.push(base.join("MetaData"));
     }
@@ -232,6 +234,11 @@ fn wer_report_paths() -> Vec<PathBuf> {
     let mut v = Vec::new();
     if let Some(lad) = local_app_data() {
         let wer = lad.join("Microsoft").join("Windows").join("WER");
+        v.push(wer.join("ReportArchive"));
+        v.push(wer.join("ReportQueue"));
+    }
+    if let Some(pdata) = env_path("ProgramData") {
+        let wer = pdata.join("Microsoft").join("Windows").join("WER");
         v.push(wer.join("ReportArchive"));
         v.push(wer.join("ReportQueue"));
     }
@@ -828,8 +835,19 @@ pub fn execute_volume_trim(drive_letter: char) -> TrimStatus {
             );
         }
         Ok(out) => {
-            let stderr = String::from_utf8_lossy(&out.stderr);
-            status.message = format!("Hardware TRIM failed: {}", stderr.trim());
+            let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+            let msg = if !stderr.is_empty() {
+                stderr
+            } else {
+                let stdout = String::from_utf8_lossy(&out.stdout);
+                stdout
+                    .lines()
+                    .map(str::trim)
+                    .find(|line| !line.is_empty())
+                    .unwrap_or("defrag reported failure")
+                    .to_string()
+            };
+            status.message = format!("Hardware TRIM failed: {msg}");
         }
         Err(e) => {
             status.message = format!("Failed to launch defrag for TRIM: {e}");
@@ -949,5 +967,42 @@ mod tests {
         assert!(preserved_skill_file.exists());
 
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn local_low_and_cryptnet_resolvers() {
+        if let Some(ll) = local_low_app_data() {
+            assert!(ll.to_string_lossy().contains("LocalLow"));
+        }
+        let crypt_paths = cryptnet_cache_paths();
+        if !crypt_paths.is_empty() {
+            assert!(
+                crypt_paths
+                    .iter()
+                    .any(|p| p.to_string_lossy().contains("Content"))
+            );
+            assert!(
+                crypt_paths
+                    .iter()
+                    .any(|p| p.to_string_lossy().contains("MetaData"))
+            );
+        }
+    }
+
+    #[test]
+    fn wer_report_resolvers() {
+        let wer_paths = wer_report_paths();
+        if !wer_paths.is_empty() {
+            assert!(
+                wer_paths
+                    .iter()
+                    .any(|p| p.to_string_lossy().contains("ReportArchive"))
+            );
+            assert!(
+                wer_paths
+                    .iter()
+                    .any(|p| p.to_string_lossy().contains("ReportQueue"))
+            );
+        }
     }
 }

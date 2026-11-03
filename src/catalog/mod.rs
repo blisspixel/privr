@@ -152,9 +152,88 @@ pub fn all() -> Vec<Control> {
     }
 }
 
+/// Check whether a control ID is known across any compiled platform catalogue.
+pub fn is_known_control_id(id: &str) -> bool {
+    if all().iter().any(|c| c.spec.id == id) {
+        return true;
+    }
+    const ALL_REGISTERED_IDS: &[&str] = &[
+        // Windows
+        "windows.advertising.id",
+        "windows.shell.history-persistence",
+        "windows.ai.copilot-shell",
+        "windows.ai.recall-snapshot",
+        "windows.capability.account-info",
+        "windows.capability.activity",
+        "windows.capability.wifi-data",
+        "windows.diagnostics.crash-dump-scope",
+        "windows.diagnostics.error-reporting",
+        "windows.diagnostics.feedback",
+        "windows.diagnostics.inventory-collector",
+        "windows.clipboard.cloud-sync",
+        "windows.clipboard.cross-device",
+        "windows.diagnostics.level",
+        "windows.experience.start-suggestions",
+        "windows.experience.suggested-apps",
+        "windows.experience.system-suggestions",
+        "windows.experience.tailored",
+        "windows.input.personalization",
+        "windows.search.device-history",
+        "windows.search.web",
+        "windows.delivery-optimization.mode",
+        "windows.security.llmnr",
+        "windows.security.ncsi-probing",
+        "windows.security.wpad",
+        "windows.browser.edge.telemetry",
+        "windows.storage.pagefile-clear",
+        "windows.storage.thumbnail-cache",
+        "windows.storage.bitlocker-cipher",
+        "windows.storage.dma-protection",
+        "windows.storage.trim-notify",
+        // Linux
+        "debian.popularity-contest.participation",
+        "fedora.abrt.auto-reporting",
+        "freedesktop.thumbnails.caching",
+        "gnome.crash-reporting.technical-problems",
+        "gnome.history.application-usage",
+        "gnome.history.recent-files",
+        "gnome.telemetry.software-usage",
+        "kde.user-feedback.global",
+        "systemd.coredump.storage",
+        "systemd.fstrim.timer",
+        "systemd.journald.storage",
+        "ubuntu.insights.consent",
+        "ubuntu.report.consent",
+        "networkmanager.connectivity.check",
+        "avahi.mdns.publishing",
+        "systemd.resolved.llmnr",
+        "systemd.resolved.mdns",
+        // macOS
+        "macos.advertising.personalized",
+        "macos.analytics.share-mac",
+        "macos.analytics.share-with-developers",
+        "macos.siri.improvement",
+        "macos.storage.quarantine-events",
+        "macos.storage.quicklook-cache",
+    ];
+
+    ALL_REGISTERED_IDS.contains(&id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_compiled_control_is_registered_in_known_catalogue() {
+        for control in all() {
+            assert!(
+                is_known_control_id(&control.spec.id),
+                "control '{}' missing from ALL_REGISTERED_IDS",
+                control.spec.id
+            );
+        }
+    }
 
     #[test]
     fn control_identifiers_are_unique_and_ordered() {

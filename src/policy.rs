@@ -447,12 +447,9 @@ impl CustomPolicy {
 
     /// Validate the policy against compiled catalogue rules.
     pub fn validate(&self) -> Result<(), String> {
-        let all_controls = crate::catalog::all();
-        let valid_ids: BTreeSet<String> = all_controls.into_iter().map(|c| c.spec.id).collect();
-
         // Control overrides must reference existing controls
         for id in self.controls.keys() {
-            if !valid_ids.contains(id) {
+            if !crate::catalog::is_known_control_id(id) {
                 return Err(format!(
                     "privr: unknown control identifier '{id}' in policy file"
                 ));
@@ -462,7 +459,7 @@ impl CustomPolicy {
         // Exceptions must reference existing controls, provide reasons, and valid expiry dates
         let mut seen_exceptions = BTreeSet::new();
         for ex in &self.exceptions {
-            if !valid_ids.contains(&ex.control) {
+            if !crate::catalog::is_known_control_id(&ex.control) {
                 return Err(format!(
                     "privr: unknown control identifier '{}' in policy exception",
                     ex.control

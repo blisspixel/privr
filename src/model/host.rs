@@ -107,6 +107,24 @@ impl OsVersion {
         }
         true
     }
+
+    /// Returns true if this version strictly exceeds `ceiling` within the component depth of `ceiling`.
+    ///
+    /// For example:
+    /// - If `ceiling` specifies `10.0.26100` (3 components), an actual version `10.0.26100.1234` (4 components)
+    ///   does not exceed the ceiling, because its first 3 components match `10.0.26100`.
+    /// - An actual version `10.0.26200.1` does exceed `10.0.26100`, because at index 2, 26200 > 26100.
+    /// - An actual version `10.0.22631.4000` does not exceed `10.0.26100`.
+    pub fn exceeds_ceiling(&self, ceiling: &Self) -> bool {
+        for index in 0..ceiling.components.len() {
+            let mine = self.components.get(index).copied().unwrap_or(0);
+            let theirs = ceiling.components[index];
+            if mine != theirs {
+                return mine > theirs;
+            }
+        }
+        false
+    }
 }
 
 /// Processor architecture, which gates some controls on macOS and Windows.
@@ -292,6 +310,22 @@ mod tests {
     #[test]
     fn equal_versions_satisfy_at_least() {
         assert!(version(&[15, 2]).at_least(&version(&[15, 2])));
+    }
+
+    #[test]
+    fn version_exceeds_ceiling_respects_ceiling_depth() {
+        let ceiling_3 = version(&[10, 0, 26100]);
+        // Same build with patch revision does not exceed ceiling
+        assert!(!version(&[10, 0, 26100, 1234]).exceeds_ceiling(&ceiling_3));
+        assert!(!version(&[10, 0, 26100, 0]).exceeds_ceiling(&ceiling_3));
+        assert!(!version(&[10, 0, 26100]).exceeds_ceiling(&ceiling_3));
+
+        // Older build does not exceed ceiling
+        assert!(!version(&[10, 0, 22631, 4000]).exceeds_ceiling(&ceiling_3));
+
+        // Newer build does exceed ceiling
+        assert!(version(&[10, 0, 26200, 1]).exceeds_ceiling(&ceiling_3));
+        assert!(version(&[11, 0, 0]).exceeds_ceiling(&ceiling_3));
     }
 
     #[test]

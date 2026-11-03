@@ -17,7 +17,7 @@ designed to be driven by an agent harness as readily as by a person.
 
 ## Status
 
-- **Windows `check`, `explain`, `list`, `doctor`, `recommend`, `simulate`, `plan`, `apply`, `history`, and `rollback` are implemented**, with posture dimensions, rollback journaling, and native UAC elevation handling. When drift is present, a terminal offers `[y] apply safe fixes, [d] preview diff, [e] explain score & critical items, [q] quit`. An incomplete check with no drift asks what could not be checked. CLI aliases (`status`, `scan`, `diff`, `fix`, `harden`, `undo`, `log`) still work. Release blockers remain in the roadmap.
+- **Windows `check`, `explain`, `list`, `doctor`, `recommend`, `simulate`, `plan`, `apply`, `history`, and `rollback` are implemented**, with 31 controls across 5 posture dimensions, rollback journaling, and native UAC elevation handling. When drift is present, a terminal offers `[y] apply safe fixes, [d] preview diff, [e] explain score & critical items, [q] quit`. An incomplete check with no drift asks what could not be checked. CLI aliases (`status`, `scan`, `diff`, `fix`, `harden`, `undo`, `log`) still work. Release blockers remain in the roadmap.
 - **Defensive and adaptive application**: `plan` and `apply` accept `--workload` (`general`, `developer`, `creative`, `mobile`, `high-assurance`) and `--max-friction`. When run unprivileged, batch operations apply eligible user-scope controls and report deferred machine-scope controls without failure.
 - **Linux and macOS `check` are experimental** with typed elevation metadata, tested in CI across multiple platforms.
 - **Mac analytics sharing remains Unknown**. Diagnostic history cannot establish
@@ -52,7 +52,7 @@ designed to be driven by an agent harness as readily as by a person.
   confidence) and the compiled source table. It does not keep raw evidence.
   `explain` is a fresh read and says so. Plan, apply, rollback, recommend,
   simulate, and journal records stay schema 1.
-- **File-based probe replay has started** for Windows advertising ID and diagnostic data. Advertising policy distinguishes enforcement from user choice. Synthetic observations exercise the compiled probes and evaluator; native captures and full per-control coverage remain release blockers.
+- **File-based probe replay covers Windows controls** (advertising ID, diagnostic data, LLMNR name resolution, and thumbnail caching) across 65 synthetic observation states. Synthetic observations exercise the compiled probes and evaluator; native captures and full per-control coverage remain release blockers.
 - **Agent integration (`privr mcp`) is implemented**, providing a stdio Model Context Protocol (MCP) server exposing `privr_check` (with post-update regression comparison), `privr_plan`, `privr_apply`, `privr_recommend`, `privr_simulate`, `privr_explain`, `privr_clean`, `privr_history`, and `privr_doctor` with Agent Plugins v1.0.0 packaging.
 
 The full state, including known defects, is in
@@ -81,14 +81,14 @@ matches the selected policy; it does not mean diagnostic transmission is off.
 
 What is designed but not built: custom policy files, sectioned approval,
 complete per-control fixtures, and signed releases. PowerShell session-only history
-is planned, with [its scope and tradeoffs](docs/PRIVACY_RESIDUE.md#shell-command-histories)
-documented; it is not checked or changed by `privr` today.
-Cache and disposable-temp cleanup is [planned](docs/CACHE_PRIVACY_PLAN.md),
+is implemented as a guided review control (`windows.shell.history-persistence`) and
+architectural walkthrough (`privr explain shell`), with [its scope and tradeoffs](docs/PRIVACY_RESIDUE.md#shell-command-histories)
+documented.
+Cache and disposable-temp cleanup is implemented (`privr clean`, alias `privr purge`),
 thorough by default, with `--polite` retaining disruptive caches. Both modes
 protect OS operation, recovery, and active work; login state, history, and
 persistent site data require separate selection and approval. Unconfirmed calls
-preview the plan. Removal does not promise secure media erasure. `purge` is not
-implemented.
+preview the plan. Hardware SSD TRIM (`--trim`) is available to restore solid-state performance.
 
 ## Where it is going
 

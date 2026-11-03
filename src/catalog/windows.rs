@@ -257,7 +257,7 @@ fn diagnostics_level() -> Control {
             desired: SemanticState::new("required"),
             reversibility: Reversibility::Exact,
             maturity: Maturity::Automated,
-            verified_through: None,
+            verified_through: Some(OsVersion::new(vec![10, 0, 26100], "10.0.26100")),
             remediation: Remediation::AuditOnly,
             remediation_reason: None,
             min_profile: Profile::Baseline,
@@ -313,7 +313,7 @@ fn advertising_id() -> Control {
             desired: disabled(),
             reversibility: Reversibility::Exact,
             maturity: Maturity::Automated,
-            verified_through: None,
+            verified_through: Some(OsVersion::new(vec![10, 0, 26100], "10.0.26100")),
             remediation: Remediation::Automatic,
             remediation_reason: None,
             min_profile: Profile::Baseline,
@@ -393,6 +393,12 @@ impl Toggle {
                 ManagementSource::Default,
             ),
             Evidence::Denied { .. } => Resolution::uncertain(Uncertainty::Denied, self.source()),
+            Evidence::Malformed { .. } => {
+                Resolution::uncertain(Uncertainty::Malformed, self.source())
+            }
+            Evidence::Unsupported { .. } => {
+                Resolution::uncertain(Uncertainty::Unsupported, self.source())
+            }
             _ => Resolution::uncertain(Uncertainty::Undetermined, self.source()),
         }
     }
@@ -672,7 +678,7 @@ fn security_llmnr() -> Control {
             desired: disabled(),
             reversibility: Reversibility::Exact,
             maturity: Maturity::Automated,
-            verified_through: None,
+            verified_through: Some(OsVersion::new(vec![10, 0, 26100], "10.0.26100")),
             remediation: Remediation::Automatic,
             remediation_reason: None,
             min_profile: Profile::Baseline,
@@ -902,7 +908,7 @@ fn toggle_control(
 
 fn profile_for_control(id: &str, section: &str) -> Profile {
     match section {
-        "telemetry" | "diagnostics" | "advertising" | "browser" => Profile::Baseline,
+        "telemetry" | "diagnostics" | "advertising" | "browser" | "shell" => Profile::Baseline,
         "delivery-optimization" => Profile::Baseline,
         "ai" | "clipboard" | "experience" | "input" | "search" => Profile::Strict,
         "capability" => match id {
@@ -996,6 +1002,10 @@ fn dimension_and_friction_for_control(id: &str, section: &str) -> (PostureDimens
             PostureDimension::BehavioralCommercial,
             FrictionTier::Tier0Transparent,
         ),
+        "shell" => (
+            PostureDimension::ForensicResidue,
+            FrictionTier::Tier2WorkflowAltering,
+        ),
         "capability" => (PostureDimension::AmbientSensor, FrictionTier::Tier1Cosmetic),
         _ => (
             PostureDimension::BehavioralCommercial,
@@ -1054,7 +1064,7 @@ fn toggle_control_with_desired(
             desired,
             reversibility: Reversibility::Exact,
             maturity: Maturity::Automated,
-            verified_through: None,
+            verified_through: Some(OsVersion::new(vec![10, 0, 26100], "10.0.26100")),
             remediation: if apply.is_some() {
                 Remediation::Automatic
             } else {
@@ -1385,10 +1395,73 @@ fn probe_trim_notify(ctx: &Context) -> Resolution {
     TRIM_NOTIFY.probe(ctx)
 }
 
+const PSREADLINE_ABOUT_DOCS: &str =
+    "https://learn.microsoft.com/powershell/module/psreadline/about/about_psreadline";
+const PSREADLINE_SET_DOCS: &str =
+    "https://learn.microsoft.com/powershell/module/psreadline/set-psreadlineoption";
+
+fn probe_shell_history_persistence(_ctx: &Context) -> Resolution {
+    Resolution::determined(SemanticState::new("persistent"), ManagementSource::User)
+        .with_note(
+            "Interactive PSReadLine session state requires guided verification: in your PowerShell console, run '(Get-PSReadLineOption).HistorySaveStyle'. To configure session-only recall, add 'Set-PSReadLineOption -HistorySaveStyle SaveNothing' to your $PROFILE."
+        )
+}
+
+fn shell_history_persistence() -> Control {
+    let (dimension, friction) =
+        dimension_and_friction_for_control("windows.shell.history-persistence", "shell");
+    Control {
+        spec: ControlSpec {
+            id: "windows.shell.history-persistence".to_owned(),
+            title: "PowerShell command history persistence".to_owned(),
+            section: "shell".to_owned(),
+            dimension,
+            friction,
+            applicability: Applicability::new(vec![Variant::new(
+                "windows",
+                vec![Predicate::Platform(Platform::Windows)],
+            )]),
+            desired: SemanticState::new("session-only"),
+            reversibility: Reversibility::Exact,
+            maturity: Maturity::Manual,
+            verified_through: Some(OsVersion::new(vec![10, 0, 26100], "10.0.26100")),
+            remediation: Remediation::Guided,
+            remediation_reason: None,
+            min_profile: Profile::Baseline,
+            requires_elevation: false,
+        },
+        title: "PowerShell command history persistence",
+        summary: "Controls whether interactive PowerShell sessions persist command recall history to disk.",
+        rationale: "PSReadLine normally saves commands to a persistent history file ($($Host.Name)_history.txt). Command arguments can expose passwords, tokens, and sensitive file paths. Session-only history retains command recall (up-arrow, Ctrl+R) in the running terminal while stopping persistent writes to disk.",
+        tradeoff: Some(
+            "Cross-session command recall (pressing up-arrow in a new shell or after rebooting) is eliminated.",
+        ),
+        mitigation: Some(
+            "Within the active shell session, up-arrow recall and reverse search (Ctrl+R) remain fully functional.",
+        ),
+        sources: &[
+            Source {
+                url: PSREADLINE_ABOUT_DOCS,
+                claim: "Documents PSReadLine command history persistence and options.",
+                reviewed: "2026-10-20",
+            },
+            Source {
+                url: PSREADLINE_SET_DOCS,
+                claim: "Documents Set-PSReadLineOption -HistorySaveStyle SaveNothing.",
+                reviewed: "2026-10-20",
+            },
+        ],
+        probe: probe_shell_history_persistence,
+        apply: None,
+        rollback: None,
+    }
+}
+
 /// Every Windows control, in stable sorted order by identifier.
 pub fn controls() -> Vec<Control> {
     let mut controls = vec![
         advertising_id(),
+        shell_history_persistence(),
         toggle_control(
             "windows.ai.copilot-shell",
             "ai",

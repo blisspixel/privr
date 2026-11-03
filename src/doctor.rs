@@ -509,10 +509,25 @@ fn diagnose_with_storage_facts(
     };
 
     let all_controls = crate::catalog::all();
+    let stale_sources = all_controls
+        .iter()
+        .filter(|c| match (&c.spec.verified_through, host.version.known()) {
+            (Some(ceiling), Some(actual)) => actual.exceeds_ceiling(ceiling),
+            _ => false,
+        })
+        .count();
+
+    let last_reviewed = all_controls
+        .iter()
+        .flat_map(|c| c.sources.iter().map(|s| s.reviewed))
+        .max()
+        .unwrap_or("2026-10-20")
+        .to_string();
+
     let catalog_facts = DoctorCatalogFacts {
         total_controls: all_controls.len(),
-        stale_sources: 0,
-        last_reviewed: "2026-10-01".to_string(),
+        stale_sources,
+        last_reviewed,
     };
 
     let schemas = DoctorSchemas {

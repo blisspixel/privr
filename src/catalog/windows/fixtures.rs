@@ -499,11 +499,80 @@ fn diagnostic_fixtures_replay_the_real_probe_and_evaluator() {
     );
 }
 
+const LLMNR: &[(&str, &str)] = &[
+    (
+        "absent-default",
+        include_str!("../../../tests/fixtures/windows.security.llmnr/absent-default.json"),
+    ),
+    (
+        "disabled-compliant",
+        include_str!("../../../tests/fixtures/windows.security.llmnr/disabled-compliant.json"),
+    ),
+    (
+        "enabled-drift",
+        include_str!("../../../tests/fixtures/windows.security.llmnr/enabled-drift.json"),
+    ),
+    (
+        "policy-denied",
+        include_str!("../../../tests/fixtures/windows.security.llmnr/policy-denied.json"),
+    ),
+    (
+        "policy-malformed",
+        include_str!("../../../tests/fixtures/windows.security.llmnr/policy-malformed.json"),
+    ),
+];
+
+#[test]
+fn llmnr_fixtures_replay_the_real_probe_and_evaluator() {
+    replay(security_llmnr(), LLMNR, LLMNR_MULTICAST, LLMNR_MULTICAST);
+}
+
+const THUMBNAIL: &[(&str, &str)] = &[
+    (
+        "absent-default",
+        include_str!("../../../tests/fixtures/windows.storage.thumbnail-cache/absent-default.json"),
+    ),
+    (
+        "disabled-compliant",
+        include_str!(
+            "../../../tests/fixtures/windows.storage.thumbnail-cache/disabled-compliant.json"
+        ),
+    ),
+    (
+        "enabled-drift",
+        include_str!("../../../tests/fixtures/windows.storage.thumbnail-cache/enabled-drift.json"),
+    ),
+    (
+        "user-denied",
+        include_str!("../../../tests/fixtures/windows.storage.thumbnail-cache/user-denied.json"),
+    ),
+    (
+        "user-malformed",
+        include_str!("../../../tests/fixtures/windows.storage.thumbnail-cache/user-malformed.json"),
+    ),
+];
+
+#[test]
+fn thumbnail_fixtures_replay_the_real_probe_and_evaluator() {
+    let thumbnail_control = controls()
+        .into_iter()
+        .find(|c| c.spec.id == "windows.storage.thumbnail-cache")
+        .expect("thumbnail control");
+    replay(
+        thumbnail_control,
+        THUMBNAIL,
+        THUMBNAIL_CACHE.target,
+        THUMBNAIL_CACHE.target,
+    );
+}
+
 #[test]
 fn every_fixture_file_is_replayed() {
     for (control, files) in [
         ("windows.advertising.id", ADVERTISING),
         ("windows.diagnostics.level", DIAGNOSTICS),
+        ("windows.security.llmnr", LLMNR),
+        ("windows.storage.thumbnail-cache", THUMBNAIL),
     ] {
         let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures")

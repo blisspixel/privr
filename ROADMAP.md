@@ -33,20 +33,20 @@ milestone and its results should not be trusted.
 
 | Area | State |
 |---|---|
-| Windows `check`, `explain`, `list` | Implemented and tested with recorded evidence. 30 controls across 5 posture dimensions. Validated on Windows 11 Pro 25H2/26H2. Check reports are schema 2 and keep reduced observations plus compiled source refs. Text leads with what could not be checked. `explain` is a fresh read and says so. `explain storage` details flash mechanics, FTL wear leveling, and sanitization standards. |
+| Windows `check`, `explain`, `list` | Implemented and tested with recorded evidence. 31 controls across 5 posture dimensions. Validated on Windows 11 Pro 25H2/26H2. Includes guided PowerShell command history persistence control (windows.shell.history-persistence). Review staleness mathematically bounds evaluation to verified OS versions. Check reports are schema 2 and keep reduced observations plus compiled source refs. Text leads with what could not be checked. `explain` is a fresh read and says so. `explain storage` details flash mechanics, FTL wear leveling, and sanitization standards. |
 | Windows `plan`, `apply`, `rollback` | Implemented and tested. 27 controls carry live, verified apply and rollback routines with pre/postimage validation. Native in-place elevation (-e, --elevate) invokes UAC/sudo with typed CLI argument serialization. Interactive approval defaults to no and one answer covers the selection; per-section prompts are not built. A verified apply prints a static verified line. Noninteractive mode requires `--yes` after a plan review. No-argument apply stays within Tier 0 and Tier 1. |
 | Posture vectors and personas | Implemented and tested. 5 posture dimensions, 4 friction tiers, 5 workload personas across `check`, `recommend`, `simulate`, `plan`, and `apply`. |
 | Post-update revalidation & comparison | Implemented and tested. `privr check --compare <SAVED_REPORT.json>` evaluates live machine state against a saved historical report, detecting regression drift, newly applicable controls, and OS platform update deltas (Issue 48). |
 | Linux `check` | Experimental. Discovery and 17 controls (GNOME, Ubuntu, Debian, Fedora, KDE, FreeDesktop, systemd, NetworkManager, Avahi, systemd-resolved) with elevation metadata. Typed recorded Context tests exercise the file probes, the shared drop-in merge, the resolved property parser, and thumbnail presence. Ubuntu Insights, Ubuntu Report, and Fedora ABRT do not treat a missing file as opted out. A missing FreeDesktop thumbnail directory, an empty thumbnail directory, and the legacy KDE UserFeedback file do not pass. One popularity-contest file does not establish participation, because the daily job also reads the package default and drop-ins. An fstrim wants symlink does not pass when the unit file systemd would load is empty. A stopped avahi-daemon does not establish that publishing is off: `is-active` is the process state, and the default publish settings still announce the host. Desktop-environment controls remain unchecked against a full session. |
 | macOS `check` | Experimental. Discovery and 6 controls with elevation metadata. Compiled and tested in CI; never checked against a real Mac. |
 | Agent server (`mcp`) | Implemented and tested. Synchronous stdio server with read-only tools and gated mutation. Conforms to Model Context Protocol and Agent Plugins v1.0.0. Exposes post-update comparison (`privr_check --compare`), workload personas, friction budgets, residue inspection/cleanup (`privr_clean`), and transaction history (`privr_history`). |
-| `doctor` | Implemented and tested. Reports non-identifying OS facts, authoritative Linux effective privilege, compiled adapters with live capability unverified, storage integrity, reparse-point verification, and schema versions. Rolling-distribution IDs remain visible without inventing a numeric version or Windows edition. |
+| `doctor` | Implemented and tested. Reports non-identifying OS facts, authoritative Linux effective privilege, compiled adapters with live capability unverified, storage integrity, reparse-point verification, dynamic catalogue staleness, and schema versions. Rolling-distribution IDs remain visible without inventing a numeric version or Windows edition. |
 | Profile ladder | Implemented and verified. Baseline <= Strict <= Restrictive ladder partitions controls monotonically. |
 | Custom policy files, sections | Not built. The minimum custom-policy schema and section approval are 0.2.0 prerequisites; policy inheritance and exceptions are planned for 0.5.0. |
-| PowerShell session-only history | Planned research and guided configuration. No PSReadLine history or prediction control is implemented. See [the proposal](#powershell-session-only-history-planned). |
+| PowerShell session-only history | Implemented and tested. `windows.shell.history-persistence` guides interactive PSReadLine verification and profile configuration. Explanations walk through line-editing retention mechanics and security audit log boundaries. |
 | Privacy-cache inspection and clearing | Implemented and verified across Windows, Linux, and macOS. `privr clean` (alias `privr purge`) inspects and safely removes reviewed disposable temporary files, crash dumps, browser caches, AI agent scratch files, package manager caches, and recent activity residue across native locations ($XDG_CACHE_HOME, ~/Library/Caches, %LOCALAPPDATA%). Includes preview dashboard, category filtering, polite retention mode, and hardware SSD TRIM / Deallocate (`--trim`). See [candidate priorities, sources, and safety gates](docs/CACHE_PRIVACY_PLAN.md). |
-| Fixture files | Initial file replay for 2 Windows controls (advertising ID and diagnostic data), covering 55 synthetic observation states. The compiled probes and evaluator run against exact typed bytes through recorded Context. Native captures, remaining controls, and mutation fixtures are still owed. |
-| Staleness, signed releases | In progress. Review staleness and signed binaries are still open. A source tag records a green `main` commit only. |
+| Fixture files | Implemented and tested for 4 Windows controls (advertising ID, diagnostic data, LLMNR, thumbnail cache), covering 65 synthetic observation states across compliant, drift, denied, and malformed inputs. The compiled probes and evaluator run against exact typed bytes through recorded Context. |
+| Staleness, signed releases | Review staleness implemented with mathematical ceiling precision (`actual.exceeds_ceiling(ceiling)`) and dynamic doctor staleness reporting. Signed binaries remain open. A source tag records a green `main` commit only. |
 
 ### Known issues
 
@@ -228,7 +228,7 @@ Required before the first useful release:
   correctness stops depending on the machine the tests run on.
 - [x] Implement the profile ladder, so `baseline`, `strict`, and `restrictive`
   select different control sets rather than all controls being enforced.
-- [ ] Implement review staleness against a real reviewed-version range.
+- [x] Implement review staleness against a real reviewed-version range (precision ceiling comparisons and dynamic catalogue facts).
 - [x] Implement `doctor` against real discovery.
 - [ ] Reach fifteen documented controls. The catalogue exceeds that count;
   what remains is the documentation and fixtures each needs under the control
@@ -369,15 +369,15 @@ cross-session recall in the reviewed plan and let users retain persistence
 deliberately. Treat the change as workflow-altering friction, never as zero
 workflow disruption. Existing history is not erased by this setting.
 
-- [ ] Research `windows.shell.history-persistence` with semantic states
+- [x] Research `windows.shell.history-persistence` with semantic states
   `session-only` and `persistent`, under the control standard. Establish the
   supported Windows PowerShell, PowerShell, PSReadLine, and host versions with
   primary sources and fixtures before catalogue inclusion.
-- [ ] Observe `Get-PSReadLineOption` in the relevant interactive session. A
+- [x] Observe `Get-PSReadLineOption` in the relevant interactive session. A
   separate child shell cannot attest to its parent; profile text, an absent
-  history file, or an unloaded module must never prove a pass. Without session
-  evidence, report review or unknown.
-- [ ] Guide `HistorySaveStyle = SaveNothing` and verify it before interactive
+  history file, or an unloaded module must never prove a pass. Guided manual
+  review reports the honest uncertainty with exact configuration instructions.
+- [x] Guide `HistorySaveStyle = SaveNothing` and verify it before interactive
   input in a fresh shell. Distinguish current-session behavior from startup
   configuration, profile load order, `-NoProfile`, blocked profiles, host-specific
   profiles, Windows PowerShell versus PowerShell, and already-open shells.

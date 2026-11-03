@@ -349,7 +349,7 @@ pub fn evaluate(
     // Staleness. A host past the reviewed range loses verified support, so it
     // can no longer report a pass and cannot be remediated automatically.
     let stale = match (&spec.verified_through, host.version.known()) {
-        (Some(ceiling), Some(actual)) => actual.at_least(ceiling) && actual != ceiling,
+        (Some(ceiling), Some(actual)) => actual.exceeds_ceiling(ceiling),
         // A host whose version is unknown is not assumed to be in range.
         (Some(_), None) => true,
         (None, _) => false,
@@ -644,6 +644,28 @@ mod tests {
         );
         assert_eq!(result.outcome, Outcome::Drift);
         assert_eq!(result.remediation, Remediation::AuditOnly);
+        assert!(result.is_coherent());
+    }
+
+    #[test]
+    fn a_patched_revision_within_verified_build_is_not_stale() {
+        let mut host = host();
+        // Host has a patch revision UBR
+        host.version = Fact::Known(OsVersion::new(vec![10, 0, 26100, 1234], "10.0.26100.1234"));
+
+        let mut spec = spec();
+        spec.verified_through = Some(OsVersion::new(vec![10, 0, 26100], "10.0.26100"));
+
+        let result = evaluate(
+            &spec,
+            Mode::Enforce,
+            &Resolution::determined(SemanticState::new("disabled"), ManagementSource::User),
+            &host,
+            Exception::None,
+        );
+
+        assert_eq!(result.outcome, Outcome::Pass);
+        assert_eq!(result.support, Support::Verified);
         assert!(result.is_coherent());
     }
 

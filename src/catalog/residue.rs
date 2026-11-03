@@ -212,6 +212,24 @@ fn windows_targets() -> Vec<ResidueSpec> {
             polite_retained: true,
             requires_risk_ack: false,
         },
+        ResidueSpec {
+            id: "windows.residue.activity-history".to_owned(),
+            title: "Windows Activity History database (Connected Devices Platform)".to_owned(),
+            category: ResidueCategory::RecentActivity,
+            description: "SQLite database logging chronological app launches, document access timestamps, and cross-device clipboard history payloads.".to_owned(),
+            trade_off: "Clears historical activity timeline and cross-device clipboard cache; system recreates an empty database.".to_owned(),
+            polite_retained: true,
+            requires_risk_ack: false,
+        },
+        ResidueSpec {
+            id: "dev.residue.cargo-cache".to_owned(),
+            title: "Rust Cargo crate package cache".to_owned(),
+            category: ResidueCategory::PackageCache,
+            description: "Downloaded .crate archive packages cached by Cargo in the user profile.".to_owned(),
+            trade_off: "Cargo will re-download crates from the registry on next build if not already extracted in the project.".to_owned(),
+            polite_retained: true,
+            requires_risk_ack: false,
+        },
     ]
 }
 

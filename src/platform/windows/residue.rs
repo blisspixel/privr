@@ -303,6 +303,34 @@ fn powershell_history_paths() -> Vec<PathBuf> {
     v
 }
 
+fn activity_history_paths() -> Vec<PathBuf> {
+    let mut v = Vec::new();
+    if let Some(lad) = local_app_data() {
+        let cdp = lad.join("ConnectedDevicesPlatform");
+        if let Ok(entries) = fs::read_dir(&cdp) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    v.push(path);
+                }
+            }
+        }
+    }
+    v
+}
+
+fn activity_history_filter(_parent: &Path, name: &str) -> bool {
+    name.starts_with("ActivitiesCache.db")
+}
+
+fn cargo_cache_paths() -> Vec<PathBuf> {
+    let mut v = Vec::new();
+    if let Some(up) = user_profile() {
+        v.push(up.join(".cargo").join("registry").join("cache"));
+    }
+    v
+}
+
 static TARGET_RULES: &[TargetPathRule] = &[
     TargetPathRule {
         target_id: "windows.residue.temp",
@@ -441,6 +469,20 @@ static TARGET_RULES: &[TargetPathRule] = &[
         target_id: "windows.residue.powershell-history",
         path_display: "%APPDATA%\\Microsoft\\Windows\\PowerShell\\PSReadLine\\ConsoleHost_history.txt",
         resolve_paths: powershell_history_paths,
+        file_filter: None,
+        recurse_filter: None,
+    },
+    TargetPathRule {
+        target_id: "windows.residue.activity-history",
+        path_display: "%LOCALAPPDATA%\\ConnectedDevicesPlatform\\*\\ActivitiesCache.db*",
+        resolve_paths: activity_history_paths,
+        file_filter: Some(activity_history_filter),
+        recurse_filter: None,
+    },
+    TargetPathRule {
+        target_id: "dev.residue.cargo-cache",
+        path_display: "~/.cargo/registry/cache",
+        resolve_paths: cargo_cache_paths,
         file_filter: None,
         recurse_filter: None,
     },
@@ -1004,5 +1046,26 @@ mod tests {
                     .any(|p| p.to_string_lossy().contains("ReportQueue"))
             );
         }
+    }
+
+    #[test]
+    fn activity_history_filter_and_cargo_resolvers() {
+        assert!(activity_history_filter(
+            Path::new("dummy"),
+            "ActivitiesCache.db"
+        ));
+        assert!(activity_history_filter(
+            Path::new("dummy"),
+            "ActivitiesCache.db-wal"
+        ));
+        assert!(activity_history_filter(
+            Path::new("dummy"),
+            "ActivitiesCache.db-shm"
+        ));
+        assert!(!activity_history_filter(Path::new("dummy"), "other.txt"));
+
+        let cargo_paths = cargo_cache_paths();
+        assert_eq!(cargo_paths.len(), 1);
+        assert!(cargo_paths[0].to_string_lossy().contains(".cargo"));
     }
 }

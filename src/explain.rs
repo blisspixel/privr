@@ -333,12 +333,175 @@ fn render_overview_for(controls: &[Control], ui: &Ui) -> String {
     ));
     out.push_str(&format!(
         "  {:18} {}\n",
+        ui.paint(style::IDENT, "privr clean"),
+        ui.paint(
+            style::MUTED,
+            "Preview and purge disposable caches, activity databases, and residue"
+        )
+    ));
+    out.push_str(&format!(
+        "  {:18} {}\n",
         ui.paint(style::IDENT, "privr explain <id>"),
         ui.paint(
             style::MUTED,
             "Inspect current evidence, tradeoffs, and citations for a compiled control"
         )
     ));
+    out.push_str(&format!(
+        "  {:18} {}\n",
+        ui.paint(style::IDENT, "privr explain residue"),
+        ui.paint(
+            style::MUTED,
+            "Forensic artifact analysis, polite vs aggressive modes, and cache hygiene"
+        )
+    ));
+    out.push_str(&format!(
+        "  {:18} {}\n",
+        ui.paint(style::IDENT, "privr explain storage"),
+        ui.paint(
+            style::MUTED,
+            "NAND flash mechanics, TRIM/DZAT deallocation, and chip-off defense"
+        )
+    ));
+
+    out
+}
+
+/// Render the forensic residue architecture, cache hygiene, and sanitization model.
+pub fn render_residue_explanation(ui: &Ui) -> String {
+    let mut out = String::new();
+    out.push_str(&format!(
+        "{}\n\n",
+        ui.paint(
+            style::HEADING,
+            "privr Disposable Residue & Forensic Sanitization Architecture"
+        )
+    ));
+
+    out.push_str(&format!(
+        "{}\n",
+        ui.paint(
+            style::HEADING,
+            "1. Forensic Residue: How Operating Systems Log Activity"
+        )
+    ));
+    out.push_str(&ui.wrap(
+        "Modern operating systems, web browsers, and desktop tools continuously log user \
+         actions into specialized metadata stores, caches, and SQLite databases. \
+         These artifacts record sensitive access history even after source files are deleted \
+         or viewed from external encrypted volumes:",
+        2,
+    ));
+    out.push('\n');
+    out.push_str(&ui.wrap(
+        "- Jump Lists and Recent Items: AutomaticDestinations and CustomDestinations track opened \
+         files, pinned paths, and execution timestamps for taskbar shortcuts.",
+        4,
+    ));
+    out.push('\n');
+    out.push_str(&ui.wrap(
+        "- Windows Activity History: ConnectedDevicesPlatform (ActivitiesCache.db) logs chronological \
+         app access timelines, document metadata, and cross-device clipboard history payloads.",
+        4,
+    ));
+    out.push('\n');
+    out.push_str(&ui.wrap(
+        "- CryptoAPI Cache: CryptnetUrlCache stores CRL and OCSP certificate revocation checks, \
+         revealing domains and HTTPS endpoints contacted by background services and applications.",
+        4,
+    ));
+    out.push('\n');
+    out.push_str(&ui.wrap(
+        "- Shell Caches: File Explorer thumbnail and icon databases (thumbcache_*.db, iconcache_*.db) \
+         persist scaled image previews and application icons indefinitely.",
+        4,
+    ));
+    out.push_str("\n\n");
+
+    out.push_str(&format!(
+        "{}\n",
+        ui.paint(
+            style::HEADING,
+            "2. Polite Mode vs Aggressive Mode: Intentional Distinction"
+        )
+    ));
+    out.push_str(&ui.wrap(
+        "privr clean distinguishes between pure waste and high-cost convenience caches:",
+        2,
+    ));
+    out.push('\n');
+    out.push_str(&ui.wrap(
+        "- Polite Mode (--polite): Purges strictly disposable operational residue (system temp files, \
+         DirectX/GPU shader caches, browser web caches, WER error reporting queues, and AI agent debug logs) \
+         while retaining convenience caches whose recreation is computationally expensive or disrupts \
+         daily workflow (Explorer thumbnail previews, Jump Lists, command line history, and developer package caches).",
+        4,
+    ));
+    out.push('\n');
+    out.push_str(&ui.wrap(
+        "- Aggressive Mode (default for deep cleans): Performs an exhaustive forensic clean of all reviewed \
+         categories, removing historical activity timelines, command histories, Jump Lists, package archives, \
+         and thumbnail/icon caches.",
+        4,
+    ));
+    out.push_str("\n\n");
+
+    out.push_str(&format!(
+        "{}\n",
+        ui.paint(
+            style::HEADING,
+            "3. Scientific Sanitization vs Legacy Cleaner Antipatterns"
+        )
+    ));
+    out.push_str(&ui.wrap(
+        "privr replaces obsolete legacy practices with scientifically sound privacy patterns:",
+        2,
+    ));
+    out.push('\n');
+    out.push_str(&ui.wrap(
+        "- No Registry Cleaners: Blindly deleting orphaned COM registrations, file type associations, \
+         and CLSIDs is hazardous snake oil that causes application crashes and shell corruption. \
+         privr never performs speculative registry scanning; it configures reviewed, authoritative policy toggles.",
+        4,
+    ));
+    out.push('\n');
+    out.push_str(&ui.wrap(
+        "- Zero-Wear Hardware TRIM: Traditional multi-pass disk overwrites (DoD 5220.22-M) burn NAND flash \
+         endurance (TBW) without sanitizing wear-leveled flash blocks. privr issues hardware TRIM / Deallocate \
+         to instruct the SSD controller to deallocate unmapped LBAs instantly (0 B flash wear).",
+        4,
+    ));
+    out.push('\n');
+    out.push_str(&ui.wrap(
+        "- Session Preservation: Unlike blunt cleaners that log users out of all websites, privr cleans HTTP \
+         assets, images, and script bytecode while preserving cookies, authenticated sessions, and passwords.",
+        4,
+    ));
+    out.push_str("\n\n");
+
+    out.push_str(&format!(
+        "{}\n",
+        ui.paint(style::HEADING, "4. AI Agent & Developer Workspace Hygiene")
+    ));
+    out.push_str(&ui.wrap(
+        "Autonomous coding agents and package managers generate massive ephemeral data footprints:",
+        2,
+    ));
+    out.push('\n');
+    out.push_str(&ui.wrap(
+        "- AI Agents (Claude, Codex): Agent runtimes create hundreds of megabytes of prompt transcripts, \
+         model scratchpads, ambient suggestions, and execution traces. privr purges these disposable logs \
+         while preserving project configurations, prompt instructions, and skills.",
+        4,
+    ));
+    out.push('\n');
+    out.push_str(&ui.wrap(
+        "- Developer Caches (Cargo, NuGet, Go, npm, pip): Package managers download duplicate archive \
+         tarballs and compiler build caches across the user profile. privr reclaims gigabytes of rebuildable \
+         package caches without touching project vendor directories or node_modules.",
+        4,
+    ));
+    out.push('\n');
 
     out
 }
@@ -609,6 +772,19 @@ mod tests {
         assert!(text.contains("3. High-Assurance Defense Against Chip-Off Forensics"));
         assert!(text.contains("4. Decommissioning & Drive Disposal Standards"));
         assert!(text.contains("NIST SP 800-88"));
+        assert!(!text.contains('\u{1b}'));
+    }
+
+    #[test]
+    fn residue_explanation_renders_forensics_and_hygiene_walkthrough() {
+        let plain_ui = Ui::plain();
+        let text = render_residue_explanation(&plain_ui);
+        assert!(text.contains("privr Disposable Residue & Forensic Sanitization Architecture"));
+        assert!(text.contains("1. Forensic Residue: How Operating Systems Log Activity"));
+        assert!(text.contains("2. Polite Mode vs Aggressive Mode: Intentional Distinction"));
+        assert!(text.contains("3. Scientific Sanitization vs Legacy Cleaner Antipatterns"));
+        assert!(text.contains("4. AI Agent & Developer Workspace Hygiene"));
+        assert!(text.contains("ConnectedDevicesPlatform"));
         assert!(!text.contains('\u{1b}'));
     }
 

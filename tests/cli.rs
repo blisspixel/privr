@@ -371,6 +371,26 @@ fn explain_storage_topic_shows_flash_mechanics_and_sanitization() {
 }
 
 #[test]
+fn explain_residue_topic_shows_forensics_and_hygiene() {
+    for topic in ["residue", "clean", "purge", "forensics"] {
+        let mut command = Command::cargo_bin("privr").expect("binary");
+        command
+            .args(["explain", topic])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains(
+                "privr Disposable Residue & Forensic Sanitization Architecture",
+            ))
+            .stdout(predicate::str::contains("Forensic Residue"))
+            .stdout(predicate::str::contains("Polite Mode vs Aggressive Mode"))
+            .stdout(predicate::str::contains("Scientific Sanitization"))
+            .stdout(predicate::str::contains(
+                "AI Agent & Developer Workspace Hygiene",
+            ));
+    }
+}
+
+#[test]
 fn explain_known_control_shows_evidence_and_rationale() {
     let control_id = if cfg!(windows) {
         "windows.advertising.id"

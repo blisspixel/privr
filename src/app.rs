@@ -1892,6 +1892,13 @@ fn run_with_check_context(
                 let _ = write!(out, "{}", crate::explain::render_storage_explanation(&ui));
                 return 0;
             }
+            if matches!(
+                topic_or_id.to_ascii_lowercase().as_str(),
+                "residue" | "clean" | "purge" | "forensics" | "cache" | "caches"
+            ) {
+                let _ = write!(out, "{}", crate::explain::render_residue_explanation(&ui));
+                return 0;
+            }
             match crate::explain::find(topic_or_id) {
                 Ok(control) => {
                     let host = crate::platform::discover();

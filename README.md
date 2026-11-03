@@ -17,7 +17,7 @@ designed to be driven by an agent harness as readily as by a person.
 
 ## Status
 
-- **Windows `check`, `explain`, `list`, `doctor`, `recommend`, `simulate`, `plan`, `apply`, `history`, and `rollback` are implemented**, with 31 controls across 5 posture dimensions, rollback journaling, and native UAC elevation handling. When drift is present, a terminal offers `[y] apply safe fixes, [d] preview diff, [e] explain score & critical items, [q] quit`. An incomplete check with no drift asks what could not be checked. CLI aliases (`status`, `scan`, `diff`, `fix`, `harden`, `undo`, `log`) still work. Release blockers remain in the roadmap.
+- **Windows `check`, `explain`, `list`, `doctor`, `recommend`, `simulate`, `plan`, `apply`, `history`, and `rollback` are implemented**, with 31 controls across 5 posture dimensions (verified through Windows 11 24H2 and 26H2 build 26300), rollback journaling, and native UAC elevation handling. When drift is present, a terminal offers `[y] apply safe fixes, [d] preview diff, [e] explain score & critical items, [q] quit`. An incomplete check with no drift asks what could not be checked. CLI aliases (`status`, `scan`, `diff`, `fix`, `harden`, `undo`, `log`) still work. Release blockers remain in the roadmap.
 - **Defensive and adaptive application**: `plan` and `apply` accept `--workload` (`general`, `developer`, `creative`, `mobile`, `high-assurance`) and `--max-friction`. When run unprivileged, batch operations apply eligible user-scope controls and report deferred machine-scope controls without failure.
 - **Linux and macOS `check` are experimental** with typed elevation metadata, tested in CI across multiple platforms.
 - **Mac analytics sharing remains Unknown**. Diagnostic history cannot establish

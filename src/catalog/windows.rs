@@ -257,7 +257,7 @@ fn diagnostics_level() -> Control {
             desired: SemanticState::new("required"),
             reversibility: Reversibility::Exact,
             maturity: Maturity::Automated,
-            verified_through: Some(OsVersion::new(vec![10, 0, 26100], "10.0.26100")),
+            verified_through: Some(OsVersion::new(vec![10, 0, 26300], "10.0.26300")),
             remediation: Remediation::AuditOnly,
             remediation_reason: None,
             min_profile: Profile::Baseline,
@@ -313,7 +313,7 @@ fn advertising_id() -> Control {
             desired: disabled(),
             reversibility: Reversibility::Exact,
             maturity: Maturity::Automated,
-            verified_through: Some(OsVersion::new(vec![10, 0, 26100], "10.0.26100")),
+            verified_through: Some(OsVersion::new(vec![10, 0, 26300], "10.0.26300")),
             remediation: Remediation::Automatic,
             remediation_reason: None,
             min_profile: Profile::Baseline,
@@ -678,7 +678,7 @@ fn security_llmnr() -> Control {
             desired: disabled(),
             reversibility: Reversibility::Exact,
             maturity: Maturity::Automated,
-            verified_through: Some(OsVersion::new(vec![10, 0, 26100], "10.0.26100")),
+            verified_through: Some(OsVersion::new(vec![10, 0, 26300], "10.0.26300")),
             remediation: Remediation::Automatic,
             remediation_reason: None,
             min_profile: Profile::Baseline,
@@ -1064,7 +1064,7 @@ fn toggle_control_with_desired(
             desired,
             reversibility: Reversibility::Exact,
             maturity: Maturity::Automated,
-            verified_through: Some(OsVersion::new(vec![10, 0, 26100], "10.0.26100")),
+            verified_through: Some(OsVersion::new(vec![10, 0, 26300], "10.0.26300")),
             remediation: if apply.is_some() {
                 Remediation::Automatic
             } else {
@@ -1433,7 +1433,7 @@ fn shell_history_persistence() -> Control {
             desired: SemanticState::new("session-only"),
             reversibility: Reversibility::Exact,
             maturity: Maturity::Manual,
-            verified_through: Some(OsVersion::new(vec![10, 0, 26100], "10.0.26100")),
+            verified_through: Some(OsVersion::new(vec![10, 0, 26300], "10.0.26300")),
             remediation: Remediation::Guided,
             remediation_reason: None,
             min_profile: Profile::Baseline,
@@ -2914,5 +2914,25 @@ mod tests {
         )]);
         let post_res_absent = probe_recall_snapshots(&recorded(&post_24h2_host, &absent_policy));
         assert_eq!(post_res_absent.state, Some(enabled()));
+    }
+
+    #[test]
+    fn windows_26h2_build_26300_is_within_verified_through_ceiling() {
+        let mut host_26h2 = windows_host();
+        host_26h2.version =
+            Fact::Known(OsVersion::new(vec![10, 0, 26300, 9818], "10.0.26300.9818"));
+        let catalogue = controls();
+        for control in &catalogue {
+            if let Some(ceiling) = &control.spec.verified_through {
+                let actual = host_26h2.version.known().unwrap();
+                assert!(
+                    !actual.exceeds_ceiling(ceiling),
+                    "Control {} verified_through ceiling ({:?}) is exceeded by Windows 26H2 ({:?})",
+                    control.spec.id,
+                    ceiling,
+                    actual
+                );
+            }
+        }
     }
 }

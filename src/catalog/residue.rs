@@ -230,6 +230,42 @@ fn windows_targets() -> Vec<ResidueSpec> {
             polite_retained: true,
             requires_risk_ack: false,
         },
+        ResidueSpec {
+            id: "browser.residue.chromium-cache".to_owned(),
+            title: "Chromium web cache (open-source)".to_owned(),
+            category: ResidueCategory::BrowserCache,
+            description: "Cached web page assets and script bytecode for open-source Chromium builds.".to_owned(),
+            trade_off: "Visited websites will re-download assets; logins, cookies, and browsing history are preserved.".to_owned(),
+            polite_retained: false,
+            requires_risk_ack: false,
+        },
+        ResidueSpec {
+            id: "windows.residue.icon-cache".to_owned(),
+            title: "Windows Explorer icon cache".to_owned(),
+            category: ResidueCategory::ThumbnailCache,
+            description: "Cached desktop and application icon preview databases (iconcache_*.db) created by File Explorer.".to_owned(),
+            trade_off: "Explorer will rebuild icon caches on demand as applications and shortcuts are viewed.".to_owned(),
+            polite_retained: true,
+            requires_risk_ack: false,
+        },
+        ResidueSpec {
+            id: "dev.residue.nuget-cache".to_owned(),
+            title: "NuGet package and HTTP cache".to_owned(),
+            category: ResidueCategory::PackageCache,
+            description: "Cached .nupkg packages and HTTP response metadata in %LOCALAPPDATA%\\NuGet\\v3-cache.".to_owned(),
+            trade_off: "NuGet will re-download package metadata and packages on subsequent dotnet restore or build.".to_owned(),
+            polite_retained: true,
+            requires_risk_ack: false,
+        },
+        ResidueSpec {
+            id: "dev.residue.go-cache".to_owned(),
+            title: "Go compiler build cache".to_owned(),
+            category: ResidueCategory::PackageCache,
+            description: "Cached compilation artifacts and test results in %LOCALAPPDATA%\\go-build.".to_owned(),
+            trade_off: "Go will recompile packages on subsequent go build or go test execution.".to_owned(),
+            polite_retained: true,
+            requires_risk_ack: false,
+        },
     ]
 }
 

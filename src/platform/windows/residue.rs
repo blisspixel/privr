@@ -49,6 +49,9 @@ fn crash_dump_paths() -> Vec<PathBuf> {
     if let Some(lad) = local_app_data() {
         v.push(lad.join("CrashDumps"));
     }
+    if let Ok(sr) = std::env::var("SystemRoot") {
+        v.push(PathBuf::from(sr).join("Minidump"));
+    }
     v
 }
 
@@ -72,17 +75,60 @@ fn directx_shader_paths() -> Vec<PathBuf> {
     v
 }
 
+fn chromium_user_data_cache_paths(user_data_dir: &Path) -> Vec<PathBuf> {
+    let mut v = Vec::new();
+    if !user_data_dir.is_dir() {
+        return v;
+    }
+
+    // Top-level shared shader and GPU caches across profiles
+    let top_caches = [
+        "ShaderCache",
+        "GrShaderCache",
+        "GraphiteDawnCache",
+        "GPUPersistentCache",
+    ];
+    for name in &top_caches {
+        let p = user_data_dir.join(name);
+        if p.is_dir() {
+            v.push(p);
+        }
+    }
+
+    // Inspect profile subdirectories: "Default", "Profile *", "Guest Profile"
+    if let Ok(entries) = fs::read_dir(user_data_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let file_name = match path.file_name().and_then(|n| n.to_str()) {
+                Some(n) => n,
+                None => continue,
+            };
+
+            let is_profile = file_name == "Default"
+                || file_name == "Guest Profile"
+                || file_name.starts_with("Profile ");
+
+            if is_profile {
+                v.push(path.join("Cache"));
+                v.push(path.join("Code Cache"));
+                v.push(path.join("GPUCache"));
+                v.push(path.join("DawnCache"));
+                v.push(path.join("DawnGraphiteCache"));
+                v.push(path.join("DawnWebGPUCache"));
+            }
+        }
+    }
+    v
+}
+
 fn edge_cache_paths() -> Vec<PathBuf> {
     let mut v = Vec::new();
     if let Some(lad) = local_app_data() {
-        let edge_default = lad
-            .join("Microsoft")
-            .join("Edge")
-            .join("User Data")
-            .join("Default");
-        v.push(edge_default.join("Cache").join("Cache_Data"));
-        v.push(edge_default.join("Code Cache"));
-        v.push(edge_default.join("GPUCache"));
+        let edge_user_data = lad.join("Microsoft").join("Edge").join("User Data");
+        v.extend(chromium_user_data_cache_paths(&edge_user_data));
     }
     v
 }
@@ -90,14 +136,8 @@ fn edge_cache_paths() -> Vec<PathBuf> {
 fn chrome_cache_paths() -> Vec<PathBuf> {
     let mut v = Vec::new();
     if let Some(lad) = local_app_data() {
-        let chrome_default = lad
-            .join("Google")
-            .join("Chrome")
-            .join("User Data")
-            .join("Default");
-        v.push(chrome_default.join("Cache").join("Cache_Data"));
-        v.push(chrome_default.join("Code Cache"));
-        v.push(chrome_default.join("GPUCache"));
+        let chrome_user_data = lad.join("Google").join("Chrome").join("User Data");
+        v.extend(chromium_user_data_cache_paths(&chrome_user_data));
     }
     v
 }
@@ -265,13 +305,20 @@ fn firefox_cache_paths() -> Vec<PathBuf> {
 fn brave_cache_paths() -> Vec<PathBuf> {
     let mut v = Vec::new();
     if let Some(lad) = local_app_data() {
-        let default_dir = lad
+        let brave_user_data = lad
             .join("BraveSoftware")
             .join("Brave-Browser")
-            .join("User Data")
-            .join("Default");
-        v.push(default_dir.join("Cache"));
-        v.push(default_dir.join("Code Cache"));
+            .join("User Data");
+        v.extend(chromium_user_data_cache_paths(&brave_user_data));
+    }
+    v
+}
+
+fn chromium_cache_paths() -> Vec<PathBuf> {
+    let mut v = Vec::new();
+    if let Some(lad) = local_app_data() {
+        let user_data = lad.join("Chromium").join("User Data");
+        v.extend(chromium_user_data_cache_paths(&user_data));
     }
     v
 }
@@ -327,6 +374,35 @@ fn cargo_cache_paths() -> Vec<PathBuf> {
     let mut v = Vec::new();
     if let Some(up) = user_profile() {
         v.push(up.join(".cargo").join("registry").join("cache"));
+    }
+    v
+}
+
+fn icon_cache_paths() -> Vec<PathBuf> {
+    let mut v = Vec::new();
+    if let Some(lad) = local_app_data() {
+        v.push(lad.join("Microsoft").join("Windows").join("Explorer"));
+        v.push(lad);
+    }
+    v
+}
+
+fn icon_cache_filter(_parent: &Path, name: &str) -> bool {
+    (name.starts_with("iconcache_") && name.ends_with(".db")) || name == "IconCache.db"
+}
+
+fn nuget_cache_paths() -> Vec<PathBuf> {
+    let mut v = Vec::new();
+    if let Some(lad) = local_app_data() {
+        v.push(lad.join("NuGet").join("v3-cache"));
+    }
+    v
+}
+
+fn go_cache_paths() -> Vec<PathBuf> {
+    let mut v = Vec::new();
+    if let Some(lad) = local_app_data() {
+        v.push(lad.join("go-build"));
     }
     v
 }
@@ -453,7 +529,7 @@ static TARGET_RULES: &[TargetPathRule] = &[
     },
     TargetPathRule {
         target_id: "browser.residue.brave-cache",
-        path_display: "%LOCALAPPDATA%\\BraveSoftware\\Brave-Browser\\User Data\\Default\\Cache",
+        path_display: "%LOCALAPPDATA%\\BraveSoftware\\Brave-Browser\\User Data\\*\\Cache",
         resolve_paths: brave_cache_paths,
         file_filter: None,
         recurse_filter: None,
@@ -483,6 +559,34 @@ static TARGET_RULES: &[TargetPathRule] = &[
         target_id: "dev.residue.cargo-cache",
         path_display: "~/.cargo/registry/cache",
         resolve_paths: cargo_cache_paths,
+        file_filter: None,
+        recurse_filter: None,
+    },
+    TargetPathRule {
+        target_id: "browser.residue.chromium-cache",
+        path_display: "%LOCALAPPDATA%\\Chromium\\User Data\\*\\Cache",
+        resolve_paths: chromium_cache_paths,
+        file_filter: None,
+        recurse_filter: None,
+    },
+    TargetPathRule {
+        target_id: "windows.residue.icon-cache",
+        path_display: "%LOCALAPPDATA%\\Microsoft\\Windows\\Explorer\\iconcache_*.db",
+        resolve_paths: icon_cache_paths,
+        file_filter: Some(icon_cache_filter),
+        recurse_filter: None,
+    },
+    TargetPathRule {
+        target_id: "dev.residue.nuget-cache",
+        path_display: "%LOCALAPPDATA%\\NuGet\\v3-cache",
+        resolve_paths: nuget_cache_paths,
+        file_filter: None,
+        recurse_filter: None,
+    },
+    TargetPathRule {
+        target_id: "dev.residue.go-cache",
+        path_display: "%LOCALAPPDATA%\\go-build",
+        resolve_paths: go_cache_paths,
         file_filter: None,
         recurse_filter: None,
     },
@@ -1067,5 +1171,57 @@ mod tests {
         let cargo_paths = cargo_cache_paths();
         assert_eq!(cargo_paths.len(), 1);
         assert!(cargo_paths[0].to_string_lossy().contains(".cargo"));
+    }
+
+    #[test]
+    fn icon_cache_filter_and_package_resolvers() {
+        assert!(icon_cache_filter(Path::new("dummy"), "iconcache_32.db"));
+        assert!(icon_cache_filter(Path::new("dummy"), "iconcache_idx.db"));
+        assert!(icon_cache_filter(Path::new("dummy"), "IconCache.db"));
+        assert!(!icon_cache_filter(Path::new("dummy"), "thumbcache_32.db"));
+        assert!(!icon_cache_filter(Path::new("dummy"), "other.txt"));
+
+        let icon_paths = icon_cache_paths();
+        assert!(!icon_paths.is_empty());
+
+        let nuget_paths = nuget_cache_paths();
+        assert_eq!(nuget_paths.len(), 1);
+        assert!(nuget_paths[0].to_string_lossy().contains("NuGet"));
+
+        let go_paths = go_cache_paths();
+        assert_eq!(go_paths.len(), 1);
+        assert!(go_paths[0].to_string_lossy().contains("go-build"));
+    }
+
+    #[test]
+    fn chromium_cache_paths_resolves_profile_caches() {
+        let temp = std::env::temp_dir().join(format!("privr-chrometest-{}", std::process::id()));
+        let default_profile = temp.join("Default");
+        let profile_1 = temp.join("Profile 1");
+        let other_dir = temp.join("System Profile");
+        let _ = fs::create_dir_all(default_profile.join("Cache"));
+        let _ = fs::create_dir_all(profile_1.join("Code Cache"));
+        let _ = fs::create_dir_all(temp.join("ShaderCache"));
+        let _ = fs::create_dir_all(other_dir);
+
+        let paths = chromium_user_data_cache_paths(&temp);
+        let path_strs: Vec<String> = paths
+            .iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect();
+
+        assert!(path_strs.iter().any(|p| p.contains("ShaderCache")));
+        assert!(
+            path_strs
+                .iter()
+                .any(|p| p.contains("Default") && p.contains("Cache"))
+        );
+        assert!(
+            path_strs
+                .iter()
+                .any(|p| p.contains("Profile 1") && p.contains("Code Cache"))
+        );
+
+        let _ = fs::remove_dir_all(&temp);
     }
 }

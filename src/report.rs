@@ -805,6 +805,14 @@ pub fn render_purge_preview(
         group_map.entry(key).or_default().push(item);
     }
 
+    let max_title_len = items
+        .iter()
+        .map(|i| i.title.len())
+        .chain(trim.map(|t| format!("Solid-state drive free space TRIM ({})", t.volume).len()))
+        .max()
+        .unwrap_or(42)
+        .max(42);
+
     for ((_, group_title), group_items) in group_map {
         out.push_str(&format!("  {}\n", ui.paint(style::HEADING, group_title)));
         for item in group_items {
@@ -820,9 +828,10 @@ pub fn render_purge_preview(
                 let bullet = if ui.unicode() { "•" } else { "*" };
                 let tag = ui.paint(style::outcome_style(Outcome::Drift), bullet);
                 out.push_str(&format!(
-                    "    {tag} {:<42} {}\n",
+                    "    {tag} {:<width$} {}\n",
                     item.title,
-                    ui.paint(style::VALUE, &scope_str)
+                    ui.paint(style::VALUE, &scope_str),
+                    width = max_title_len
                 ));
             } else {
                 retained_count += 1;
@@ -836,10 +845,11 @@ pub fn render_purge_preview(
                     " [retained]".to_owned()
                 };
                 out.push_str(&format!(
-                    "    {tag} {:<42} {}{}\n",
+                    "    {tag} {:<width$} {}{}\n",
                     ui.paint(style::MUTED, &item.title),
                     ui.paint(style::MUTED, &scope_str),
-                    ui.paint(style::MUTED, &note)
+                    ui.paint(style::MUTED, &note),
+                    width = max_title_len
                 ));
             }
         }
@@ -855,9 +865,10 @@ pub fn render_purge_preview(
         if trim.supported {
             let tag = ui.paint(style::outcome_style(Outcome::Drift), bullet);
             out.push_str(&format!(
-                "    {tag} {:<42} {}\n\n",
+                "    {tag} {:<width$} {}\n\n",
                 format!("Solid-state drive free space TRIM ({})", trim.volume),
-                ui.paint(style::VALUE, "[eligible: SSD/NVMe volume, 0 B wear]")
+                ui.paint(style::VALUE, "[eligible: SSD/NVMe volume, 0 B wear]"),
+                width = max_title_len
             ));
         } else {
             let bullet_muted = if ui.unicode() { "•" } else { "-" };
@@ -868,9 +879,10 @@ pub fn render_purge_preview(
                 "[skipped: media type unverified, TRIM skipped for safety]"
             };
             out.push_str(&format!(
-                "    {tag} {:<42} {}\n\n",
+                "    {tag} {:<width$} {}\n\n",
                 format!("Solid-state drive free space TRIM ({})", trim.volume),
-                ui.paint(style::MUTED, skip_desc)
+                ui.paint(style::MUTED, skip_desc),
+                width = max_title_len
             ));
         }
     }

@@ -231,3 +231,73 @@ fn absolute_overrides_work_without_home_and_missing_cache_root_is_explained() {
             "no absolute user root is available",
         ));
 }
+
+#[test]
+fn default_cleanup_removes_supported_activity_with_one_confirmation() {
+    let fixture = Fixture::new();
+    let cache = fixture.0.join("override/cache/pip/canary");
+    let recent = fixture.0.join("override/data/recently-used.xbel");
+    let history = fixture
+        .0
+        .join("override/data/powershell/PSReadLine/ConsoleHost_history.txt");
+    let document = fixture.0.join("home/Documents/work.txt");
+    let selected = [cache, recent, history];
+    for path in selected.iter().chain([&document]) {
+        seed(path);
+    }
+    fixture
+        .command(Some("absolute"), true)
+        .args(["clean", "--preview", "--yes"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Deletion is permanent"))
+        .stdout(predicate::str::contains("linux.residue.powershell-history"))
+        .stdout(predicate::str::contains("Close PowerShell first"));
+    assert_preserved(&selected);
+    let preview = fixture
+        .command(Some("absolute"), true)
+        .args(["clean", "--preview", "--format", "json"])
+        .assert()
+        .success();
+    let preview: serde_json::Value =
+        serde_json::from_slice(&preview.get_output().stdout).expect("preview JSON");
+    let item = preview["items"]
+        .as_array()
+        .expect("items")
+        .iter()
+        .find(|item| item["id"] == "linux.residue.powershell-history")
+        .expect("history target");
+    assert!(
+        item["trade_off"]
+            .as_str()
+            .expect("tradeoff")
+            .contains("open shells can rewrite history")
+    );
+    fixture
+        .command(Some("absolute"), true)
+        .args(["clean", "--yes"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("3 files removed"));
+    for path in &selected {
+        assert!(
+            !path.exists(),
+            "default cleanup must remove supported residue"
+        );
+    }
+    assert_preserved(&[document]);
+}
+
+#[test]
+fn cleanup_help_describes_linux_targets_and_all_main_categories() {
+    let mut command = Command::cargo_bin("privr").expect("binary");
+    command
+        .args(["clean", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("GTK recently used files"))
+        .stdout(predicate::str::contains("Mozilla Firefox"))
+        .stdout(predicate::str::contains("app, apps:"))
+        .stdout(predicate::str::contains("%TEMP%").not())
+        .stdout(predicate::str::contains("DirectX").not());
+}

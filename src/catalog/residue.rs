@@ -216,7 +216,7 @@ fn windows_targets() -> Vec<ResidueSpec> {
             title: "PowerShell console command history".to_owned(),
             category: ResidueCategory::RecentActivity,
             description: "Plaintext command history recorded by PSReadLine (ConsoleHost_history.txt), which frequently captures sensitive parameters and paths.".to_owned(),
-            trade_off: "Clears command recall across PowerShell sessions; aliases, functions, and profiles are untouched.".to_owned(),
+            trade_off: "Permanently removes saved ConsoleHost command recall. Close PowerShell first; open shells can rewrite history. Custom history paths and other hosts are not covered.".to_owned(),
             polite_retained: true,
             requires_risk_ack: false,
         },
@@ -312,7 +312,7 @@ fn linux_targets() -> Vec<ResidueSpec> {
             title: "PowerShell console command history".to_owned(),
             category: ResidueCategory::RecentActivity,
             description: "Plaintext command history recorded by PSReadLine in $XDG_DATA_HOME/powershell.".to_owned(),
-            trade_off: "Clears command recall across PowerShell sessions; profiles and shell functions are untouched.".to_owned(),
+            trade_off: "Permanently removes saved ConsoleHost command recall. Close PowerShell first; open shells can rewrite history. Custom history paths and other hosts are not covered.".to_owned(),
             polite_retained: true,
             requires_risk_ack: false,
         },
@@ -560,8 +560,8 @@ fn macos_targets() -> Vec<ResidueSpec> {
             id: "macos.residue.powershell-history".to_owned(),
             title: "PowerShell console command history".to_owned(),
             category: ResidueCategory::RecentActivity,
-            description: "Plaintext command history recorded by PSReadLine in ~/Library/Application Support/powershell.".to_owned(),
-            trade_off: "Clears command recall across PowerShell sessions; profiles and shell functions are untouched.".to_owned(),
+            description: "Plaintext command history recorded by PSReadLine under XDG_DATA_HOME/powershell or ~/.local/share/powershell.".to_owned(),
+            trade_off: "Permanently removes saved ConsoleHost command recall. Close PowerShell first; open shells can rewrite history. Custom history paths and other hosts are not covered.".to_owned(),
             polite_retained: true,
             requires_risk_ack: false,
         },
@@ -725,6 +725,28 @@ mod tests {
                 !thumb_pol.unwrap().1,
                 "QuickLook cache should be retained in polite mode"
             );
+        }
+    }
+
+    #[test]
+    fn thorough_default_includes_activity_without_additional_acknowledgement() {
+        let targets = select_residue_targets(PurgeMode::Aggressive, &[], &[]);
+        let activity: Vec<_> = targets
+            .iter()
+            .filter(|(spec, _, _)| spec.category == ResidueCategory::RecentActivity)
+            .collect();
+        assert!(
+            !activity.is_empty(),
+            "the compiled platform must expose its activity targets"
+        );
+        for (spec, selected, reason) in activity {
+            assert!(*selected, "{} must be selected by default", spec.id);
+            assert!(reason.is_none());
+            assert!(
+                !spec.requires_risk_ack,
+                "routine history cleanup uses whole-plan confirmation"
+            );
+            assert!(!spec.trade_off.is_empty());
         }
     }
 

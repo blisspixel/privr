@@ -171,8 +171,9 @@ does not continuously reapply a conflicting local preference.
 
 The project rejects features that:
 
-- clear security, forensic, crash, or shell-history records as routine privacy
-  remediation;
+- clear security or audit records, or perform generic anti-forensic scrubbing;
+  ordinary command recall and recent activity are separate admitted `clean`
+  targets under decision 13;
 - delete user documents or cloud data;
 - disable updates, encryption, firewalling, or real-time malware protection in
   the default policy;

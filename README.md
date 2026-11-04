@@ -56,8 +56,8 @@ designed to be driven by an agent harness as readily as by a person.
 - **Custom policy engine is implemented**: `check`, `plan`, and `apply` accept `--policy <FILE>` supporting schema 1 TOML and JSON formats. Policies extend built-in profiles (`baseline`, `strict`, `restrictive`), allow per-control mode and desired-state overrides, and support ISO-dated exceptions (`[[exceptions]]`). Active exceptions are distinguished from absent risk in posture reports and safely excluded from automated remediation until expiry.
 - **Agent integration (`privr mcp`) is implemented**, providing a stdio Model Context Protocol (MCP) server exposing `privr_check` (with post-update regression comparison), `privr_plan`, `privr_apply`, `privr_recommend`, `privr_simulate`, `privr_explain`, `privr_clean`, `privr_history`, and `privr_doctor` with Agent Plugins v1.0.0 packaging.
 
-Cleanup remains experimental: unresolved defects include the history-selection
-documentation contract and incomplete cleanup journals. See the known
+Cleanup remains experimental: per-target native validation and complete cleanup
+journals remain outstanding. See the known
 issues below before using deletion workflows.
 
 The full state, including known defects, is in
@@ -93,27 +93,29 @@ explicit risk acceptance (`--accept-risk <id>` or `--force`) for high-friction c
 PowerShell session-only history is implemented as a guided review control
 (`windows.shell.history-persistence`) and architectural walkthrough (`privr explain shell`),
 with [its scope and tradeoffs](docs/PRIVACY_RESIDUE.md#shell-command-histories) documented.
-Cache and disposable-temp cleanup is implemented (`privr clean`, alias `privr purge`),
-thorough by default, with `--polite` retaining disruptive caches. Both modes
-protect OS operation, recovery, and active work; login state, history, and
-persistent site data require separate selection and approval. Unconfirmed calls
-preview the plan. Hardware SSD TRIM (`--trim`) is available to restore solid-state performance.
+Privacy cleanup is implemented (`privr clean`, alias `privr purge`), thorough by
+default across supported caches, temporary residue, recent-file lists, and saved
+PowerShell ConsoleHost history. One preview and confirmation approves permanent
+deletion; `--yes` confirms it in scripts. Close affected applications first,
+because they can recreate records. `--polite` offers reduced cleanup. Browser
+cookies, browser history, and site/session storage are not implemented targets
+yet. Actual user content and recovery material remain outside routine cleanup.
+See [cleanup scope and limits](docs/CLI.md#clean-alias-purge).
 
 ## Where it is going
 
-`plan` exists today only as a flat list. This is the intended shape: changes
-grouped into sections you approve one at a time, every tradeoff paired with a
-way to keep the capability, and a plan that changes nothing.
+`plan` previews configuration changes without applying them. Section-by-section
+approval is implemented in `apply`. The illustration below shows a proposed
+presentation of those changes and their tradeoffs, not current terminal output.
 
 ![privr plan, showing changes grouped into sections, a tradeoff paired with a mitigation, and confirmation that nothing has been changed](docs/assets/plan-linux.svg)
 
-The image is a mockup of unimplemented behaviour, unlike the output above it.
+The image is a presentation mockup, unlike the captured output above it.
 
-Local retention matters too. Planned PowerShell support will recommend
-session-only command history at baseline, keeping recall in the current shell
-without saving new PSReadLine history across sessions. The plan will disclose
-the loss of cross-session recall. Bounded retention and cleanup of existing
-history need further research; security logs remain outside this setting.
+Local retention matters too. PowerShell guidance recommends session-only
+command history, keeping recall in the current shell without saving new
+PSReadLine history across sessions. It discloses the loss of cross-session recall. Bounded retention needs further research. Existing ConsoleHost history cleanup
+is a separate `clean` target; security logs remain outside both workflows.
 Predictive suggestions are a separate option. See the
 [roadmap](ROADMAP.md#powershell-session-only-history-planned).
 
@@ -223,7 +225,7 @@ privr clean (or privr purge)
 - `apply` (aliases: `fix`, `harden`) executes safe, verified remediation with transaction journaling, interactive plan review, section-by-section approval (`-i, --interactive-sections`), and native in-place elevation (`-e, --elevate`). Running `privr apply` without arguments is limited to Tier 0 and Tier 1 (transparent and cosmetic) daily-driver controls. Confirmation defaults to no; interactive mode offers whole-batch approval (`[y]`), section-by-section review (`[s]`), detailed diff (`[d]`), or cancelling (`[q]`). Stopping partway is treated as verified success (`stopped X sections applied, Y deferred`). A non-interactive shell must pass `--yes` after `privr plan`.
 - `history` (alias: `log`) lists previous transactions, timestamps, applied control counts, and profiles. Running `privr history --purge` (with `-y / --yes`) permanently purges and destroys transaction records from disk.
 - `rollback` (aliases: `restore`, `undo`) restores exact prior values. Running `privr undo` without arguments automatically targets the most recent transaction recorded on disk.
-- `clean` (alias: `purge`) safely inspects and purges disposable temporary files, crash dumps, browser caches, AI agent residue, developer caches, and recent activity residue. Logins, credentials, session databases, and browser cookies are strictly preserved. Optional hardware TRIM (`--trim`) safely informs solid-state drive (SSD/NVMe) controllers of unallocated blocks to eliminate flash wear and restore peak write performance. Running in an interactive terminal displays an organized dashboard preview and prompts before deleting anything (`privr clean --preview` forces read-only preview; `--polite` retains disruptive caches like thumbnails and recent items; `-c/--category` targets specific categories like `ai`, `browsers`, `dev`, `recent`, `system`).
+- `clean` (alias: `purge`) removes the supported privacy residue described above. Review with `clean --preview`, then confirm interactively or use `clean --yes`. History deletion is irreversible. `--polite` reduces scope; `--category` and `--control` narrow it. `--trim` requests separate free-space maintenance, not secure erasure.
 
 The full command and exit-code contract is in [docs/CLI.md](docs/CLI.md).
 

@@ -439,9 +439,9 @@ pub fn render_residue_explanation(ui: &Ui) -> String {
     ));
     out.push('\n');
     out.push_str(&ui.wrap(
-        "- Aggressive Mode (default for deep cleans): Performs an exhaustive forensic clean of all reviewed \
-         categories, removing historical activity timelines, command histories, Jump Lists, package archives, \
-         and thumbnail/icon caches.",
+        "- Aggressive Mode (the thorough default): Removes supported caches, recent activity, saved ConsoleHost \
+         command history, Jump Lists, and package archives. One preview and confirmation approves permanent \
+         cleanup. Coverage depends on the compiled platform targets; this is not a claim that all traces are gone.",
         4,
     ));
     out.push_str("\n\n");
@@ -473,8 +473,9 @@ pub fn render_residue_explanation(ui: &Ui) -> String {
     ));
     out.push('\n');
     out.push_str(&ui.wrap(
-        "- Session Preservation: Unlike blunt cleaners that log users out of all websites, privr cleans HTTP \
-         assets, images, and script bytecode while preserving cookies, authenticated sessions, and passwords.",
+        "- Browser Coverage: Current browser adapters clean HTTP assets, images, and script bytecode. Cookie, \
+         browsing-history, and session-residue clearing are not implemented yet. Those traces remain; \
+         future validated targets should disclose sign-outs in the cleanup preview. Saved passwords remain user content.",
         4,
     ));
     out.push_str("\n\n");
@@ -737,8 +738,9 @@ pub fn render_shell_history_explanation(ui: &Ui) -> String {
     ));
     out.push('\n');
     out.push_str(&ui.wrap(
-        "- Residue Purge: Running 'privr clean -c recent' safely targets existing PSReadLine history files \
-         while preserving user profile configurations, functions, and environment variables.",
+        "- Residue Cleanup: The thorough default includes the saved ConsoleHost history file; 'privr clean -c recent' \
+         narrows cleanup to activity records. Deletion is permanent. Close PowerShell first because open shells \
+         can rewrite history. Custom history paths, other hosts, and in-memory recall are not covered.",
         2,
     ));
     out.push('\n');

@@ -74,7 +74,7 @@ policy.
 
 ### Planned residue tests
 
-Purge is not implemented. Its admission criteria, preservation tests, failure
+Cleanup is experimental. Its remaining admission criteria, isolation tests, failure
 cases, privacy canaries, and performance measurements are specified in the
 [privacy cache capability plan](CACHE_PRIVACY_PLAN.md#required-failure-evidence).
 Use recorded Context observations for ordinary tests and synthetic data in

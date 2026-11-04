@@ -911,7 +911,7 @@ pub fn render_purge_preview(
     trim: Option<&crate::model::residue::TrimStatus>,
 ) -> String {
     let mut out = String::new();
-    let header = format!("privr clean (preview, {} mode)\n\n", mode.as_str());
+    let header = format!("privr clean (preview, {} mode)\n\n", mode.display_name());
     out.push_str(&ui.paint(style::HEADING, &header));
 
     let mut selected_files = 0;
@@ -957,6 +957,10 @@ pub fn render_purge_preview(
                     ui.paint(style::VALUE, &scope_str),
                     width = max_title_len
                 ));
+                out.push_str(&format!("      {}\n", item.id));
+                if !item.trade_off.is_empty() {
+                    out.push_str(&format!("      {}\n", item.trade_off));
+                }
             } else {
                 retained_count += 1;
                 retained_bytes += item.size_bytes;
@@ -1011,6 +1015,12 @@ pub fn render_purge_preview(
         }
     }
 
+    out.push_str("Deletion is permanent; cleanup cannot be rolled back.\n");
+    if items.iter().any(|item| {
+        item.selected && item.category == crate::model::residue::ResidueCategory::RecentActivity
+    }) {
+        out.push_str("Selected history and recent activity will be removed. Close affected applications first; open applications can recreate records.\n");
+    }
     out.push_str(&format!(
         "Plan: {} to clean ({}, {} files), {} retained ({}).\n",
         selected_count,
@@ -1030,7 +1040,7 @@ pub fn render_purge_report(
     tx_id: Option<&str>,
 ) -> String {
     let mut out = String::new();
-    let header = format!("privr clean ({} mode)\n\n", report.mode.as_str());
+    let header = format!("privr clean ({} mode)\n\n", report.mode.display_name());
     out.push_str(&ui.paint(style::HEADING, &header));
 
     let mut group_map: std::collections::BTreeMap<

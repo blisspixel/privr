@@ -15,10 +15,14 @@ impl DoctorStorage {
 
     fn command(&self) -> Command {
         let mut command = Command::cargo_bin("privr").expect("binary");
+        self.isolate(&mut command);
+        command
+    }
+
+    fn isolate(&self, command: &mut Command) {
         command
             .env("XDG_DATA_HOME", &self.0)
             .env("LOCALAPPDATA", &self.0);
-        command
     }
 }
 
@@ -564,12 +568,31 @@ fn clean_preview_with_trim_json_contains_trim_status() {
 
 #[test]
 fn history_purge_with_yes_executes_safely() {
-    let mut command = Command::cargo_bin("privr").expect("binary");
+    let inherited = DoctorStorage::new();
+    let isolated = DoctorStorage::new();
+    let record = br#"{"schema":1,"transaction_id":"apply-test","timestamp":"1.000","platform":"linux","profile":"baseline","operations":[]}"#;
+    let seed = |storage: &DoctorStorage| {
+        let root = storage.0.join("privr/state/transactions");
+        std::fs::create_dir_all(&root).expect("create fixture journal root");
+        let path = root.join("apply-test.json");
+        std::fs::write(&path, record).expect("seed fixture journal");
+        path
+    };
+    let sentinel = seed(&inherited);
+    let selected = seed(&isolated);
+    // Simulate inherited user storage using a second disposable root. Override
+    // only this child, never the process-wide environment of parallel tests.
+    let mut command = inherited.command();
+    isolated.isolate(&mut command);
     command
         .args(["history", "--purge", "-y"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Purged"));
+        .stdout(predicate::str::contains(
+            "Purged 1 transaction history record(s).",
+        ));
+    assert!(!selected.exists(), "the isolated record must be purged");
+    assert_eq!(std::fs::read(sentinel).expect("preserved sentinel"), record);
 }
 
 #[test]

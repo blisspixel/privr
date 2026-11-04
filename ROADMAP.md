@@ -44,7 +44,7 @@ milestone and its results should not be trusted.
 | Profile ladder | Implemented and verified. Baseline <= Strict <= Restrictive ladder partitions controls monotonically. |
 | Custom policy files | Implemented and tested. Schema 1 TOML and JSON engine supporting base profile inheritance (`extends = "builtin:baseline@0.1"`), per-control mode and desired-state overrides, and ISO-dated exceptions (`[[exceptions]]`). Active exceptions are distinguished from absent risk in posture reports and safely excluded from automated remediation until expiry. |
 | PowerShell session-only history | Implemented and tested. `windows.shell.history-persistence` guides interactive PSReadLine verification and profile configuration. Explanations walk through line-editing retention mechanics and security audit log boundaries. |
-| Privacy-cache inspection and clearing | Implemented and verified across Windows, Linux, and macOS. `privr clean` (alias `privr purge`) inspects and safely removes reviewed disposable temporary files, crash dumps, browser caches, AI agent scratch files, package manager caches, and recent activity residue across native locations ($XDG_CACHE_HOME, ~/Library/Caches, %LOCALAPPDATA%). Includes preview dashboard, category filtering, polite retention mode, and hardware SSD TRIM / Deallocate (`--trim`). See [candidate priorities, sources, and safety gates](docs/CACHE_PRIVACY_PLAN.md). |
+| Privacy-cache inspection and clearing | Implemented but experimental on Windows, Linux, and macOS. Linux playtesting found unresolved root-resolution, default-selection, and journal defects (issues 49, 50, and 57); cross-platform preservation and interruption validation remain required. `privr clean` (alias `privr purge`) inspects and removes catalogued temporary files, crash dumps, browser caches, AI agent scratch files, package manager caches, and recent activity residue across native locations ($XDG_CACHE_HOME, ~/Library/Caches, %LOCALAPPDATA%). Includes preview dashboard, category filtering, polite retention mode, and hardware SSD TRIM / Deallocate (`--trim`). See [candidate priorities, sources, and safety gates](docs/CACHE_PRIVACY_PLAN.md). |
 | Fixture files | Implemented and tested for 10 Windows controls (advertising ID, Copilot shell integration, Recall snapshots, diagnostic data, LLMNR, WPAD auto-discovery, thumbnail cache, tailored experiences, web search, delivery optimization), covering 96 synthetic observation states across compliant, drift, denied, malformed, and OS build-gated inputs. The compiled probes and evaluator run against exact typed bytes through recorded Context. |
 | Staleness, signed releases | Review staleness implemented with mathematical ceiling precision (`actual.exceeds_ceiling(ceiling)`) and dynamic doctor staleness reporting. Signed binaries remain open. A source tag records a green `main` commit only. |
 
@@ -55,6 +55,19 @@ fixed, or the affected path disabled, before the milestone it belongs to can
 exit.
 
 Mutation (blocks 0.2.0):
+
+- [x] The confirmed history-purge CLI test used the developer's journal root
+  (issue 51). The child now overrides both platform storage variables with an
+  absolute temporary root. It proves one seeded record is removed while a
+  second disposable root's sentinel remains byte-for-byte unchanged.
+- [ ] Invalid XDG roots can redirect cleanup and journals into the working
+  directory (issue 49). Empty and relative fallback roots also need validation.
+- [ ] Default cleanup selects command history and recent-file lists despite
+  the documented preservation contract (issue 50). Existing shell-history
+  erasure still requires a scope review.
+- [ ] Cleanup journals lack target totals and interruption state (issue 57).
+
+The remaining Linux playtest findings are tracked in [issue 65](https://github.com/blisspixel/privr/issues/65).
 
 - [x] `apply` writes before journaling, and a failed journal write only warns
   and continues. (Fixed: transaction journal establishes writability before

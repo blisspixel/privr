@@ -1184,9 +1184,10 @@ fn handle_tools_call_with_check_context(
                         match automatic_elevation_decision(c, &eval, is_elevated, filter.is_some())
                         {
                             ElevationDecision::Refuse => {
-                                let initial_path = crate::journal::transactions_dir()
-                                    .join(format!("{tx_id}.json"));
-                                let _ = std::fs::remove_file(initial_path);
+                                if let Ok(root) = crate::journal::transactions_dir() {
+                                    let _ =
+                                        std::fs::remove_file(root.join(format!("{tx_id}.json")));
+                                }
                                 return tool_error(format!(
                                     "Control '{}' requires administrative privileges (run privr as Administrator).",
                                     c.spec.id
@@ -1231,9 +1232,10 @@ fn handle_tools_call_with_check_context(
                 }
             }
 
-            if journal.operations.is_empty() {
-                let initial_path = crate::journal::transactions_dir().join(format!("{tx_id}.json"));
-                let _ = std::fs::remove_file(initial_path);
+            if journal.operations.is_empty()
+                && let Ok(root) = crate::journal::transactions_dir()
+            {
+                let _ = std::fs::remove_file(root.join(format!("{tx_id}.json")));
             }
 
             let report = json!({
@@ -1563,8 +1565,10 @@ fn handle_tools_call_with_check_context(
                     Err(e) => Err((-32603, format!("Failed to purge transaction history: {e}"))),
                 }
             } else {
-                let txs = crate::journal::list_transactions();
-                tool_success(serde_json::to_string_pretty(&txs).unwrap_or_default())
+                match crate::journal::list_transactions() {
+                    Ok(txs) => tool_success(serde_json::to_string_pretty(&txs).unwrap_or_default()),
+                    Err(error) => tool_error(error.to_string()),
+                }
             }
         }
         "privr_clean" => {
@@ -1623,6 +1627,16 @@ fn handle_tools_call_with_check_context(
                 crate::model::residue::PurgeMode::Aggressive
             };
 
+            let target_specs = crate::catalog::residue::select_residue_targets(
+                mode,
+                &control_filter,
+                &category_filter,
+            );
+
+            if let Err(reason) = crate::platform::validate_residue_roots(&target_specs) {
+                return tool_error(reason);
+            }
+
             let trim_status = if trim {
                 if dry_run {
                     Some(crate::platform::check_volume_trim_support())
@@ -1632,12 +1646,6 @@ fn handle_tools_call_with_check_context(
             } else {
                 None
             };
-
-            let target_specs = crate::catalog::residue::select_residue_targets(
-                mode,
-                &control_filter,
-                &category_filter,
-            );
 
             if dry_run {
                 let mut preview_items = Vec::new();

@@ -60,8 +60,11 @@ Mutation (blocks 0.2.0):
   (issue 51). The child now overrides both platform storage variables with an
   absolute temporary root. It proves one seeded record is removed while a
   second disposable root's sentinel remains byte-for-byte unchanged.
-- [ ] Invalid XDG roots can redirect cleanup and journals into the working
-  directory (issue 49). Empty and relative fallback roots also need validation.
+- [x] Invalid XDG roots could redirect cleanup and journals into the working
+  directory (issue 49). Empty and relative overrides now use only an absolute
+  home fallback. Missing valid roots refuse selected cleanup and journal access
+  before mutation. Disposable CLI fixtures cover cache, config, data, and
+  journal locations, including unchanged working-directory canaries.
 - [ ] Default cleanup selects command history and recent-file lists despite
   the documented preservation contract (issue 50). Existing shell-history
   erasure still requires a scope review.

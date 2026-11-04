@@ -2906,6 +2906,7 @@ Run privr explain without arguments for the posture overview, or privr list to s
                                     id: i.id.clone(),
                                     title: i.title.clone(),
                                     category: i.category,
+                                    trade_off: i.trade_off.clone(),
                                     files_removed: i.file_count,
                                     bytes_reclaimed: i.size_bytes,
                                     files_retained: 0,
@@ -2955,9 +2956,9 @@ Run privr explain without arguments for the posture overview, or privr list to s
                 let prompt_text = if selected_count == 0 && trim {
                     "\nIssue hardware TRIM to SSD? [y/N]: "
                 } else if trim {
-                    "\nClean selected residue and issue hardware TRIM? [y/N]: "
+                    "\nPermanently clean selected residue and issue hardware TRIM? [y/N]: "
                 } else {
-                    "\nClean selected residue? [y/N]: "
+                    "\nPermanently clean selected residue? [y/N]: "
                 };
                 let _ = write!(out, "{}", prompt_text);
                 let _ = out.flush();

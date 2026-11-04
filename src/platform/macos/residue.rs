@@ -28,10 +28,6 @@ fn user_caches() -> Option<PathBuf> {
     user_library().map(|lib| lib.join("Caches"))
 }
 
-fn user_app_support() -> Option<PathBuf> {
-    user_library().map(|lib| lib.join("Application Support"))
-}
-
 fn safari_cache_paths() -> Vec<PathBuf> {
     let mut v = Vec::new();
     if let Some(caches) = user_caches() {
@@ -254,10 +250,9 @@ fn go_cache_paths() -> Vec<PathBuf> {
 
 fn powershell_history_paths() -> Vec<PathBuf> {
     let mut v = Vec::new();
-    if let Some(app_sup) = user_app_support() {
+    if let Some(data) = crate::platform::xdg::user_root("XDG_DATA_HOME", ".local/share") {
         v.push(
-            app_sup
-                .join("powershell")
+            data.join("powershell")
                 .join("PSReadLine")
                 .join("ConsoleHost_history.txt"),
         );
@@ -385,7 +380,7 @@ static TARGET_RULES: &[TargetPathRule] = &[
     },
     TargetPathRule {
         target_id: "macos.residue.powershell-history",
-        path_display: "~/Library/Application Support/powershell/PSReadLine/ConsoleHost_history.txt",
+        path_display: "$XDG_DATA_HOME/powershell/PSReadLine/ConsoleHost_history.txt",
         resolve_paths: powershell_history_paths,
         file_filter: None,
         recurse_filter: None,
@@ -614,6 +609,7 @@ pub fn inspect_target(
         id: spec.id.clone(),
         title: spec.title.clone(),
         category: spec.category,
+        trade_off: spec.trade_off.clone(),
         path_display,
         file_count,
         size_bytes,
@@ -644,6 +640,7 @@ pub fn purge_target(spec: &ResidueSpec) -> ResiduePurgeItem {
                 id: spec.id.clone(),
                 title: spec.title.clone(),
                 category: spec.category,
+                trade_off: spec.trade_off.clone(),
                 files_removed: total_removed,
                 bytes_reclaimed: total_bytes,
                 files_retained: total_retained,
@@ -654,6 +651,7 @@ pub fn purge_target(spec: &ResidueSpec) -> ResiduePurgeItem {
             id: spec.id.clone(),
             title: spec.title.clone(),
             category: spec.category,
+            trade_off: spec.trade_off.clone(),
             files_removed: 0,
             bytes_reclaimed: 0,
             files_retained: 0,

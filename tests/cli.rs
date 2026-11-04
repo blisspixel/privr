@@ -782,3 +782,50 @@ mode = "ignore"
     let output = String::from_utf8(assert.get_output().stdout.clone()).expect("utf-8");
     assert!(output.contains("custom (extends baseline)"));
 }
+
+#[test]
+fn console_history_cleanup_uses_the_documented_platform_root() {
+    let storage = DoctorStorage::new();
+    let root = if cfg!(windows) {
+        storage.0.join("Microsoft/Windows/PowerShell/PSReadLine")
+    } else {
+        storage.0.join("powershell/PSReadLine")
+    };
+    std::fs::create_dir_all(&root).expect("fixture history directory");
+    let history = root.join("ConsoleHost_history.txt");
+    std::fs::write(&history, "fixture command recall").expect("seed history");
+    let id = if cfg!(windows) {
+        "windows.residue.powershell-history"
+    } else if cfg!(target_os = "macos") {
+        "macos.residue.powershell-history"
+    } else {
+        "linux.residue.powershell-history"
+    };
+    for preview in [true, false] {
+        let mut command = storage.command();
+        command
+            .env("HOME", &storage.0)
+            .env("USERPROFILE", &storage.0)
+            .env("APPDATA", &storage.0)
+            .env("XDG_CACHE_HOME", &storage.0)
+            .env("XDG_CONFIG_HOME", &storage.0)
+            .env("TEMP", &storage.0)
+            .env("TMP", &storage.0)
+            .args(["clean", "--control", id, "--yes", "--format", "json"]);
+        if preview {
+            command.arg("--preview");
+        }
+        let output = command.assert().success();
+        let report: serde_json::Value =
+            serde_json::from_slice(&output.get_output().stdout).expect("JSON");
+        assert_eq!(report["total_files_affected"], 1);
+        assert_eq!(report["dry_run"], preview);
+        assert_eq!(history.exists(), preview);
+        assert!(
+            report["items"][0]["trade_off"]
+                .as_str()
+                .expect("tradeoff")
+                .contains("Close PowerShell first")
+        );
+    }
+}

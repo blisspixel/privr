@@ -2,11 +2,11 @@
 
 ## Purpose and scope
 
-Status: research inventory and proposed architecture. `purge` is not implemented.
-Artifact descriptions are research candidates, not validated control contracts
-or authorization to clear data. Decision 13 and the roadmap exclusions govern
-eligibility. Crash, security, audit, forensic, shell-history, and cloud erasure
-remain excluded; prevention settings are separate choices.
+Status: research inventory alongside experimental `clean` implementations.
+Artifact descriptions below are research candidates, not validated control
+contracts or authorization to clear arbitrary data. Decision 13 governs scope:
+supported ordinary history belongs in thorough cleanup; security/audit records
+and cloud deletion remain excluded. See the roadmap for implemented coverage.
 
 The [privacy cache capability plan](CACHE_PRIVACY_PLAN.md) defines candidate
 priorities, primary sources for common cache workflows, and implementation
@@ -288,9 +288,10 @@ Local privacy residue presents four distinct threat vectors:
 
 #### Shell command histories
 
-Status: proposed baseline prevention recommendation, not implemented. Bounded
-retention and existing-history cleanup need research; erasure remains excluded
-pending the roadmap's scope review.
+Status: guided session-only prevention is implemented. Experimental cleanup
+removes the default ConsoleHost history file as part of thorough `clean`.
+Bounded retention, custom paths, additional hosts, and open-writer behavior
+need further validation. Ordinary recall is admitted under decision 13.
 
 PowerShell's session history and PSReadLine's history are separate. PSReadLine
 normally saves commands to a host-specific file and filters some sensitive
@@ -363,50 +364,34 @@ personalized history and profile paths.
 
 ## Architectural design for `privr purge`
 
-Under decision 13 in `docs/DECISIONS.md`:
-
-- `privr` does not perform unprincipled disk cleaning or arbitrary file deletion.
-- It invokes documented vendor erasure actions only.
-- Erasure lives behind its own verb (`purge`), never in the default profile,
-  never part of `apply`, and never reachable from `--yes`.
-- Every purge requires an explicit confirmation flag (`--accept-risk <target>`).
-- Every purge writes a transaction journal entry recording that rollback is
-  unavailable and why, so a subsequent rollback fails loudly and truthfully.
+Under decision 13 in `docs/DECISIONS.md`, cleanup uses compiled, narrowly bounded
+operations for documented local artifacts. It is separate from configuration
+`apply` and requires one whole-plan confirmation. Routine supported activity
+records belong in the default scope; actual user content, security/audit logs,
+and cloud deletion do not.
 
 ### CLI command contract
 
 ```text
-privr purge [--control <id>] [--polite] [--preview] [--accept-risk <control-id>]
+privr clean [--control <id>] [--polite] [--preview] [--yes]
 ```
 
-Aggressive clearing is the default intensity within reviewed disposable caches
-and temporary files. Both modes preserve cookies, persistent site data, history,
-and recent-file lists unless separately selected and approved. `--polite`
-additionally retains caches classified as disruptive to rebuild. Both modes
-preserve OS operation and recovery, and honor explicit user exceptions.
-Intensity does not authorize deletion:
-unconfirmed calls preview their selected mode, and execution requires each
-target's named acknowledgement. `--preview` always forbids mutation. See
-[the full mode contract](CACHE_PRIVACY_PLAN.md#aggressive-and-polite-clearing).
+`purge` is an alias. A terminal shows a preview and asks for confirmation.
+Noninteractive calls preview unless `--yes` is supplied. `--preview` always
+prevents mutation. The default includes supported recent activity and saved
+command recall; `--polite` deliberately reduces scope. Tradeoffs appear beside
+target IDs before approval. Browser cookies, history, and session residue need
+future validated adapters and must not be described as cleared today.
 
-1. **Default mode (`--preview`):**
-   - Read-only audit of residue targets.
-   - Measures on-disk footprint in human-readable and versioned JSON formats.
-   - Reports whether the generating mechanism is still enabled (identifying
-     whether residue will immediately regenerate).
-   - Identifies the authoritative vendor clear mechanism.
-   - Produces no side effects on the machine.
-
-2. **Execution mode:**
-   - Requires explicit target naming and `--accept-risk <target>`.
-   - Dispatches only compiled, allowlisted operations through documented vendor
-     mechanisms. Third-party cleaner rules do not establish platform support.
-   - Verifies the post-state after invocation.
-   - Logs the irreversible operation to `privr history`.
+Reports should expose verification limits and interrupted state. Cleanup cannot
+be reversed; its journal must not imply otherwise. Per-target totals and
+interruption handling remain known gaps in issue 57. See the
+[command contract](CLI.md#clean-alias-purge) and
+[validation plan](CACHE_PRIVACY_PLAN.md).
 
 ### Candidate eligibility
 
-No entry in this inventory is a supported purge target. Preserve existing
+An entry in this research inventory alone does not establish a supported purge target. Preserve existing
 catalogue IDs and review new ones under the control standard before inclusion.
 
 | Candidate | Eligibility | Mechanism evidence required |

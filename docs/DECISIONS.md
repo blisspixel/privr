@@ -261,57 +261,56 @@ recorded postimage, refusing rather than overwriting a later external change,
 and verifying the result. That, together with cited applicability and precedence
 resolution, is the defensible ground.
 
-## 13. Erasure invokes documented vendor mechanisms only
+## 13. Thorough privacy cleanup with whole-plan confirmation
 
-Status: decided.
+Status: decided; cleanup scope and consent revised 2026-11-04.
 
-`privr` does not delete files. It invokes documented vendor erasure actions.
-That single rule excludes anti-forensic behavior and undocumented edits without
-needing a separate prohibition list, and keeps erasure in the same evidence
-class as every check: each action cites a vendor page.
+`clean` (alias `purge`) exists to remove local privacy traces. Its recommended
+default includes supported caches, temporary residue, ordinary activity records,
+recent-file lists, and saved command history. Convenience alone is not a reason
+to retain those traces. Cookie, browsing-history, and session-residue clearing
+belong in this default once their typed adapters and local-only scope are
+validated; they are not implemented merely because this decision admits them.
 
-Supporting findings:
+Cleanup stays separate from configuration `apply`. Show the selected targets,
+consequences, and irreversible deletion in one preview. One interactive
+confirmation or explicit `clean --yes` authorizes routine cleanup within that
+scope. Do not require repeated category acknowledgements for ordinary history
+loss, sign-outs, or cache rebuilding. `--preview` always prevents mutation,
+including alongside `--yes`. Agent mutation still requires the enabled mutation
+interface and explicit confirmation.
 
-- The size case and the privacy case barely overlap. The artifacts that consume
-  many gigabytes carry little personal content, and the artifacts that carry
-  personal content are usually small. One artifact is both large and highly
-  sensitive, and it justifies the feature on its own.
-- Documented clear mechanisms correlate inversely with forensic value, so the
-  vendor-documentation rule excludes the anti-forensic set automatically.
-- Staging to a quarantine area is rejected. The desktop trash specification
-  requires a per-item record of original path and deletion date, which
-  manufactures an index of exactly what the operator considered sensitive. It
-  converts one exposure into two while allowing the tool to report success.
+`--polite` is an optional reduced scope that retains convenience-sensitive
+categories. It must report what remains. Filters narrow the selected scope.
+Neither a filter nor a mode permits arbitrary paths, unknown targets, cloud
+deletion, or overriding an authoritative manager.
 
-Erasure lives behind its own verb, never in the default profile, never part of
-an ordinary apply, and never reachable from a blanket confirmation flag.
-Preview is the default and is contractually free of side effects. Warnings are
-structured metadata naming the artifact, the capability it supports, that the
-action cannot be undone, and the consequence.
+Use documented vendor operations or compiled, narrowly bounded filesystem
+adapters for documented local artifacts. Validate roots before access. Admission
+requires evidence about scope, active writers, unrelated data, and verification.
+A named location alone does not establish that every file inside is disposable.
+Current implementations and remaining validation gaps are recorded in the
+[roadmap](../ROADMAP.md#current-state).
 
-Clearing intensity defaults to aggressive within reviewed disposable caches and
-temporary files. Both modes preserve cookies, persistent site data,
-browser/download history, and ordinary recent-file lists unless separately
-selected and approved. `--polite` additionally retains caches whose rebuilding
-would disrupt convenience or workflows. Both modes preserve OS components,
-updates, restore points, installer state, autosave, and recovery data, and honor
-explicit user exceptions. Intensity does not grant permission: an unconfirmed
-call previews its selected mode, and execution still requires each target's
-named risk acknowledgement. Neither mode expands eligibility or overrides
-excluded data, unknown scope, or external management. See the
-[privacy cache capability plan](CACHE_PRIVACY_PLAN.md).
+Ordinary saved command recall is distinct from security logging. The existing
+PowerShell target removes the default ConsoleHost history file, not custom
+history paths or every host's history. Open shells can recreate persisted
+records. Disclose that limitation, recommend closing affected applications, and
+never claim that file deletion clears in-memory recall or prevents future
+retention. Never read command contents into reports or journals.
 
-Documented disposable temporary-file categories are eligible for purge research
-alongside privacy caches. Vendor eligibility, age conditions, and in-use
-protections remain binding in aggressive mode. Never infer that autosave,
-recovery data, an active workspace, or a durable file is disposable from its
-temporary location or name.
+Preserve actual user content: documents, projects, downloaded files, saved
+passwords, passkeys, bookmarks, unsynced work, autosave, and recovery material.
+Keep security and audit logs, cloud data, OS components, updates, and restore
+points outside routine cleanup. Site storage that mixes trace data with unsynced
+content requires an adapter that can distinguish them or a separate destructive
+choice. Broad file shredding and deletion based only on age or size remain out
+of scope. Do not kill applications or bypass locks to complete a clean.
 
-Broad disk optimization and deletion of arbitrary old or large files remain
-out of scope. Size, age, lock state, and whether a supported mechanism exists
-are computable. Whether the operator still wants user content is not. Verified
-file removal does not establish secure media sanitization; the CLI must report
-the actual mechanism and verification limits.
+Journal intent before deletion and report partial or interrupted state honestly.
+Do not stage removed traces in a hidden quarantine or pretend cleanup is
+reversible. File removal does not prove physical-media sanitization. Reports
+state the actual operation and its limits, not that the machine is trace-free.
 
 ## 14. No webview, and no promise of three native applications
 

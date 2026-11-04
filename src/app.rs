@@ -52,7 +52,13 @@ struct RollbackReport {
 }
 
 pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
-    run_with_journal_dir(cli, out, err, &crate::journal::transactions_dir())
+    match crate::journal::transactions_dir() {
+        Ok(root) => run_with_journal_dir(cli, out, err, &root),
+        Err(error) => {
+            let _ = writeln!(err, "privr: {error}");
+            5
+        }
+    }
 }
 
 fn explicit_elevation_required(
@@ -2843,6 +2849,11 @@ Run privr explain without arguments for the posture overview, or privr list to s
             if target_specs.is_empty() && !trim {
                 let _ = writeln!(err, "privr: no matching residue targets found.");
                 return 2;
+            }
+
+            if let Err(reason) = crate::platform::validate_residue_roots(&target_specs) {
+                let _ = writeln!(err, "privr: {reason}");
+                return 5;
             }
 
             // Check for required risk acknowledgements

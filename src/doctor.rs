@@ -402,7 +402,19 @@ pub fn check_storage_integrity(dir: &Path) -> DoctorStorageFacts {
 
 /// Run full system diagnostics and build the `DoctorReport`.
 pub fn diagnose(host: &HostFacts) -> DoctorReport {
-    diagnose_with_storage(host, &crate::journal::transactions_dir())
+    match crate::journal::transactions_dir() {
+        Ok(root) => diagnose_with_storage(host, &root),
+        Err(error) => diagnose_with_storage_facts(
+            host,
+            DoctorStorageFacts {
+                root: "unavailable".to_owned(),
+                exists: false,
+                writable: false,
+                reparse_point: false,
+                status: error.to_string(),
+            },
+        ),
+    }
 }
 
 pub(crate) fn diagnose_with_storage(host: &HostFacts, tx_dir: &Path) -> DoctorReport {

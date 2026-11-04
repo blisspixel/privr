@@ -16,6 +16,9 @@ pub mod windows;
 
 pub mod elevation;
 
+#[cfg(not(windows))]
+pub(crate) mod xdg;
+
 use crate::model::host::HostFacts;
 use crate::model::residue::{ResiduePreviewItem, ResiduePurgeItem, ResidueSpec, TrimStatus};
 
@@ -41,6 +44,28 @@ pub fn discover() -> HostFacts {
     {
         HostFacts::unknown(crate::model::host::Platform::current())
     }
+}
+
+/// Refuse unresolved user roots before inspecting or deleting a selected target.
+pub(crate) fn validate_residue_roots(
+    targets: &[(ResidueSpec, bool, Option<String>)],
+) -> Result<(), String> {
+    for (spec, selected, _) in targets {
+        if !selected {
+            continue;
+        }
+        #[cfg(target_os = "linux")]
+        if let Err(reason) = linux::residue::validate_target_root(spec) {
+            return Err(format!("{}: {reason}", spec.id));
+        }
+        #[cfg(target_os = "macos")]
+        if xdg::home_dir().is_none() {
+            return Err(format!("{}: no absolute HOME is available", spec.id));
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        let _ = spec;
+    }
+    Ok(())
 }
 
 /// Inspect a residue target and return its preview item.

@@ -45,10 +45,10 @@ pub fn is_valid_transaction_id(id: &str) -> bool {
 }
 
 /// The base directory where transaction journals are stored.
-pub fn transactions_dir() -> PathBuf {
+pub fn transactions_dir() -> Result<PathBuf, std::io::Error> {
     #[cfg(windows)]
     {
-        if let Ok(appdata) = std::env::var("LOCALAPPDATA") {
+        Ok(if let Ok(appdata) = std::env::var("LOCALAPPDATA") {
             PathBuf::from(appdata)
                 .join("privr")
                 .join("state")
@@ -62,34 +62,24 @@ pub fn transactions_dir() -> PathBuf {
                 .join("transactions")
         } else {
             PathBuf::from(r"C:\ProgramData\privr\state\transactions")
-        }
+        })
     }
     #[cfg(not(windows))]
     {
-        if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
-            PathBuf::from(xdg)
-                .join("privr")
-                .join("state")
-                .join("transactions")
-        } else if let Ok(home) = std::env::var("HOME") {
-            PathBuf::from(home)
-                .join(".local")
-                .join("share")
-                .join("privr")
-                .join("state")
-                .join("transactions")
-        } else {
-            std::env::temp_dir()
-                .join("privr")
-                .join("state")
-                .join("transactions")
-        }
+        crate::platform::xdg::user_root("XDG_DATA_HOME", ".local/share")
+            .map(|root| root.join("privr/state/transactions"))
+            .ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "Cannot resolve journal storage: set an absolute XDG_DATA_HOME or HOME",
+                )
+            })
     }
 }
 
 /// Write a transaction to disk atomically.
 pub fn save_transaction(tx: &TransactionJournal) -> Result<PathBuf, std::io::Error> {
-    save_transaction_in(&transactions_dir(), tx)
+    save_transaction_in(&transactions_dir()?, tx)
 }
 
 pub(crate) fn save_transaction_in(
@@ -150,7 +140,7 @@ pub(crate) fn save_transaction_in(
 
 /// Read a transaction from disk by ID.
 pub fn load_transaction(id: &str) -> Result<TransactionJournal, std::io::Error> {
-    load_transaction_in(&transactions_dir(), id)
+    load_transaction_in(&transactions_dir()?, id)
 }
 
 pub(crate) fn load_transaction_in(
@@ -195,8 +185,8 @@ pub(crate) fn load_transaction_in(
 }
 
 /// List all saved transactions in chronological order.
-pub fn list_transactions() -> Vec<TransactionJournal> {
-    list_transactions_in(&transactions_dir())
+pub fn list_transactions() -> Result<Vec<TransactionJournal>, std::io::Error> {
+    Ok(list_transactions_in(&transactions_dir()?))
 }
 
 pub(crate) fn list_transactions_in(dir: &Path) -> Vec<TransactionJournal> {
@@ -220,13 +210,13 @@ pub(crate) fn list_transactions_in(dir: &Path) -> Vec<TransactionJournal> {
 }
 
 /// Retrieve the most recent transaction recorded on disk.
-pub fn latest_transaction() -> Option<TransactionJournal> {
-    list_transactions().pop()
+pub fn latest_transaction() -> Result<Option<TransactionJournal>, std::io::Error> {
+    Ok(list_transactions()?.pop())
 }
 
 /// Purge all transaction journal files, returning the count of removed records.
 pub fn purge_transactions() -> Result<usize, std::io::Error> {
-    purge_transactions_in(&transactions_dir())
+    purge_transactions_in(&transactions_dir()?)
 }
 
 pub(crate) fn purge_transactions_in(dir: &Path) -> Result<usize, std::io::Error> {

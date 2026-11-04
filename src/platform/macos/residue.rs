@@ -18,9 +18,7 @@ struct TargetPathRule {
     recurse_filter: Option<fn(&Path) -> bool>,
 }
 
-fn home_dir() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(PathBuf::from)
-}
+use crate::platform::xdg::home_dir;
 
 fn user_library() -> Option<PathBuf> {
     home_dir().map(|h| h.join("Library"))

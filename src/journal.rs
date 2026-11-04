@@ -5,6 +5,7 @@
 //! rollback can verify no external changes occurred before restoring prior state.
 
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -24,7 +25,7 @@ pub struct OperationJournal {
     pub verified: bool,
 }
 
-/// A completed mutation transaction.
+/// A mutation transaction, including unfinished irreversible cleanup progress.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TransactionJournal {
     pub schema: u8,
@@ -33,6 +34,8 @@ pub struct TransactionJournal {
     pub platform: String,
     pub profile: String,
     pub operations: Vec<OperationJournal>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cleanup: Option<crate::model::residue::CleanupJournal>,
 }
 
 /// Validate that a transaction ID contains only allowed characters and no path navigation.
@@ -96,11 +99,9 @@ pub(crate) fn save_transaction_in(
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        if let Ok(metadata) = fs::metadata(dir) {
-            let mut perms = metadata.permissions();
-            perms.set_mode(0o700);
-            let _ = fs::set_permissions(dir, perms);
-        }
+        let mut perms = fs::metadata(dir)?.permissions();
+        perms.set_mode(0o700);
+        fs::set_permissions(dir, perms)?;
     }
     let final_path = dir.join(format!("{}.json", tx.transaction_id));
     if final_path.is_symlink() {
@@ -121,19 +122,26 @@ pub(crate) fn save_transaction_in(
     ));
     let content = serde_json::to_string_pretty(tx)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    fs::write(&tmp_path, content)?;
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        if let Ok(metadata) = fs::metadata(&tmp_path) {
-            let mut perms = metadata.permissions();
-            perms.set_mode(0o600);
-            let _ = fs::set_permissions(&tmp_path, perms);
-        }
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
     }
-    if let Err(e) = fs::rename(&tmp_path, &final_path) {
+    let result = (|| {
+        let mut file = options.open(&tmp_path)?;
+        file.write_all(content.as_bytes())?;
+        file.sync_all()?;
+        drop(file);
+        fs::rename(&tmp_path, &final_path)?;
+        #[cfg(unix)]
+        fs::File::open(dir)?.sync_all()?;
+        Ok::<_, std::io::Error>(())
+    })();
+    if let Err(error) = result {
         let _ = fs::remove_file(&tmp_path);
-        return Err(e);
+        return Err(error);
     }
     Ok(final_path)
 }
@@ -277,6 +285,7 @@ mod tests {
     fn transactions_round_trip_through_json() {
         let tx = TransactionJournal {
             schema: JOURNAL_SCHEMA,
+            cleanup: None,
             transaction_id: "tx-test-123".to_owned(),
             timestamp: "2026-09-21T10:00:00Z".to_owned(),
             platform: "windows".to_owned(),
@@ -314,6 +323,7 @@ mod tests {
         let directory = TestDirectory::new();
         let tx = TransactionJournal {
             schema: JOURNAL_SCHEMA,
+            cleanup: None,
             transaction_id: "tx-test-roundtrip-42".to_owned(),
             timestamp: "2026-10-02T12:00:00Z".to_owned(),
             platform: "windows".to_owned(),
@@ -356,6 +366,7 @@ mod tests {
         let directory = TestDirectory::new();
         let tx1 = TransactionJournal {
             schema: JOURNAL_SCHEMA,
+            cleanup: None,
             transaction_id: "tx-test-list-1".to_owned(),
             timestamp: "2026-10-02T10:00:00Z".to_owned(),
             platform: "windows".to_owned(),
@@ -364,6 +375,7 @@ mod tests {
         };
         let tx2 = TransactionJournal {
             schema: JOURNAL_SCHEMA,
+            cleanup: None,
             transaction_id: "tx-test-list-2".to_owned(),
             timestamp: "2026-10-02T11:00:00Z".to_owned(),
             platform: "windows".to_owned(),
@@ -386,6 +398,7 @@ mod tests {
     fn empty_transaction(id: &str) -> TransactionJournal {
         TransactionJournal {
             schema: JOURNAL_SCHEMA,
+            cleanup: None,
             transaction_id: id.to_owned(),
             timestamp: "2026-10-06T12:00:00Z".to_owned(),
             platform: "windows".to_owned(),

@@ -8,6 +8,7 @@
 
 mod app;
 pub mod catalog;
+mod cleanup;
 mod cli;
 pub mod doctor;
 pub mod engine;

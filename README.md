@@ -56,8 +56,9 @@ designed to be driven by an agent harness as readily as by a person.
 - **Custom policy engine is implemented**: `check`, `plan`, and `apply` accept `--policy <FILE>` supporting schema 1 TOML and JSON formats. Policies extend built-in profiles (`baseline`, `strict`, `restrictive`), allow per-control mode and desired-state overrides, and support ISO-dated exceptions (`[[exceptions]]`). Active exceptions are distinguished from absent risk in posture reports and safely excluded from automated remediation until expiry.
 - **Agent integration (`privr mcp`) is implemented**, providing a stdio Model Context Protocol (MCP) server exposing `privr_check` (with post-update regression comparison), `privr_plan`, `privr_apply`, `privr_recommend`, `privr_simulate`, `privr_explain`, `privr_clean`, `privr_history`, and `privr_doctor` with Agent Plugins v1.0.0 packaging.
 
-Cleanup remains experimental: per-target native validation and complete cleanup
-journals remain outstanding. See the known
+Cleanup remains experimental. Journals now track per-target totals and explicit
+completion or interruption; Linux signal tests cover partial cleanup. Broader
+native target and cancellation validation remain outstanding. See the known
 issues below before using deletion workflows.
 
 The full state, including known defects, is in

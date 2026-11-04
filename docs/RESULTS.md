@@ -314,3 +314,29 @@ requirement, not a side effect.
 Values, digests, and versions above are illustrative, not the live check
 schema. The live check contract is schema 2, described above. Plan, apply,
 rollback, recommend, simulate, and journal documents remain schema 1.
+
+## Cleanup progress (additive schema 1 fields)
+
+Cleanup execution reports carry `status`, `transaction_id`, and an optional
+`journal_error`. Status is `completed`, `interrupted`, or `failed`. Preview
+reports omit these execution fields. Existing item counts and the serialized
+mode names remain unchanged.
+
+A transaction may carry an optional `cleanup` object. Configuration transactions
+omit it. It contains an overall `status`, a `targets` array, and optional hardware
+`trim` status. Each target stores its compiled `id`, `status`, `files_removed`,
+`bytes_removed`, and `files_retained`. No deleted paths, filenames, command
+contents, or local identifiers are recorded.
+
+Target states are `pending`, `running`, `completed`, `interrupted`, and `failed`.
+Intent is persisted before deletion and target results afterward. `running`
+means the operation was started but completion is unverified. After a hard kill,
+counts for that target may understate actual removal; completed earlier targets
+retain their durable counts. Never infer completion from an empty `operations`
+array, a transaction ID, or the presence of a journal file.
+
+Older schema 1 cleanup records omit `cleanup`; their outcome and counts remain
+unknown. An interrupted or failed current report can include known removals even
+if persisting the last checkpoint failed. `journal_error` makes that distinction
+explicit. Cleanup receipts provide accounting, not rollback material or proof
+of physical-media sanitization.

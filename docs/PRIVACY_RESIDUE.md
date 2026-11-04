@@ -384,8 +384,8 @@ target IDs before approval. Browser cookies, history, and session residue need
 future validated adapters and must not be described as cleared today.
 
 Reports should expose verification limits and interrupted state. Cleanup cannot
-be reversed; its journal must not imply otherwise. Per-target totals and
-interruption handling remain known gaps in issue 57. See the
+be reversed; its journal must not imply otherwise. Per-target totals and cooperative cancellation are implemented. Linux fixtures
+cover SIGINT, SIGTERM, and hard kills; broader native validation remains open. See the
 [command contract](CLI.md#clean-alias-purge) and
 [validation plan](CACHE_PRIVACY_PLAN.md).
 

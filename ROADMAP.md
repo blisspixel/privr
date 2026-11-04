@@ -44,7 +44,7 @@ milestone and its results should not be trusted.
 | Profile ladder | Implemented and verified. Baseline <= Strict <= Restrictive ladder partitions controls monotonically. |
 | Custom policy files | Implemented and tested. Schema 1 TOML and JSON engine supporting base profile inheritance (`extends = "builtin:baseline@0.1"`), per-control mode and desired-state overrides, and ISO-dated exceptions (`[[exceptions]]`). Active exceptions are distinguished from absent risk in posture reports and safely excluded from automated remediation until expiry. |
 | PowerShell session-only history | Implemented and tested. `windows.shell.history-persistence` guides interactive PSReadLine verification and profile configuration. Explanations walk through line-editing retention mechanics and security audit log boundaries. |
-| Privacy-cache inspection and clearing | Implemented but experimental on Windows, Linux, and macOS. Linux playtesting identified root-resolution and disclosure defects, now addressed in source (issues 49 and 50); cleanup journal defects remain (issue 57); cross-platform preservation and interruption validation remain required. `privr clean` (alias `privr purge`) inspects and removes catalogued temporary files, crash dumps, browser caches, AI agent scratch files, package manager caches, and recent activity residue across native locations ($XDG_CACHE_HOME, ~/Library/Caches, %LOCALAPPDATA%). Includes preview dashboard, category filtering, polite retention mode, and hardware SSD TRIM / Deallocate (`--trim`). See [candidate priorities, sources, and safety gates](docs/CACHE_PRIVACY_PLAN.md). |
+| Privacy-cache inspection and clearing | Implemented but experimental on Windows, Linux, and macOS. Linux playtesting identified root-resolution and disclosure defects, now addressed in source (issues 49 and 50); cleanup now records per-target totals and progress with cooperative cancellation (issue 57). Linux CLI/MCP signal tests cover partial cleanup and hard kills; native Windows/macOS cancellation and broader target validation remain required. `privr clean` (alias `privr purge`) inspects and removes catalogued temporary files, crash dumps, browser caches, AI agent scratch files, package manager caches, and recent activity residue across native locations ($XDG_CACHE_HOME, ~/Library/Caches, %LOCALAPPDATA%). Includes preview dashboard, category filtering, polite retention mode, and hardware SSD TRIM / Deallocate (`--trim`). See [candidate priorities, sources, and safety gates](docs/CACHE_PRIVACY_PLAN.md). |
 | Fixture files | Implemented and tested for 10 Windows controls (advertising ID, Copilot shell integration, Recall snapshots, diagnostic data, LLMNR, WPAD auto-discovery, thumbnail cache, tailored experiences, web search, delivery optimization), covering 96 synthetic observation states across compliant, drift, denied, malformed, and OS build-gated inputs. The compiled probes and evaluator run against exact typed bytes through recorded Context. |
 | Staleness, signed releases | Review staleness implemented with mathematical ceiling precision (`actual.exceeds_ceiling(ceiling)`) and dynamic doctor staleness reporting. Signed binaries remain open. A source tag records a green `main` commit only. |
 
@@ -72,7 +72,13 @@ Mutation (blocks 0.2.0):
   cross-platform CLI fixture covers ConsoleHost deletion and preview, and the
   macOS path now follows the documented XDG location. Native cross-platform
   results and customized-path coverage remain incomplete.
-- [ ] Cleanup journals lack target totals and interruption state (issue 57).
+- [x] Cleanup journals lacked target totals and interruption state (issue 57).
+  CLI and MCP share an executor that journals before each target, saves aggregate
+  results, and stops on cancellation or failed progress writes. Linux disposable
+  fixtures exercise SIGINT, SIGTERM, and hard kills. Unfinished and legacy records
+  never imply completion; native Windows/macOS signal validation remains open.
+- [x] Rollback with only cleanup history claimed no history and exited `1`
+  (issue 56). It now reports irreversible records and refuses with exit `5`.
 - [x] Cleanup help listed Windows-only locations on Linux and omitted application
   caches (issue 60). Categories now derive from the compiled platform targets,
   including aliases. Text uses thorough; JSON retains the stable aggressive mode.

@@ -298,11 +298,27 @@ Unix, XDG overrides and HOME fallbacks must resolve to absolute roots; selected
 cleanup and journal access are refused when the required root is unavailable.
 
 `--trim` requests separate hardware free-space maintenance. It is not evidence
-that privacy traces were erased. Cleanup journals currently record the run but
-lack per-target totals and interruption state (issue 57); they cannot restore
+that privacy traces were erased. Cleanup journals record selected target IDs,
+per-target aggregate counts, and explicit progress states. They cannot restore
 deleted files.
 
+SIGINT and SIGTERM request a stop between files. An interrupted run prints its
+partial totals and exits `4`; MCP returns the same partial report with
+`isError: true`. Failed targets or progress-journal writes stop later targets.
+Failure to prepare the journal refuses cleanup before deletion (exit `5`).
+External hardware maintenance completes its current subprocess before the
+cancellation request is reconciled; it is journaled separately before execution.
+
+A hard kill or crash can leave `running` in the journal. `history` labels that
+record unfinished with completion unverified. Totals are the last durable
+checkpoint, not a reconstruction of everything that might have been deleted.
+Legacy cleanup records without progress metadata have unknown completion and
+unknown totals. Neither case is reported as completed.
+
 ## `rollback`
+
+With no reversible transaction, `rollback` exits `5` and distinguishes empty
+history from recorded irreversible cleanup. It never restores deleted residue.
 
 `rollback` accepts only an internal transaction ID. It never reads a caller-
 selected snapshot file as an elevated mutation request.

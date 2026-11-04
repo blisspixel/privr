@@ -14,6 +14,7 @@ pub mod macos;
 #[cfg(windows)]
 pub mod windows;
 
+pub mod cancellation;
 pub mod elevation;
 
 #[cfg(not(windows))]
@@ -104,18 +105,21 @@ pub fn inspect_residue_target(
 }
 
 /// Execute purge for a residue target and return its result item.
-pub fn purge_residue_target(spec: &ResidueSpec) -> ResiduePurgeItem {
+pub fn purge_residue_target(
+    spec: &ResidueSpec,
+    cancellation: &cancellation::Cancellation,
+) -> ResiduePurgeItem {
     #[cfg(windows)]
     {
-        windows::residue::purge_target(spec)
+        windows::residue::purge_target(spec, cancellation)
     }
     #[cfg(target_os = "linux")]
     {
-        linux::residue::purge_target(spec)
+        linux::residue::purge_target(spec, cancellation)
     }
     #[cfg(target_os = "macos")]
     {
-        macos::residue::purge_target(spec)
+        macos::residue::purge_target(spec, cancellation)
     }
     #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
     {

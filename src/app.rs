@@ -1712,6 +1712,7 @@ fn run_with_check_context(
             };
             let mut journal = crate::journal::TransactionJournal {
                 schema: crate::journal::JOURNAL_SCHEMA,
+                cleanup: None,
                 transaction_id: tx_id.clone(),
                 timestamp: timestamp.clone(),
                 platform: host.platform.as_str().to_owned(),
@@ -1974,16 +1975,30 @@ fn run_with_check_context(
         } => {
             let transaction_id = match transaction_id {
                 Some(id) => id,
-                None => match crate::journal::list_transactions_in(journal_dir)
-                    .into_iter()
-                    .rfind(|tx| !tx.operations.is_empty())
-                {
-                    Some(tx) => tx.transaction_id,
-                    None => {
-                        let _ = writeln!(err, "privr: no transaction history found to roll back.");
-                        return 1;
+                None => {
+                    let transactions = crate::journal::list_transactions_in(journal_dir);
+                    match transactions.iter().rfind(|tx| !tx.operations.is_empty()) {
+                        Some(tx) => tx.transaction_id.clone(),
+                        None => {
+                            if transactions.is_empty() {
+                                let _ = writeln!(
+                                    err,
+                                    "privr: no reversible transactions; transaction history is empty."
+                                );
+                            } else {
+                                let clean_count = transactions
+                                    .iter()
+                                    .filter(|tx| tx.profile.starts_with("clean:"))
+                                    .count();
+                                let _ = writeln!(
+                                    err,
+                                    "privr: no reversible transactions. {clean_count} cleanup record(s) are recorded; cleanup cannot be rolled back."
+                                );
+                            }
+                            return 5;
+                        }
                     }
-                },
+                }
             };
 
             if !crate::journal::is_valid_transaction_id(&transaction_id) {
@@ -2344,12 +2359,55 @@ fn run_with_check_context(
                                             .profile
                                             .strip_prefix("clean:")
                                             .unwrap_or(&tx.profile);
+                                        let mode_name = if mode_name == "aggressive" {
+                                            "thorough"
+                                        } else {
+                                            mode_name
+                                        };
                                         let _ = writeln!(
                                             out,
                                             "{}  disposable residue clean ({})",
                                             ui.paint(crate::ui::style::IDENT, &tx.transaction_id),
                                             mode_name
                                         );
+                                        if let Some(cleanup) = &tx.cleanup {
+                                            let _ = writeln!(
+                                                out,
+                                                "          {}",
+                                                cleanup.status.as_str()
+                                            );
+                                            for target in &cleanup.targets {
+                                                let _ = writeln!(
+                                                    out,
+                                                    "          {}: {}, {} files removed, {} bytes removed, {} not removed",
+                                                    target.id,
+                                                    target.status.as_str(),
+                                                    target.files_removed,
+                                                    target.bytes_removed,
+                                                    target.files_retained
+                                                );
+                                            }
+                                            if cleanup.status
+                                                == crate::model::residue::CleanupStatus::Running
+                                            {
+                                                let _ = writeln!(
+                                                    out,
+                                                    "          Recorded totals only; an unfinished target may have changed further."
+                                                );
+                                            }
+                                            if let Some(status) = cleanup.trim {
+                                                let _ = writeln!(
+                                                    out,
+                                                    "          hardware TRIM: {}",
+                                                    status.as_str()
+                                                );
+                                            }
+                                        } else {
+                                            let _ = writeln!(
+                                                out,
+                                                "          legacy record: completion and removal totals unknown"
+                                            );
+                                        }
                                     } else {
                                         let _ = writeln!(
                                             out,
@@ -2368,8 +2426,17 @@ fn run_with_check_context(
                                     ui.paint(crate::ui::style::MUTED, &meta)
                                 );
                             }
-                            let _ =
-                                writeln!(out, "To reverse the most recent changes: privr rollback");
+                            if txs.iter().any(|tx| !tx.operations.is_empty()) {
+                                let _ = writeln!(
+                                    out,
+                                    "To reverse the most recent changes: privr rollback"
+                                );
+                            } else {
+                                let _ = writeln!(
+                                    out,
+                                    "No reversible transactions are recorded; cleanup cannot be rolled back."
+                                );
+                            }
                         }
                     }
                     OutputFormat::Json => {
@@ -2889,6 +2956,9 @@ Run privr explain without arguments for the posture overview, or privr list to s
                             schema: 1,
                             mode,
                             dry_run: true,
+                            status: None,
+                            transaction_id: None,
+                            journal_error: None,
                             total_files_affected: preview_items
                                 .iter()
                                 .filter(|i| i.selected)
@@ -2973,54 +3043,23 @@ Run privr explain without arguments for the posture overview, or privr list to s
                 let _ = writeln!(out);
             }
 
-            // Verify journal storage is writable before mutating
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default();
-            let timestamp = format!("{}.{:03}", now.as_secs(), now.subsec_millis());
-            let tx_id = format!("clean-{}-{}", now.as_secs(), now.subsec_millis());
-
-            let journal = crate::journal::TransactionJournal {
-                schema: crate::journal::JOURNAL_SCHEMA,
-                transaction_id: tx_id.clone(),
-                timestamp: timestamp.clone(),
-                platform: crate::model::host::Platform::current().as_str().to_owned(),
-                profile: format!("clean:{}", mode.as_str()),
-                operations: Vec::new(),
-            };
-
-            if let Err(e) = crate::journal::save_transaction_in(journal_dir, &journal) {
-                let _ = writeln!(err, "privr: cannot write transaction journal: {e}");
-                return 1;
-            }
-
-            // Execute purge for selected targets
-            let mut purge_results = Vec::new();
-            for (spec, selected, _) in &target_specs {
-                if *selected {
-                    let result = crate::platform::purge_residue_target(spec);
-                    purge_results.push(result);
+            let selected: Vec<_> = target_specs
+                .into_iter()
+                .filter_map(|(spec, selected, _)| selected.then_some(spec))
+                .collect();
+            let report = match crate::cleanup::execute(mode, &selected, trim, journal_dir) {
+                Ok(report) => report,
+                Err(reason) => {
+                    let _ = writeln!(err, "privr: {reason}");
+                    return 5;
                 }
-            }
-
-            let executed_trim = if trim {
-                Some(crate::platform::execute_volume_trim())
-            } else {
-                None
             };
-
-            let total_removed: usize = purge_results.iter().map(|r| r.files_removed).sum();
-            let total_reclaimed: u64 = purge_results.iter().map(|r| r.bytes_reclaimed).sum();
-
-            let report = crate::model::residue::PurgeReport {
-                schema: 1,
-                mode,
-                dry_run: false,
-                total_files_affected: total_removed,
-                total_bytes_affected: total_reclaimed,
-                items: purge_results,
-                trim: executed_trim,
-            };
+            let exit_code =
+                if report.status == Some(crate::model::residue::CleanupStatus::Completed) {
+                    0
+                } else {
+                    4
+                };
 
             match cli.format {
                 OutputFormat::Json => {
@@ -3028,12 +3067,16 @@ Run privr explain without arguments for the posture overview, or privr list to s
                     let _ = writeln!(out, "{}", json);
                 }
                 OutputFormat::Text => {
-                    let rendered = crate::report::render_purge_report(&ui, &report, Some(&tx_id));
+                    let rendered = crate::report::render_purge_report(
+                        &ui,
+                        &report,
+                        report.transaction_id.as_deref(),
+                    );
                     let _ = write!(out, "{}", rendered);
                 }
             }
 
-            0
+            exit_code
         }
     }
 }
@@ -3807,6 +3850,7 @@ desired = "disabled"
         let directory = crate::journal::TestDirectory::new();
         let tx = crate::journal::TransactionJournal {
             schema: crate::journal::JOURNAL_SCHEMA,
+            cleanup: None,
             transaction_id: "tx-purge-test".to_owned(),
             timestamp: "2026-10-20T00:00:00Z".to_owned(),
             platform: "windows".to_owned(),
@@ -3846,9 +3890,9 @@ desired = "disabled"
             elevate: false,
             elevated_output: None,
         }));
-        assert_eq!(code, 1);
+        assert_eq!(code, 5);
         assert!(stdout.is_empty());
-        assert!(stderr.contains("no transaction history found"));
+        assert!(stderr.contains("no reversible transactions; transaction history is empty"));
     }
 
     #[test]
@@ -3871,6 +3915,7 @@ desired = "disabled"
         let directory = crate::journal::TestDirectory::new();
         let clean_tx = crate::journal::TransactionJournal {
             schema: crate::journal::JOURNAL_SCHEMA,
+            cleanup: None,
             transaction_id: "clean-123-456".to_owned(),
             timestamp: "2026-11-01T00:00:00Z".to_owned(),
             platform: "windows".to_owned(),
@@ -3907,6 +3952,7 @@ desired = "disabled"
         let directory = crate::journal::TestDirectory::new();
         let apply_tx = crate::journal::TransactionJournal {
             schema: crate::journal::JOURNAL_SCHEMA,
+            cleanup: None,
             transaction_id: "tx-apply-1".to_owned(),
             timestamp: "2026-10-01T00:00:00Z".to_owned(),
             platform: "windows".to_owned(),
@@ -3927,6 +3973,7 @@ desired = "disabled"
         };
         let clean_tx = crate::journal::TransactionJournal {
             schema: crate::journal::JOURNAL_SCHEMA,
+            cleanup: None,
             transaction_id: "clean-recent".to_owned(),
             timestamp: "2026-10-02T00:00:00Z".to_owned(),
             platform: "windows".to_owned(),
@@ -4069,6 +4116,7 @@ desired = "disabled"
         ] {
             let transaction = crate::journal::TransactionJournal {
                 schema,
+                cleanup: None,
                 transaction_id: stored_id.to_owned(),
                 timestamp: "2026-10-06T12:00:00Z".to_owned(),
                 platform: "windows".to_owned(),
@@ -4172,6 +4220,7 @@ desired = "disabled"
     fn verified_line_names_the_journal_and_omits_yes() {
         let journal = crate::journal::TransactionJournal {
             schema: crate::journal::JOURNAL_SCHEMA,
+            cleanup: None,
             transaction_id: "tx-10-1".to_owned(),
             timestamp: "2026-10-20T00:00:00Z".to_owned(),
             platform: "linux".to_owned(),
@@ -4226,6 +4275,7 @@ desired = "disabled"
         let directory = crate::journal::TestDirectory::new();
         let transaction = crate::journal::TransactionJournal {
             schema: crate::journal::JOURNAL_SCHEMA,
+            cleanup: None,
             transaction_id: "tx-10-2".to_owned(),
             timestamp: "2026-10-20T00:00:00Z".to_owned(),
             platform: "windows".to_owned(),

@@ -42,6 +42,9 @@ jobs:
           toolchain: stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - run: cargo test --locked --workspace --all-features
+        env:
+          XDG_DATA_HOME: ${{ runner.temp }}/privr-test-state
+          LOCALAPPDATA: ${{ runner.temp }}/privr-test-state
 
   coverage:
     name: Coverage
@@ -58,6 +61,9 @@ jobs:
           fallback: none
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - run: cargo llvm-cov --locked --workspace --all-features --fail-under-lines 80
+        env:
+          XDG_DATA_HOME: ${{ runner.temp }}/privr-test-state
+          LOCALAPPDATA: ${{ runner.temp }}/privr-test-state
 
   dependency-policy:
     name: Dependency policy

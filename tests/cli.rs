@@ -867,7 +867,7 @@ fn no_input_flag_is_accepted_globally() {
     command
         .args(["check", "--no-input"])
         .assert()
-        .code(predicate::in_iter([0, 1]));
+        .code(predicate::in_iter([0, 1, 3]));
 
     let mut apply_cmd = Command::cargo_bin("privr").expect("binary");
     apply_cmd

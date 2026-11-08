@@ -81,6 +81,23 @@ Use recorded Context observations for ordinary tests and synthetic data in
 disposable VMs for vendor clearing operations. No test may clean a developer's
 real caches, temporary files, browser profiles, or history.
 
+### Cleanup interruption coverage
+
+Deterministic executor tests inject failures at every journal checkpoint and
+verify that no later target or hardware operation starts. Cancellation tests
+assert exact partial aggregates and pending targets. Linux child-process tests
+use isolated homes and XDG roots with synthetic caches, deliver SIGINT/SIGTERM,
+and compare reported removal totals with remaining files. A hard-kill fixture
+verifies that history labels the record unfinished. MCP tests exercise partial
+error reports and successive cleanups in one server process.
+
+The cross-platform signal adapter uses `ctrlc` with its `termination` feature.
+No existing dependency exposes safe portable signal registration; this avoids
+local unsafe code and introduces no async runtime or network operations. Its
+handler requests cancellation only; ordinary execution saves progress and
+prints results. Native Windows console-event and macOS signal tests remain
+required before claiming equivalent cancellation validation on those hosts.
+
 ### Evaluator and probe tests
 
 The evaluation engine is a pure function from catalogue, policy, host facts, and

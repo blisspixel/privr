@@ -1089,6 +1089,7 @@ fn handle_tools_call_with_check_context(
             let tx_id = format!("tx-{}-{}", now.as_secs(), now.subsec_millis());
             let mut journal = crate::journal::TransactionJournal {
                 schema: crate::journal::JOURNAL_SCHEMA,
+                cleanup: None,
                 transaction_id: tx_id.clone(),
                 timestamp: timestamp.clone(),
                 platform: host.platform.as_str().to_owned(),
@@ -1637,12 +1638,8 @@ fn handle_tools_call_with_check_context(
                 return tool_error(reason);
             }
 
-            let trim_status = if trim {
-                if dry_run {
-                    Some(crate::platform::check_volume_trim_support())
-                } else {
-                    Some(crate::platform::execute_volume_trim())
-                }
+            let trim_status = if trim && dry_run {
+                Some(crate::platform::check_volume_trim_support())
             } else {
                 None
             };
@@ -1658,6 +1655,9 @@ fn handle_tools_call_with_check_context(
                     schema: 1,
                     mode,
                     dry_run: true,
+                    status: None,
+                    transaction_id: None,
+                    journal_error: None,
                     total_files_affected: preview_items
                         .iter()
                         .filter(|i| i.selected)
@@ -1695,44 +1695,25 @@ fn handle_tools_call_with_check_context(
                     }
                 }
 
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default();
-                let timestamp = format!("{}.{:03}", now.as_secs(), now.subsec_millis());
-                let tx_id = format!("clean-{}-{}", now.as_secs(), now.subsec_millis());
-
-                let journal = crate::journal::TransactionJournal {
-                    schema: crate::journal::JOURNAL_SCHEMA,
-                    transaction_id: tx_id,
-                    timestamp,
-                    platform: crate::model::host::Platform::current().as_str().to_owned(),
-                    profile: format!("clean:{}", mode.as_str()),
-                    operations: Vec::new(),
+                let selected: Vec<_> = target_specs
+                    .into_iter()
+                    .filter_map(|(spec, selected, _)| selected.then_some(spec))
+                    .collect();
+                let root = match crate::journal::transactions_dir() {
+                    Ok(root) => root,
+                    Err(error) => return tool_error(error.to_string()),
                 };
-
-                if let Err(e) = crate::journal::save_transaction(&journal) {
-                    return Err((-32603, format!("Cannot write transaction journal: {e}")));
-                }
-
-                let mut purge_results = Vec::new();
-                for (spec, selected, _) in &target_specs {
-                    if *selected {
-                        let result = crate::platform::purge_residue_target(spec);
-                        purge_results.push(result);
+                match crate::cleanup::execute(mode, &selected, trim, &root) {
+                    Ok(report) => {
+                        let json = serde_json::to_string_pretty(&report).unwrap_or_default();
+                        if report.status == Some(crate::model::residue::CleanupStatus::Completed) {
+                            tool_success(json)
+                        } else {
+                            tool_error(json)
+                        }
                     }
+                    Err(reason) => tool_error(reason),
                 }
-                let total_removed: usize = purge_results.iter().map(|r| r.files_removed).sum();
-                let total_reclaimed: u64 = purge_results.iter().map(|r| r.bytes_reclaimed).sum();
-                let report = crate::model::residue::PurgeReport {
-                    schema: 1,
-                    mode,
-                    dry_run: false,
-                    total_files_affected: total_removed,
-                    total_bytes_affected: total_reclaimed,
-                    items: purge_results,
-                    trim: trim_status,
-                };
-                tool_success(serde_json::to_string_pretty(&report).unwrap_or_default())
             }
         }
         unknown => Err((-32601, format!("Unknown tool '{unknown}'"))),

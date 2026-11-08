@@ -1042,13 +1042,16 @@ pub fn render_purge_report(
     let mut out = String::new();
     let header = format!("privr clean ({} mode)\n\n", report.mode.display_name());
     out.push_str(&ui.paint(style::HEADING, &header));
+    if let Some(status) = report.status {
+        out.push_str(&format!("Cleanup status: {}\n\n", status.as_str()));
+    }
 
     let mut group_map: std::collections::BTreeMap<
         (u8, &'static str),
         Vec<&crate::model::residue::ResiduePurgeItem>,
     > = std::collections::BTreeMap::new();
     for item in &report.items {
-        if item.files_removed > 0 || item.files_retained > 0 {
+        if item.files_removed > 0 || item.files_retained > 0 || item.error.is_some() {
             let key = (item.category.group_rank(), item.category.group_title());
             group_map.entry(key).or_default().push(item);
         }
@@ -1058,10 +1061,18 @@ pub fn render_purge_report(
         out.push_str(&format!("  {}\n", ui.paint(style::HEADING, group_title)));
         for item in group_items {
             let bullet = if ui.unicode() { "•" } else { "*" };
-            let tag = ui.paint(style::outcome_style(Outcome::Pass), bullet);
+            let outcome = if item.error.is_some() || item.files_retained > 0 {
+                Outcome::Error
+            } else {
+                Outcome::Pass
+            };
+            let tag = ui.paint(style::outcome_style(outcome), bullet);
+            if let Some(error) = &item.error {
+                out.push_str(&format!("    {tag} {}: {error}\n", item.title));
+            }
             if item.files_retained > 0 {
                 out.push_str(&format!(
-                    "    {tag} {}: {} reclaimed ({} files removed, {} in-use files retained)\n",
+                    "    {tag} {}: {} reclaimed ({} files removed, {} files not removed)\n",
                     item.title,
                     format_byte_size(item.bytes_reclaimed),
                     item.files_removed,
@@ -1108,6 +1119,9 @@ pub fn render_purge_report(
         report.items.iter().filter(|i| i.files_removed > 0).count()
     ));
 
+    if let Some(error) = &report.journal_error {
+        out.push_str(&format!("Journal error: {error}\n"));
+    }
     if let Some(tx) = tx_id {
         out.push_str(&format!("Transaction: {}\n", tx));
     }

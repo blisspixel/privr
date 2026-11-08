@@ -563,14 +563,19 @@ fn purge_path(
     recurse_filter: Option<fn(&Path) -> bool>,
     is_target_root: bool,
     max_depth: usize,
+    cancellation: &crate::platform::cancellation::Cancellation,
 ) -> (usize, u64, usize) {
-    if max_depth == 0 || !path.exists() {
+    if cancellation.requested() {
         return (0, 0, 0);
+    }
+    if max_depth == 0 {
+        return (0, 0, 1);
     }
 
     let meta = match fs::symlink_metadata(path) {
         Ok(m) => m,
-        Err(_) => return (0, 0, 0),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return (0, 0, 0),
+        Err(_) => return (0, 0, 1),
     };
 
     if meta.file_type().is_symlink() {
@@ -602,11 +607,24 @@ fn purge_path(
             Err(_) => return (0, 0, 1),
         };
 
-        for entry in entries.flatten() {
+        for entry in entries {
+            if cancellation.requested() {
+                break;
+            }
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(_) => {
+                    retained += 1;
+                    continue;
+                }
+            };
             let entry_path = entry.path();
             let entry_meta = match fs::symlink_metadata(&entry_path) {
                 Ok(m) => m,
-                Err(_) => continue,
+                Err(_) => {
+                    retained += 1;
+                    continue;
+                }
             };
 
             if entry_meta.file_type().is_symlink() {
@@ -634,17 +652,25 @@ fn purge_path(
                     None => filter.is_none(),
                 };
                 if allow_recurse {
-                    let (sub_rem, sub_bytes, sub_ret) =
-                        purge_path(&entry_path, filter, recurse_filter, false, max_depth - 1);
+                    let (sub_rem, sub_bytes, sub_ret) = purge_path(
+                        &entry_path,
+                        filter,
+                        recurse_filter,
+                        false,
+                        max_depth - 1,
+                        cancellation,
+                    );
                     removed += sub_rem;
                     bytes += sub_bytes;
                     retained += sub_ret;
-                    let _ = fs::remove_dir(&entry_path);
+                    if !cancellation.requested() {
+                        let _ = fs::remove_dir(&entry_path);
+                    }
                 }
             }
         }
 
-        if !is_target_root && filter.is_none() && retained == 0 {
+        if !cancellation.requested() && !is_target_root && filter.is_none() && retained == 0 {
             let _ = fs::remove_dir(path);
         }
 
@@ -707,7 +733,10 @@ pub fn inspect_target(
 }
 
 /// Executes the purge operation for a single target spec.
-pub fn purge_target(spec: &ResidueSpec) -> ResiduePurgeItem {
+pub fn purge_target(
+    spec: &ResidueSpec,
+    cancellation: &crate::platform::cancellation::Cancellation,
+) -> ResiduePurgeItem {
     let rule = find_rule(&spec.id);
     match rule {
         Some(r) if !r.root.available() => ResiduePurgeItem {
@@ -727,7 +756,8 @@ pub fn purge_target(spec: &ResidueSpec) -> ResiduePurgeItem {
             let mut total_retained = 0;
 
             for p in paths {
-                let (rem, b, ret) = purge_path(&p, r.file_filter, r.recurse_filter, true, 8);
+                let (rem, b, ret) =
+                    purge_path(&p, r.file_filter, r.recurse_filter, true, 8, cancellation);
                 total_removed += rem;
                 total_bytes += b;
                 total_retained += ret;
@@ -933,6 +963,7 @@ mod tests {
             Some(codex_recurse_filter),
             true,
             8,
+            &crate::platform::cancellation::Cancellation::default(),
         );
         assert_eq!(rem, 3);
         assert_eq!(rem_bytes, bytes);

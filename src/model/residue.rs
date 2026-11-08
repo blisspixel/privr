@@ -152,6 +152,12 @@ pub struct TrimStatus {
 /// Versioned report for a purge preview or execution.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PurgeReport {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<CleanupStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transaction_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub journal_error: Option<String>,
     pub schema: u8,
     pub mode: PurgeMode,
     pub dry_run: bool,
@@ -160,4 +166,45 @@ pub struct PurgeReport {
     pub items: Vec<ResiduePurgeItem>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trim: Option<TrimStatus>,
+}
+
+/// Durable cleanup progress. Running is unfinished, never proof of completion.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CleanupStatus {
+    Pending,
+    Running,
+    Completed,
+    Interrupted,
+    Failed,
+}
+
+impl CleanupStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Running => "unfinished (completion unverified)",
+            Self::Completed => "completed",
+            Self::Interrupted => "interrupted",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+/// Aggregate metadata only. Never record deleted paths or file contents.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct CleanupTarget {
+    pub id: String,
+    pub status: CleanupStatus,
+    pub files_removed: usize,
+    pub bytes_removed: u64,
+    pub files_retained: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct CleanupJournal {
+    pub status: CleanupStatus,
+    pub targets: Vec<CleanupTarget>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trim: Option<CleanupStatus>,
 }

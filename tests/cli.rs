@@ -733,6 +733,7 @@ fn rollback_refuses_cross_platform_transaction() {
     let foreign_platform = if cfg!(windows) { "linux" } else { "windows" };
     let tx = privr::journal::TransactionJournal {
         schema: privr::journal::JOURNAL_SCHEMA,
+        cleanup: None,
         transaction_id: "tx-foreign-99".to_owned(),
         timestamp: "2026-11-03T01:00:00Z".to_owned(),
         platform: foreign_platform.to_owned(),
@@ -828,4 +829,34 @@ fn console_history_cleanup_uses_the_documented_platform_root() {
                 .contains("Close PowerShell first")
         );
     }
+}
+
+#[test]
+fn legacy_cleanup_history_is_unknown_and_never_a_reversible_transaction() {
+    let storage = DoctorStorage::new();
+    let root = storage.0.join("privr/state/transactions");
+    std::fs::create_dir_all(&root).expect("isolated journal root");
+    let record = br#"{"schema":1,"transaction_id":"clean-legacy","timestamp":"1.000","platform":"linux","profile":"clean:aggressive","operations":[]}"#;
+    let path = root.join("clean-legacy.json");
+    std::fs::write(&path, record).expect("legacy fixture");
+    storage
+        .command()
+        .arg("history")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "legacy record: completion and removal totals unknown",
+        ))
+        .stdout(predicate::str::contains("To reverse the most recent changes").not());
+    storage
+        .command()
+        .args(["rollback", "--yes"])
+        .assert()
+        .code(5)
+        .stderr(predicate::str::contains("1 cleanup record(s)"))
+        .stderr(predicate::str::contains("no reversible transactions"));
+    assert_eq!(
+        std::fs::read(path).expect("legacy journal preserved"),
+        record
+    );
 }

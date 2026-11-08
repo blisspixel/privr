@@ -14,30 +14,45 @@ struct TargetPathRule {
     target_id: &'static str,
     path_display: &'static str,
     resolve_paths: fn() -> Vec<PathBuf>,
+    root: UserRoot,
     file_filter: Option<fn(&Path, &str) -> bool>,
     recurse_filter: Option<fn(&Path) -> bool>,
 }
 
-fn home_dir() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(PathBuf::from)
+enum UserRoot {
+    Home,
+    Cache,
+    Config,
+    Data,
+    HomeOrConfig,
 }
 
+impl UserRoot {
+    fn available(&self) -> bool {
+        match self {
+            Self::Home => home_dir().is_some(),
+            Self::Cache => xdg_cache_home().is_some(),
+            Self::Config => xdg_config_home().is_some(),
+            Self::Data => xdg_data_home().is_some(),
+            Self::HomeOrConfig => home_dir().is_some() || xdg_config_home().is_some(),
+        }
+    }
+}
+
+const INVALID_ROOT: &str = "Cannot resolve target: no absolute user root is available";
+
+use crate::platform::xdg::home_dir;
+
 fn xdg_cache_home() -> Option<PathBuf> {
-    std::env::var_os("XDG_CACHE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| home_dir().map(|h| h.join(".cache")))
+    crate::platform::xdg::user_root("XDG_CACHE_HOME", ".cache")
 }
 
 fn xdg_config_home() -> Option<PathBuf> {
-    std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .or_else(|| home_dir().map(|h| h.join(".config")))
+    crate::platform::xdg::user_root("XDG_CONFIG_HOME", ".config")
 }
 
 fn xdg_data_home() -> Option<PathBuf> {
-    std::env::var_os("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .or_else(|| home_dir().map(|h| h.join(".local").join("share")))
+    crate::platform::xdg::user_root("XDG_DATA_HOME", ".local/share")
 }
 
 fn thumbnail_cache_paths() -> Vec<PathBuf> {
@@ -315,6 +330,7 @@ static TARGET_RULES: &[TargetPathRule] = &[
         target_id: "linux.residue.thumbnails",
         path_display: "$XDG_CACHE_HOME/thumbnails/*",
         resolve_paths: thumbnail_cache_paths,
+        root: UserRoot::Cache,
         file_filter: None,
         recurse_filter: None,
     },
@@ -322,6 +338,7 @@ static TARGET_RULES: &[TargetPathRule] = &[
         target_id: "linux.residue.mesa-shader",
         path_display: "$XDG_CACHE_HOME/mesa_shader_cache",
         resolve_paths: mesa_shader_paths,
+        root: UserRoot::Cache,
         file_filter: None,
         recurse_filter: None,
     },
@@ -329,6 +346,7 @@ static TARGET_RULES: &[TargetPathRule] = &[
         target_id: "linux.residue.recent-files",
         path_display: "$XDG_DATA_HOME/recently-used.xbel",
         resolve_paths: recent_files_paths,
+        root: UserRoot::Data,
         file_filter: None,
         recurse_filter: None,
     },
@@ -336,6 +354,7 @@ static TARGET_RULES: &[TargetPathRule] = &[
         target_id: "linux.residue.powershell-history",
         path_display: "$XDG_DATA_HOME/powershell/PSReadLine/ConsoleHost_history.txt",
         resolve_paths: powershell_history_paths,
+        root: UserRoot::Data,
         file_filter: None,
         recurse_filter: None,
     },
@@ -343,6 +362,7 @@ static TARGET_RULES: &[TargetPathRule] = &[
         target_id: "browser.residue.firefox-cache",
         path_display: "$XDG_CACHE_HOME/mozilla/firefox/*/cache2",
         resolve_paths: firefox_cache_paths,
+        root: UserRoot::Cache,
         file_filter: None,
         recurse_filter: None,
     },
@@ -350,6 +370,7 @@ static TARGET_RULES: &[TargetPathRule] = &[
         target_id: "browser.residue.chrome-cache",
         path_display: "$XDG_CACHE_HOME/google-chrome/*/Cache",
         resolve_paths: chrome_cache_paths,
+        root: UserRoot::Cache,
         file_filter: None,
         recurse_filter: None,
     },
@@ -357,6 +378,7 @@ static TARGET_RULES: &[TargetPathRule] = &[
         target_id: "browser.residue.chromium-cache",
         path_display: "$XDG_CACHE_HOME/chromium/*/Cache",
         resolve_paths: chromium_cache_paths,
+        root: UserRoot::Cache,
         file_filter: None,
         recurse_filter: None,
     },
@@ -364,6 +386,7 @@ static TARGET_RULES: &[TargetPathRule] = &[
         target_id: "browser.residue.brave-cache",
         path_display: "$XDG_CACHE_HOME/BraveSoftware/Brave-Browser/*/Cache",
         resolve_paths: brave_cache_paths,
+        root: UserRoot::Cache,
         file_filter: None,
         recurse_filter: None,
     },
@@ -371,6 +394,7 @@ static TARGET_RULES: &[TargetPathRule] = &[
         target_id: "browser.residue.edge-cache",
         path_display: "$XDG_CACHE_HOME/microsoft-edge/*/Cache",
         resolve_paths: edge_cache_paths,
+        root: UserRoot::Cache,
         file_filter: None,
         recurse_filter: None,
     },
@@ -378,6 +402,7 @@ static TARGET_RULES: &[TargetPathRule] = &[
         target_id: "ai.residue.claude",
         path_display: "~/.claude/cache and $XDG_CONFIG_HOME/Claude/Cache",
         resolve_paths: claude_cache_paths,
+        root: UserRoot::HomeOrConfig,
         file_filter: None,
         recurse_filter: None,
     },
@@ -385,6 +410,7 @@ static TARGET_RULES: &[TargetPathRule] = &[
         target_id: "ai.residue.codex",
         path_display: "~/.codex/.tmp, cache, logs",
         resolve_paths: codex_cache_paths,
+        root: UserRoot::Home,
         file_filter: Some(codex_log_filter),
         recurse_filter: Some(codex_recurse_filter),
     },
@@ -392,6 +418,7 @@ static TARGET_RULES: &[TargetPathRule] = &[
         target_id: "editor.residue.vscode",
         path_display: "$XDG_CONFIG_HOME/Code/Cache and CachedData",
         resolve_paths: vscode_cache_paths,
+        root: UserRoot::Config,
         file_filter: None,
         recurse_filter: None,
     },
@@ -399,6 +426,7 @@ static TARGET_RULES: &[TargetPathRule] = &[
         target_id: "app.residue.discord",
         path_display: "$XDG_CONFIG_HOME/discord/Cache",
         resolve_paths: discord_cache_paths,
+        root: UserRoot::Config,
         file_filter: None,
         recurse_filter: None,
     },
@@ -406,6 +434,7 @@ static TARGET_RULES: &[TargetPathRule] = &[
         target_id: "dev.residue.cargo-cache",
         path_display: "~/.cargo/registry/cache",
         resolve_paths: cargo_cache_paths,
+        root: UserRoot::Home,
         file_filter: None,
         recurse_filter: None,
     },
@@ -413,6 +442,7 @@ static TARGET_RULES: &[TargetPathRule] = &[
         target_id: "dev.residue.npm-cache",
         path_display: "~/.npm/_cacache",
         resolve_paths: npm_cache_paths,
+        root: UserRoot::Home,
         file_filter: None,
         recurse_filter: None,
     },
@@ -420,6 +450,7 @@ static TARGET_RULES: &[TargetPathRule] = &[
         target_id: "dev.residue.pip-cache",
         path_display: "$XDG_CACHE_HOME/pip",
         resolve_paths: pip_cache_paths,
+        root: UserRoot::Cache,
         file_filter: None,
         recurse_filter: None,
     },
@@ -427,6 +458,7 @@ static TARGET_RULES: &[TargetPathRule] = &[
         target_id: "dev.residue.go-cache",
         path_display: "$XDG_CACHE_HOME/go-build",
         resolve_paths: go_cache_paths,
+        root: UserRoot::Cache,
         file_filter: None,
         recurse_filter: None,
     },
@@ -434,6 +466,14 @@ static TARGET_RULES: &[TargetPathRule] = &[
 
 fn find_rule(id: &str) -> Option<&'static TargetPathRule> {
     TARGET_RULES.iter().find(|r| r.target_id == id)
+}
+
+pub(crate) fn validate_target_root(spec: &ResidueSpec) -> Result<(), &'static str> {
+    match find_rule(&spec.id) {
+        Some(rule) if rule.root.available() => Ok(()),
+        Some(_) => Err(INVALID_ROOT),
+        None => Err("No adapter rule configured for target"),
+    }
 }
 
 fn scan_path(
@@ -621,6 +661,21 @@ pub fn inspect_target(
     retained_reason: Option<String>,
 ) -> ResiduePreviewItem {
     let rule = find_rule(&spec.id);
+    if let Some(rule) = rule
+        && !rule.root.available()
+    {
+        return ResiduePreviewItem {
+            id: spec.id.clone(),
+            title: spec.title.clone(),
+            category: spec.category,
+            path_display: rule.path_display.to_owned(),
+            file_count: 0,
+            size_bytes: 0,
+            selected: false,
+            retained_reason: Some(INVALID_ROOT.to_owned()),
+            requires_risk_ack: spec.requires_risk_ack,
+        };
+    }
     let (path_display, file_count, size_bytes) = match rule {
         Some(r) => {
             let paths = (r.resolve_paths)();
@@ -653,6 +708,15 @@ pub fn inspect_target(
 pub fn purge_target(spec: &ResidueSpec) -> ResiduePurgeItem {
     let rule = find_rule(&spec.id);
     match rule {
+        Some(r) if !r.root.available() => ResiduePurgeItem {
+            id: spec.id.clone(),
+            title: spec.title.clone(),
+            category: spec.category,
+            files_removed: 0,
+            bytes_reclaimed: 0,
+            files_retained: 0,
+            error: Some(INVALID_ROOT.to_owned()),
+        },
         Some(r) => {
             let paths = (r.resolve_paths)();
             let mut total_removed = 0;

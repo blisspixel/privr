@@ -340,24 +340,7 @@ pub enum Command {
         name = "clean",
         alias = "purge",
         about = "Clean disposable caches, temporary files, and activity residue",
-        long_about = "Preview or clean disposable caches, temporary files, and activity residue.\n\n\
-                      By default, running in an interactive terminal displays an organized\n\
-                      preview and requests confirmation before deleting anything. In\n\
-                      noninteractive scripts, -y/--yes is required to apply changes.\n\n\
-                      Categories:\n  \
-                        system     %TEMP%, crash dumps, thumbnail caches, DirectX shaders\n  \
-                        browsers   Chrome and Edge web caches (logins/cookies preserved)\n  \
-                        ai         Claude and Codex temporary files and debug logs\n  \
-                        dev        Python pip and Node.js npm package download caches\n  \
-                        recent     Windows recent document shortcuts and taskbar Jump Lists\n\n\
-                      Examples:\n  \
-                        privr clean                     Interactively review and clean residue\n  \
-                        privr clean -y                  Clean standard residue immediately\n  \
-                        privr clean --polite            Clean while retaining recent items & thumbnails\n  \
-                        privr clean --category ai       Clean only AI agent temporary files\n  \
-                        privr clean -c ai,browsers      Clean AI agent and web browser caches\n  \
-                        privr clean --trim              Clean residue and issue hardware TRIM to SSD\n  \
-                        privr clean --preview           Preview what would be cleaned without mutating"
+        long_about = clean_help()
     )]
     Clean {
         /// Retain disruptive or costly-to-rebuild caches (e.g. thumbnail cache, recent items).
@@ -369,10 +352,10 @@ pub enum Command {
         /// Compatibility alias for --preview.
         #[arg(long)]
         dry_run: bool,
-        /// Confirm standard-risk cleaning in noninteractive use.
+        /// Confirm permanent cleanup of the selected scope, including supported history.
         #[arg(short = 'y', long)]
         yes: bool,
-        /// Filter by residue category: system, browsers, ai, dev, recent. Repeatable or comma-separated.
+        /// Filter by residue category: system, browsers, app, ai, dev, recent. Repeatable or comma-separated.
         #[arg(short = 'c', long = "category", value_delimiter = ',')]
         categories: Vec<String>,
         /// Clean only an exact target ID or prefix. Repeatable.
@@ -385,6 +368,52 @@ pub enum Command {
         #[arg(long)]
         trim: bool,
     },
+}
+
+fn clean_help() -> String {
+    let mut help = String::from(
+        "Clean supported local privacy residue with one preview and confirmation.\n\n\
+         The thorough default includes supported command history and recent activity.\n\
+         Deletion is permanent. Close affected applications first; open applications\n\
+         can recreate records. Browser cookie and browsing-history adapters are not\n\
+         implemented yet. Without a terminal, execution requires --yes.\n\n\
+         Categories: available in this build (aliases share a row)\n",
+    );
+    let targets = crate::catalog::residue::compiled_residue_targets();
+    for (selector, names) in [
+        ("system", "system"),
+        ("temp", "temp, temporary"),
+        ("crash", "crash, dumps"),
+        ("thumbnail", "thumbnail, thumbnails"),
+        ("shader", "shader, shaders"),
+        ("browser", "browser, browsers"),
+        ("app", "app, apps"),
+        ("ai", "ai, agent, agents"),
+        ("recent", "recent, activity"),
+        ("dev", "dev, developer, package, packages"),
+    ] {
+        let titles: Vec<_> = targets
+            .iter()
+            .filter(|target| {
+                crate::catalog::residue::matches_category_filter(target.category, selector)
+            })
+            .map(|target| target.title.as_str())
+            .collect();
+        if !titles.is_empty() {
+            help.push_str(&format!("  {names}: {}\n", titles.join(", ")));
+        }
+    }
+    help.push_str(
+        "\nExamples:\n  \
+         privr clean                     Review and confirm thorough cleanup\n  \
+         privr clean -y                  Permanently clean the default scope\n  \
+         privr clean --preview           Inspect without deleting, even with --yes\n  \
+         privr clean --polite            Reduce scope, retaining recent items and thumbnails\n  \
+         privr clean --category app      Limit cleanup to application caches\n  \
+         privr clean -c ai,browsers      Limit cleanup to these categories\n  \
+         privr clean --trim              Also request hardware free-space maintenance",
+    );
+    help
 }
 
 /// When to emit colour.

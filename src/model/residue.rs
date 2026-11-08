@@ -46,8 +46,8 @@ impl ResidueCategory {
             Self::TemporaryFiles | Self::CrashDumps | Self::ThumbnailCache | Self::ShaderCache => {
                 "System Residue"
             }
-            Self::BrowserCache => "Browser Caches (logins & cookies preserved)",
-            Self::AgentResidue => "AI Agent Residue (prompts & credentials preserved)",
+            Self::BrowserCache => "Browser Caches",
+            Self::AgentResidue => "AI Agent Residue",
             Self::RecentActivity => "Recent Activity & Jump Lists",
             Self::PackageCache => "Developer Caches",
             Self::AppCache => "Application Caches",
@@ -70,7 +70,7 @@ impl ResidueCategory {
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PurgeMode {
-    /// Thorough clearing of all verified disposable and rebuildable residue.
+    /// Thorough clearing of supported privacy residue, including ordinary history.
     #[default]
     Aggressive,
     /// Retains caches whose rebuilding would disrupt convenience or workflows.
@@ -78,6 +78,13 @@ pub enum PurgeMode {
 }
 
 impl PurgeMode {
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::Aggressive => "thorough",
+            Self::Polite => "polite",
+        }
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Aggressive => "aggressive",
@@ -106,6 +113,9 @@ pub struct ResiduePreviewItem {
     pub id: String,
     pub title: String,
     pub category: ResidueCategory,
+    /// Consequence of clearing this target, available before confirmation.
+    #[serde(default)]
+    pub trade_off: String,
     pub path_display: String,
     pub file_count: usize,
     pub size_bytes: u64,
@@ -120,6 +130,9 @@ pub struct ResiduePurgeItem {
     pub id: String,
     pub title: String,
     pub category: ResidueCategory,
+    /// Consequence of clearing this target, available before confirmation.
+    #[serde(default)]
+    pub trade_off: String,
     pub files_removed: usize,
     pub bytes_reclaimed: u64,
     pub files_retained: usize,

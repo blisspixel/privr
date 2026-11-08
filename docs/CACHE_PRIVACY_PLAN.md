@@ -1,6 +1,7 @@
 # Privacy cache capability plan
 
-Status: proposed, researched 2026-10-06. This plan adds no runtime capability.
+Status: research and remaining validation plan. Cleanup defaults revised
+2026-11-04 under decision 13. This document alone adds no runtime capability.
 Implemented behavior and release blockers remain in
 [the roadmap Current state](../ROADMAP.md#current-state).
 
@@ -9,13 +10,14 @@ Prioritize data that reveals activity or contains private content. Keep disk
 space estimates separate from privacy findings, and pair each clearing action
 with an explanation of what will recreate the data.
 
-The planned purge defaults to thorough clearing of supported disposable caches
-and temporary files. Aggressive describes completeness within that safe scope.
-Both modes preserve login state, ordinary history, and persistent site data
-unless separately selected and approved. OS operation and recovery remain
-protected. `--polite` additionally retains caches whose rebuilding would disrupt
-convenience or application workflows. An unconfirmed call
-previews the plan, while named approval authorizes its execution.
+Thorough privacy cleanup is the default: remove supported caches, temporary
+residue, ordinary histories, and recent activity with one preview and
+confirmation. Cookies, browsing history, and session residue are admitted scope
+for future validated adapters, not implemented coverage. `--polite` offers a
+reduced scope for people who deliberately want to retain convenience-sensitive
+traces. Actual content, recovery material, and security/audit logs remain outside
+routine cleanup. [Decision 13](DECISIONS.md#13-thorough-privacy-cleanup-with-whole-plan-confirmation)
+is the binding scope and consent contract.
 
 ## What cleanup tools offer
 
@@ -31,8 +33,8 @@ Source: [CCleaner analysis and results](https://support.ccleaner.com/articles/en
 
 Cookie exceptions preserve selected sites rather than clearing every login.
 Support user-selected exceptions and show their retained exposure explicitly.
-The default cleanup preserves cookies. If the user separately selects cookie
-clearing, honor only explicit exceptions and disclose sign-outs. A cookie count
+When cookie clearing is implemented, include it in thorough cleanup, honor
+explicit exceptions, and disclose sign-outs. A cookie count
 alone cannot establish which cookies track the user or which are necessary for
 a workflow.
 Source: [CCleaner cookie selection](https://support.ccleaner.com/articles/en_US/Master_Article/select-cookies-to-clean-with-ccleaner-for-windows).
@@ -66,7 +68,7 @@ management handling, an authoritative observation, and recorded fixtures.
 | Browser and download history | Visited addresses and download records | Separate guided review after resolving sync scope | Address suggestions are lost; download history is distinct from downloaded files; exclude cloud deletion |
 | Windows thumbnail cache | Visual previews of documents and media | Guided selection of Thumbnails in Disk Cleanup; research a narrowly scoped adapter for 0.5.0 | Previews regenerate; retain creative-workload exceptions; verify the existing prevention control independently |
 | Ordinary recent-file lists | Records of opened documents and locations | Research documented application or desktop clear interfaces and retention choices | May lose useful recent items or pinned entries; exclude ShellBags and private databases |
-| PowerShell command recall | Commands can retain sensitive arguments | Continue the existing session-only history proposal | Cross-session recall is lost; existing-history erasure stays excluded pending the existing scope review |
+| PowerShell command recall | Commands can retain sensitive arguments | Validate existing ConsoleHost cleanup independently of future-retention settings | Cross-session recall is lost; current cleanup covers the default ConsoleHost file only, and open shells can recreate it |
 | Application and local model caches | May contain document extracts or retained prompts, depending on the application | Later research of a small named application set using vendor retention and reset interfaces | Separate rebuildable indexes from conversations, model weights, downloaded assets, projects, and unsynced documents |
 
 Google documents separate cache, cookies/site data, history, download history,
@@ -120,25 +122,21 @@ Source: [FreeDesktop thumbnail directory specification](https://specifications.f
 
 ### Aggressive and polite clearing
 
-Aggressive is the default clearing mode for reviewed disposable caches and
-temporary files. With no control filter, preview those categories for the current
-user and supported local application profiles. Cookies, persistent site data,
-history, and recent-file lists are separate opt-in targets and are never added
-by mode selection. A control filter narrows default selection or explicitly
-selects one of those reviewed optional targets. Each category remains separately
-visible and requires its own named acknowledgement before execution. Unsupported
-and blocked targets remain visible with their reasons.
+Aggressive is the serialized name for thorough default cleanup. With no filters,
+select all admitted targets implemented for the platform, including ordinary
+history and recent-file records. One whole-plan confirmation authorizes routine
+cleanup; per-category approval is not required for expected history loss,
+sign-outs, or cache rebuilding. Filters narrow scope. Unsupported and blocked
+targets must not be presented as successfully cleared.
 
-| Category | Aggressive default | Polite option |
+| Category | Thorough default | Polite option |
 |---|---|---|
-| Browser HTTP cache | Clear the selected disposable category through the documented mechanism | Clear the selected disposable category through the documented mechanism |
-| Supported thumbnail and application caches | Clear only reviewed rebuildable caches with proven isolation | Retain caches classified as costly or disruptive to rebuild |
-| Supported disposable temporary files | Clear all vendor-eligible files in the selected category | Clear vendor-eligible disposable files with the same active-work and recovery protections |
-| Cookies and login-related site state | Preserve unless separately selected and approved | Preserve unless separately selected and approved |
-| Persistent site storage and offline web-app data | Preserve unless separately selected and approved with its data-loss warning | Preserve unless separately selected and approved with its data-loss warning |
-| Browser and download history | Preserve unless separately selected and approved | Preserve unless separately selected and approved |
-| Ordinary recent-file lists | Preserve unless separately selected and approved | Preserve unless separately selected and approved |
-| Explicit user exceptions | Honor them and report retained categories or scope | Honor them and report retained categories or scope |
+| Supported browser, application, developer, and temporary caches | Clear supported eligible targets | Retain categories classified as disruptive to rebuild |
+| Ordinary recent-file lists and saved command recall | Clear supported targets and disclose permanent loss | Retain convenience-sensitive activity targets |
+| Cookies and login-related state | Include once local-only adapters are validated; disclose sign-outs | Future adapters must declare retention behavior |
+| Browser and download history | Include once adapters and sync boundaries are validated | Future adapters must declare retention behavior |
+| Persistent site storage containing unsynced work | Isolate trace data; actual content requires a separate destructive choice | Same content boundary |
+| Explicit user exceptions | Honor and report retained scope | Honor and report retained scope |
 
 Aggressive mode applies no extra recency cutoff to disposable caches. Vendor age
 limits, in-use protections, and eligibility conditions apply in both modes.
@@ -165,29 +163,22 @@ rollback workflow. Pair it with residue observations without inferring that
 disabling future retention removed existing data. Workflow-altering retention
 choices require review and the existing friction metadata.
 
-Use the already specified separate verb for deliberate clearing. The following
-syntax is planned in [CLI.md](CLI.md#purge), not implemented:
+The implemented command forms are:
 
 ```text
-privr purge
-privr purge --polite
-privr purge --preview --control <id>
-privr purge --control <id> --accept-risk <id>
-privr purge --polite --control <id> --accept-risk <id>
+privr clean --preview
+privr clean
+privr clean --yes
+privr clean --polite
+privr clean --control <id> --yes
 ```
 
-The first two forms preview aggressive and polite selection respectively.
-`--preview` always forbids mutation, even when acknowledgement flags are supplied.
-`--control` and `--accept-risk` are repeatable for individually named targets.
-Exact selection and named acknowledgement can opt into a reviewed category
-omitted by the selected mode; its tradeoffs still appear in the plan. Unknown
-control IDs and mismatched acknowledgements are usage errors, never a reason to
-broaden selection. No blanket cookie, history, or site-storage selection follows
-from an aggressive default.
-
-Preserve existing control IDs, including `windows.storage.thumbnail-cache`.
-Review any new target IDs before catalogue inclusion. Avoid a second positional
-target syntax or an unrelated generic `clean` command.
+`purge` is an alias. Interactive execution previews and asks once. Noninteractive
+execution previews without `--yes`. `--preview` always forbids mutation,
+including with `--yes`. The `--accept-risk` interface remains for targets marked
+as requiring extra acknowledgement; ordinary history targets do not require it.
+Unknown selectors must fail without broadening scope; issue 53 tracks existing
+validation gaps. Preserve stable target IDs.
 
 A preview should show aggressive or polite mode, selected and retained categories,
 the target category, bounded scope, supported versions,
@@ -213,9 +204,10 @@ Execution must:
 2. Dispatch a compiled, typed vendor operation with fixed arguments and verified
    executable resolution where a process is required. No caller-supplied paths,
    shell code, broad wildcards, or inherited cleaner presets.
-3. Require named destructive acknowledgement independently of `--yes` and any
-   ordinary apply approval. Do not add purge to agent mutation discovery until
-   equivalent approval and scope protections are proven.
+3. Require explicit whole-plan confirmation for routine cleanup, independently
+   of configuration apply. Agent execution requires enabled mutation tools and
+   explicit confirmation. Additional destructive choices outside routine scope
+   require separate acknowledgement.
 4. Durably journal intent before erasure and stop if the journal cannot be
    secured or written. Store IDs, operation states, aggregate results, and the
    mode and reason rollback is unavailable. Do not copy erased contents, record
@@ -310,11 +302,11 @@ roots, app restarts between preview and execution, background writers, managed
 settings, unknown sync scope, disk-full or denied journal writes, partial vendor
 failure, interruption, and attempted rollback of an irreversible action. Native
 VM tests must prove that unrelated categories and profiles remain intact.
-Test that aggressive default selection includes only reviewed disposable caches
-and temp files, both modes preserve cookies/history/site data unless separately
-selected, polite retains disruptive caches, and protected OS/recovery data is
-untouched. Cover full-range eligible clearing, explicit exceptions, and refusal
-to execute without each target's consent.
+Test that thorough default selection removes supported ordinary history and
+recent activity alongside caches, with one confirmation. Verify that preview
+never deletes, polite reports its reduced scope, and actual content and recovery
+material remain untouched. Cover full-range eligible clearing, explicit
+exceptions, and refusal to execute without confirmation.
 Neither mode may turn denied or unsupported evidence into an empty-cache pass.
 
 ### Performance and user experience
@@ -368,17 +360,34 @@ and all platform CI jobs.
 
 Keep registry cleaning, disk optimization, free-space wiping, generic file
 shredding, update-cache removal, Downloads deletion, security-log clearing,
-ShellBags, SRUM, quarantine/provenance databases, crash-dump erasure, and cloud
-deletion outside this plan. DNS-cache flushing is a low-priority transient-state
+ShellBags, SRUM, quarantine/provenance databases, and cloud deletion outside this
+plan. Existing crash-report targets remain experimental and need per-target
+validation of scope and diagnostic/recovery consequences. DNS-cache flushing is a low-priority transient-state
 operation, not a substitute for stored-activity cleanup. Disk encryption and
 application access controls remain necessary for local exposure.
 
-Existing shell-history erasure and assistant-session cleanup require a separate
-scope review and exact vendor documentation. Do not implement them as age-based
-file deletion. Pagefile configuration and TRIM configuration are separate
+Ordinary shell recall is admitted scope under decision 13. Current ConsoleHost
+cleanup remains limited: custom paths, other hosts, and open-writer behavior need
+further validation. Conversation/session archives that contain actual work need
+separate content-scope research. Do not infer disposability from age. Pagefile configuration and TRIM configuration are separate
 posture/storage behaviors, not cache-purge operations or secure-erasure proofs.
 
 The useful first increment is accurate browser cache guidance, reviewed
 thumbnail-cache handling, and retention recommendations, followed by an honest
 read-only residue preview. Broader automation depends on proving the mechanism,
 scope, and result for each target.
+
+## Existing history target evidence and limits
+
+Microsoft documents the per-host PSReadLine history file, its default Windows
+and XDG locations, and the possibility of sensitive arguments being persisted.
+The current target covers only `ConsoleHost_history.txt`. It does not inspect
+custom `HistorySavePath` settings. Save-at-exit or incremental writers can
+recreate records, so removal is not evidence that future retention is disabled.
+Sources: [PSReadLine history](https://learn.microsoft.com/en-us/powershell/module/psreadline/about/about_psreadline)
+and [history storage options](https://learn.microsoft.com/en-us/powershell/module/psreadline/set-psreadlineoption).
+
+GTK documents a recent-manager clearing API. The current Linux adapter instead
+removes the known XBEL file; it does not coordinate with running applications.
+Native writer/recreation validation remains outstanding. Source:
+[GTK recent manager](https://docs.gtk.org/gtk3/class.RecentManager.html).

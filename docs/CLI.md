@@ -262,54 +262,45 @@ and are excluded from counterfactual remediation.
 
 ## `clean` (alias: `purge`)
 
-Status: implemented across Windows, Linux, and macOS.
+Status: implemented but experimental; see [known defects](../ROADMAP.md#current-state).
 
-`clean` (or `purge`) removes local privacy residue by inspecting and safely clearing
-reviewed disposable caches and temporary files across native locations ($XDG_CACHE_HOME on Linux,
-~/Library/Caches on macOS, %LOCALAPPDATA% on Windows). It strictly preserves cookies,
-login sessions, passwords, history, and active databases. Optional hardware SSD TRIM (`--trim`)
-safely deallocates unallocated clusters on solid-state drives without flash wear.
+`clean` removes supported local privacy residue. The default includes compiled
+cache and temporary-file targets, recent-file lists, and the default PowerShell
+ConsoleHost history file. Ordinary history loss and cache rebuilding are expected
+consequences, disclosed in the preview. Actual target coverage depends on the
+platform. Browser cookies, browser history, and persistent site/session data do
+not yet have cleanup adapters. Their absence is a coverage gap, not proof that
+those traces are gone.
 
-It is a separate verb precisely because it is irreversible. It is never part of
-`apply`, never included in a default profile, and never reachable from `--yes`.
-Each target requires `--accept-risk` naming that control.
+In a terminal, `clean` displays the selected targets and tradeoffs, then asks for
+one confirmation. Without a terminal it previews unless `--yes` is supplied.
+`clean --yes` confirms permanent cleanup of the selected scope, including
+supported history. Routine activity targets do not require separate
+`--accept-risk` flags. That flag remains available for targets explicitly marked
+as needing additional acknowledgement.
 
-Aggressive clearing is the default intensity within reviewed disposable caches
-and temporary files. With no control filter, preview those categories for the
-current user and supported local profiles. Clear the full eligible category
-without extra age cutoffs; vendor age conditions and in-use protections remain
-binding. All losses appear in the plan before approval.
+`--preview` (or `--dry-run`) always prevents deletion, even with `--yes`.
+`--polite` reduces selection by retaining convenience-sensitive categories such
+as recent activity and thumbnails. `--control` and `--category` narrow scope.
+The text preview shows IDs, metadata counts, and tradeoffs. JSON preview and
+execution items include an additive `trade_off` string; older items without it
+remain readable. Selector validation still has known gaps tracked in issue 53.
 
-Both modes preserve cookies, persistent site data, history, and recent-file lists
-unless separately selected and approved. `--polite` additionally retains caches
-classified as disruptive to rebuild. Both modes honor explicit user exceptions
-and preserve passwords, passkeys, bookmarks, downloaded files, OS components,
-updates, restore points, installer state, autosave, recovery data, and active
-work. A mixed vendor cleanup that cannot isolate disposable data remains guided
-or unsupported. Do not kill applications, stop services, or bypass file locks.
-Mode never authorizes cloud deletion or excluded artifacts. Temporary location
-or naming alone does not establish disposability. Purge reports verified removal
-and its limits; it does not promise secure erasure or media sanitization.
+Deletion cannot be rolled back. Close affected applications first: open shells
+and desktop applications can recreate records. The PowerShell target does not
+cover customized history paths, other hosts, or in-memory recall. Cleanup does
+not disable future recording or clear cloud copies. It does not establish
+physical-media sanitization.
 
-`--control` and `--accept-risk` are repeatable for individually named targets.
-Exact selection and named acknowledgement can opt into a reviewed category
-omitted by the selected mode, with its tradeoffs displayed. Unknown IDs or
-mismatched acknowledgements are usage errors. Every selected execution target
-needs its own acknowledgement.
+Actual user content, credentials, recovery material, and security/audit logs
+remain outside routine cleanup. Do not kill applications or bypass locks. On
+Unix, XDG overrides and HOME fallbacks must resolve to absolute roots; selected
+cleanup and journal access are refused when the required root is unavailable.
 
-`--preview` is the default and is contractually free of side effects. It reports
-what exists, how much space it occupies, whether the collection that produces it
-is still enabled, and whether a supported clear mechanism is available on this
-build.
-
-An unconfirmed `privr purge` previews aggressive selection; `privr purge --polite`
-previews polite selection. `--preview` always forbids mutation, including when
-`--accept-risk` is present. Preview and results identify the mode and retained
-categories, so polite cleanup cannot appear to have cleared all local residue.
-
-A purge writes a normal transaction journal entry recording that rollback is
-unavailable and why, so a later `rollback` on that transaction fails loudly
-instead of appearing to succeed.
+`--trim` requests separate hardware free-space maintenance. It is not evidence
+that privacy traces were erased. Cleanup journals currently record the run but
+lack per-target totals and interruption state (issue 57); they cannot restore
+deleted files.
 
 ## `rollback`
 

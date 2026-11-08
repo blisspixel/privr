@@ -21,7 +21,7 @@ The decisions that constrain every milestone are recorded in
 
 ## Current state
 
-Reviewed 2026-10-21 against source and tests. This section is the single statement of
+Reviewed 2026-11-04 against source and tests. This section is the single statement of
 what exists; other documents link here rather than repeating counts. Source
 maintenance tags follow `main`. They are not the 0.1.0 Windows release, they
 publish no signed binaries, and the crate is not published.
@@ -44,7 +44,7 @@ milestone and its results should not be trusted.
 | Profile ladder | Implemented and verified. Baseline <= Strict <= Restrictive ladder partitions controls monotonically. |
 | Custom policy files | Implemented and tested. Schema 1 TOML and JSON engine supporting base profile inheritance (`extends = "builtin:baseline@0.1"`), per-control mode and desired-state overrides, and ISO-dated exceptions (`[[exceptions]]`). Active exceptions are distinguished from absent risk in posture reports and safely excluded from automated remediation until expiry. |
 | PowerShell session-only history | Implemented and tested. `windows.shell.history-persistence` guides interactive PSReadLine verification and profile configuration. Explanations walk through line-editing retention mechanics and security audit log boundaries. |
-| Privacy-cache inspection and clearing | Implemented but experimental on Windows, Linux, and macOS. Linux playtesting found unresolved root-resolution, default-selection, and journal defects (issues 49, 50, and 57); cross-platform preservation and interruption validation remain required. `privr clean` (alias `privr purge`) inspects and removes catalogued temporary files, crash dumps, browser caches, AI agent scratch files, package manager caches, and recent activity residue across native locations ($XDG_CACHE_HOME, ~/Library/Caches, %LOCALAPPDATA%). Includes preview dashboard, category filtering, polite retention mode, and hardware SSD TRIM / Deallocate (`--trim`). See [candidate priorities, sources, and safety gates](docs/CACHE_PRIVACY_PLAN.md). |
+| Privacy-cache inspection and clearing | Implemented but experimental on Windows, Linux, and macOS. Linux playtesting identified root-resolution and disclosure defects, now addressed in source (issues 49 and 50); cleanup journal defects remain (issue 57); cross-platform preservation and interruption validation remain required. `privr clean` (alias `privr purge`) inspects and removes catalogued temporary files, crash dumps, browser caches, AI agent scratch files, package manager caches, and recent activity residue across native locations ($XDG_CACHE_HOME, ~/Library/Caches, %LOCALAPPDATA%). Includes preview dashboard, category filtering, polite retention mode, and hardware SSD TRIM / Deallocate (`--trim`). See [candidate priorities, sources, and safety gates](docs/CACHE_PRIVACY_PLAN.md). |
 | Fixture files | Implemented and tested for 10 Windows controls (advertising ID, Copilot shell integration, Recall snapshots, diagnostic data, LLMNR, WPAD auto-discovery, thumbnail cache, tailored experiences, web search, delivery optimization), covering 96 synthetic observation states across compliant, drift, denied, malformed, and OS build-gated inputs. The compiled probes and evaluator run against exact typed bytes through recorded Context. |
 | Staleness, signed releases | Review staleness implemented with mathematical ceiling precision (`actual.exceeds_ceiling(ceiling)`) and dynamic doctor staleness reporting. Signed binaries remain open. A source tag records a green `main` commit only. |
 
@@ -65,10 +65,17 @@ Mutation (blocks 0.2.0):
   home fallback. Missing valid roots refuse selected cleanup and journal access
   before mutation. Disposable CLI fixtures cover cache, config, data, and
   journal locations, including unchanged working-directory canaries.
-- [ ] Default cleanup selects command history and recent-file lists despite
-  the documented preservation contract (issue 50). Existing shell-history
-  erasure still requires a scope review.
+- [x] Default history selection contradicted the documented contract (issue 50).
+  Decision 13 now admits supported ordinary history in thorough cleanup with one
+  confirmation. Previews disclose target IDs, permanent deletion, tradeoffs, and
+  open-writer limitations. Linux fixtures prove default history removal. A
+  cross-platform CLI fixture covers ConsoleHost deletion and preview, and the
+  macOS path now follows the documented XDG location. Native cross-platform
+  results and customized-path coverage remain incomplete.
 - [ ] Cleanup journals lack target totals and interruption state (issue 57).
+- [x] Cleanup help listed Windows-only locations on Linux and omitted application
+  caches (issue 60). Categories now derive from the compiled platform targets,
+  including aliases. Text uses thorough; JSON retains the stable aggressive mode.
 
 The remaining Linux playtest findings are tracked in [issue 65](https://github.com/blisspixel/privr/issues/65).
 
@@ -402,12 +409,11 @@ workflow disruption. Existing history is not erased by this setting.
 - [ ] Research a bounded-retention alternative for users who want recent
   cross-session recall. Verify the bound on persisted data, not just the recall
   buffer; `MaximumHistoryCount` alone must not be presented as on-disk cleanup.
-- [ ] Review the current shell-history erasure exclusion and decision 13 before
-  adding cleanup of existing PSReadLine history. Ordinary command recall is
-  distinct from security and audit logs. Any supported cleanup must identify
-  the documented vendor mechanism, disclose irreversibility, and account for
-  open shells rewriting saved entries. Until that review is resolved, cleanup
-  remains unimplemented and excluded from ordinary `apply`.
+- [x] Resolve the ordinary-history scope decision: decision 13 includes supported
+  saved recall in default `clean`, separately from configuration `apply`.
+- [ ] Validate open-writer behavior and additional PSReadLine hosts and custom
+  paths. The existing target covers the default ConsoleHost history file only.
+  It cannot establish removal of in-memory history or prevent recreation.
 - [ ] Never execute arbitrary profile code to audit it, change execution policy,
   weaken transcription or security logging, or read command history contents
   into evidence. Record only allowlisted settings and non-identifying version
@@ -486,9 +492,12 @@ false pass, and no control reports success from an uncommitted write.
 - [x] Add `clean` / `purge` for local privacy residue with separate browser cache,
   AI agent residue, developer cache, and recent activity categories, local-only scope checks,
   metadata-only evidence, and independent post-state verification.
-- [x] Default purge selection to thorough clearing of reviewed disposable caches
-  and temp files while preserving logins, cookies, recovery data, and active session
-  databases. `--polite` additionally retains disruptive caches (thumbnail caches, recent items).
+- [x] Default cleanup includes supported caches, temporary residue, recent activity,
+  and ConsoleHost history with one confirmation and disclosed tradeoffs.
+  `--polite` offers reduced scope.
+- [ ] Add validated local-only cookie, browsing-history, and session-residue
+  adapters to thorough cleanup. Disclose sign-outs and isolate unsynced user
+  content; current browser adapters clear caches only.
 - [ ] Research supported disposable temporary-file categories alongside privacy
   caches. Preserve vendor age and in-use rules, autosave, recovery data, and
   active work; report verified removal without claiming media sanitization.
@@ -529,9 +538,9 @@ false pass, and no control reports success from an uncommitted write.
 - Broad disk optimization or deletion of arbitrary old or large user files.
   Documented disposable temporary-file categories are separate purge research;
   temporary location alone is not evidence that a file is safe to remove.
-- Erasing security, audit, forensic, crash, shell-history, or cloud data.
-  Preventing future shell-history persistence is separate planned work, not
-  erasure of existing history or suppression of security logging.
+- Erasing security/audit logs or cloud data, and generic anti-forensic scrubbing.
+  Ordinary command recall and recent activity are admitted cleanup targets under
+  decision 13. Future-retention configuration remains separate from erasure.
 - Disabling updates, encryption, or core malware protection in any profile in
   the default ladder.
 - Direct permissions-database writes, undocumented platform state, or raw dconf
@@ -559,4 +568,5 @@ false pass, and no control reports success from an uncommitted write.
    and support burden?
 7. Can documented shell-history mechanisms support bounded local retention and
    deliberate cleanup without weakening security logging or collecting command
-   contents? The present erasure exclusion needs review before this can ship.
+   contents? Decision 13 admits ordinary history cleanup; bounded retention and additional
+   host/path validation remain open.

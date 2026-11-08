@@ -1675,6 +1675,7 @@ fn handle_tools_call_with_check_context(
                             id: i.id,
                             title: i.title,
                             category: i.category,
+                            trade_off: i.trade_off.clone(),
                             files_removed: i.file_count,
                             bytes_reclaimed: i.size_bytes,
                             files_retained: 0,

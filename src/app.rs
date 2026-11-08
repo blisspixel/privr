@@ -513,7 +513,8 @@ fn run_with_check_context(
                     // A terminal session can choose a next step. Drift keeps the
                     // preview-or-apply prompt. An incomplete check with no drift
                     // offers the saved concealed rows instead of a second probe.
-                    if is_default_entry
+                    if !cli.no_input
+                        && is_default_entry
                         && std::io::stdin().is_terminal()
                         && std::io::stdout().is_terminal()
                     {
@@ -551,6 +552,7 @@ fn run_with_check_context(
                                         Cli {
                                             format,
                                             color: cli.color,
+                                            no_input: cli.no_input,
                                             command: Some(Command::Apply {
                                                 profile,
                                                 policy: None,
@@ -577,6 +579,7 @@ fn run_with_check_context(
                                         Cli {
                                             format,
                                             color: cli.color,
+                                            no_input: cli.no_input,
                                             command: Some(Command::Clean {
                                                 polite: false,
                                                 preview: false,
@@ -601,6 +604,7 @@ fn run_with_check_context(
                                         Cli {
                                             format,
                                             color: cli.color,
+                                            no_input: cli.no_input,
                                             command: Some(Command::Plan {
                                                 profile,
                                                 policy: None,
@@ -634,6 +638,7 @@ fn run_with_check_context(
                                                     Cli {
                                                         format,
                                                         color: cli.color,
+                                                        no_input: cli.no_input,
                                                         command: Some(Command::Apply {
                                                             profile,
                                                             policy: None,
@@ -684,6 +689,7 @@ fn run_with_check_context(
                                         Cli {
                                             format,
                                             color: cli.color,
+                                            no_input: cli.no_input,
                                             command: Some(Command::Clean {
                                                 polite: false,
                                                 preview: false,
@@ -715,6 +721,7 @@ fn run_with_check_context(
                                         Cli {
                                             format,
                                             color: cli.color,
+                                            no_input: cli.no_input,
                                             command: Some(Command::Clean {
                                                 polite: false,
                                                 preview: false,
@@ -1078,6 +1085,7 @@ fn run_with_check_context(
                     Cli {
                         format,
                         color: cli.color,
+                        no_input: cli.no_input,
                         command: Some(Command::Plan {
                             profile,
                             policy,
@@ -1145,7 +1153,8 @@ fn run_with_check_context(
             });
 
             use std::io::IsTerminal;
-            let is_interactive = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+            let is_interactive =
+                !cli.no_input && std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
 
             if !yes {
                 if !is_interactive {
@@ -2123,7 +2132,8 @@ fn run_with_check_context(
             }
 
             use std::io::IsTerminal;
-            let is_interactive = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+            let is_interactive =
+                !cli.no_input && std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
 
             if !yes {
                 if !is_interactive {
@@ -2404,8 +2414,9 @@ fn run_with_check_context(
         Command::History { purge, yes } => {
             if purge {
                 use std::io::IsTerminal;
-                let is_interactive =
-                    std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+                let is_interactive = !cli.no_input
+                    && std::io::stdin().is_terminal()
+                    && std::io::stdout().is_terminal();
                 if !yes {
                     if !is_interactive {
                         let _ = writeln!(
@@ -3069,7 +3080,7 @@ Run privr explain without arguments for the posture overview, or privr list to s
             let ui = crate::ui::Ui::for_stdout(cli.color.into());
 
             // If preview requested or noninteractive without --yes
-            let is_terminal = std::io::stdin().is_terminal();
+            let is_terminal = !cli.no_input && std::io::stdin().is_terminal();
             let is_dry_run = is_preview_mode || (!yes && !is_terminal);
 
             if is_dry_run {
@@ -3481,6 +3492,7 @@ mod tests {
             Cli {
                 color: crate::cli::ColorWhen::Never,
                 format: OutputFormat::Text,
+                no_input: false,
                 command,
             },
             &mut stdout,
@@ -3598,6 +3610,7 @@ mod tests {
             Cli {
                 color: crate::cli::ColorWhen::Never,
                 format: OutputFormat::Json,
+                no_input: false,
                 command: Some(Command::Doctor),
             },
             &mut stdout,
@@ -3750,6 +3763,7 @@ mod tests {
             Cli {
                 color: crate::cli::ColorWhen::Never,
                 format: OutputFormat::Json,
+                no_input: false,
                 command: Some(Command::List {
                     platform: None,
                     query: None,
@@ -3841,6 +3855,7 @@ mod tests {
             Cli {
                 color: crate::cli::ColorWhen::Never,
                 format: OutputFormat::Json,
+                no_input: false,
                 command: Some(Command::Recommend {
                     workload: WorkloadPersona::Creative,
                     max_friction: None,
@@ -3893,6 +3908,7 @@ mod tests {
             Cli {
                 color: crate::cli::ColorWhen::Never,
                 format: OutputFormat::Json,
+                no_input: false,
                 command: Some(Command::Simulate {
                     profile: Some(Profile::Strict),
                     policy: None,
@@ -3985,6 +4001,7 @@ desired = "disabled"
             Cli {
                 color: crate::cli::ColorWhen::Never,
                 format: OutputFormat::Json,
+                no_input: false,
                 command: Some(Command::History {
                     purge: false,
                     yes: false,
@@ -4020,6 +4037,7 @@ desired = "disabled"
             Cli {
                 color: crate::cli::ColorWhen::Never,
                 format: OutputFormat::Text,
+                no_input: false,
                 command: Some(Command::History {
                     purge: true,
                     yes: true,
@@ -4084,6 +4102,7 @@ desired = "disabled"
             Cli {
                 color: crate::cli::ColorWhen::Never,
                 format: OutputFormat::Text,
+                no_input: false,
                 command: Some(Command::Rollback {
                     transaction_id: Some("clean-123-456".to_owned()),
                     sections: Vec::new(),
@@ -4143,6 +4162,7 @@ desired = "disabled"
             Cli {
                 color: crate::cli::ColorWhen::Never,
                 format: OutputFormat::Text,
+                no_input: false,
                 command: Some(Command::Rollback {
                     transaction_id: None,
                     sections: Vec::new(),
@@ -4286,6 +4306,7 @@ desired = "disabled"
                 Cli {
                     color: crate::cli::ColorWhen::Never,
                     format: OutputFormat::Text,
+                    no_input: false,
                     command: Some(Command::Rollback {
                         transaction_id: Some("tx-requested".to_owned()),
                         sections: Vec::new(),
@@ -4452,6 +4473,7 @@ desired = "disabled"
             Cli {
                 color: crate::cli::ColorWhen::Never,
                 format: OutputFormat::Text,
+                no_input: false,
                 command: Some(Command::History {
                     purge: false,
                     yes: false,
@@ -4551,6 +4573,7 @@ desired = "disabled"
                 Cli {
                     color: crate::cli::ColorWhen::Never,
                     format: OutputFormat::Text,
+                    no_input: false,
                     command: Some(cmd),
                 },
                 &mut out,
@@ -4640,6 +4663,7 @@ desired = "disabled"
                 Cli {
                     color: crate::cli::ColorWhen::Never,
                     format: OutputFormat::Text,
+                    no_input: false,
                     command: Some(cmd),
                 },
                 &mut out,

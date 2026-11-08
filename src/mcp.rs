@@ -216,13 +216,14 @@ fn handle_tools_list(allow_apply: bool) -> Value {
         }),
         json!({
             "name": "privr_check",
-            "description": "Evaluate host privacy settings against a profile (baseline, standard, strict). Returns structured findings and drift state.",
+            "description": "Evaluate host privacy settings against a profile (baseline, strict, restrictive). Returns structured findings and drift state.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "profile": {
                         "type": "string",
-                        "description": "Policy profile to evaluate (baseline, standard, strict; default is baseline)",
+                        "description": "Policy profile to evaluate (baseline, strict, restrictive; default is baseline)",
+                        "enum": ["baseline", "strict", "restrictive"],
                         "default": "baseline"
                     },
                     "all": {
@@ -271,7 +272,8 @@ fn handle_tools_list(allow_apply: bool) -> Value {
                 "properties": {
                     "profile": {
                         "type": "string",
-                        "description": "Policy profile to plan (baseline, standard, strict; default is baseline)",
+                        "description": "Policy profile to plan (baseline, strict, restrictive; default is baseline)",
+                        "enum": ["baseline", "strict", "restrictive"],
                         "default": "baseline"
                     },
                     "workload": {
@@ -332,7 +334,8 @@ fn handle_tools_list(allow_apply: bool) -> Value {
                 "properties": {
                     "profile": {
                         "type": "string",
-                        "description": "Policy profile to simulate (baseline, standard, strict; default is baseline)",
+                        "description": "Policy profile to simulate (baseline, strict, restrictive; default is baseline)",
+                        "enum": ["baseline", "strict", "restrictive"],
                         "default": "baseline"
                     },
                     "policy": {
@@ -419,7 +422,8 @@ fn handle_tools_list(allow_apply: bool) -> Value {
                 "properties": {
                     "profile": {
                         "type": "string",
-                        "description": "Policy profile to apply (default is baseline)",
+                        "description": "Policy profile to apply (baseline, strict, restrictive; default is baseline)",
+                        "enum": ["baseline", "strict", "restrictive"],
                         "default": "baseline"
                     },
                     "workload": {
@@ -861,9 +865,17 @@ fn handle_tools_call_with_check_context(
                         .to_owned(),
                 );
             }
-            let host = crate::platform::discover();
+            let discovered_host;
+            let host = match check_context {
+                Some(ctx) => ctx.host,
+                None => {
+                    discovered_host = crate::platform::discover();
+                    &discovered_host
+                }
+            };
             let is_elevated = host.elevated == crate::model::host::Fact::Known(true);
-            let context = crate::catalog::Context::live(&host);
+            let default_context = crate::catalog::Context::live(host);
+            let context = check_context.unwrap_or(&default_context);
             let all_controls = crate::catalog::all();
             let filter = arguments.get("control").and_then(Value::as_str);
             let section_filter = arguments.get("section").and_then(Value::as_str);
@@ -872,21 +884,24 @@ fn handle_tools_call_with_check_context(
                 .and_then(Value::as_bool)
                 .unwrap_or(false);
 
-            let loaded_policy = if let Some(pol_arg) =
-                arguments.get("policy").and_then(Value::as_str)
-            {
-                let pol = if pol_arg.trim_start().starts_with('{') || pol_arg.contains("schema =") {
-                    pol_arg
-                        .parse::<crate::policy::CustomPolicy>()
-                        .map_err(|e| (-32602, e))?
+            let mut is_inline_policy = false;
+            let loaded_policy =
+                if let Some(pol_arg) = arguments.get("policy").and_then(Value::as_str) {
+                    let is_inline =
+                        pol_arg.trim_start().starts_with('{') || pol_arg.contains("schema =");
+                    let pol = if is_inline {
+                        is_inline_policy = true;
+                        pol_arg
+                            .parse::<crate::policy::CustomPolicy>()
+                            .map_err(|e| (-32602, e))?
+                    } else {
+                        let path = std::path::Path::new(pol_arg);
+                        crate::policy::CustomPolicy::from_file(path).map_err(|e| (-32602, e))?
+                    };
+                    Some(pol)
                 } else {
-                    let path = std::path::Path::new(pol_arg);
-                    crate::policy::CustomPolicy::from_file(path).map_err(|e| (-32602, e))?
+                    None
                 };
-                Some(pol)
-            } else {
-                None
-            };
 
             let accept_risk: Vec<String> = arguments
                 .get("accept_risk")
@@ -994,12 +1009,12 @@ fn handle_tools_call_with_check_context(
                     crate::engine::evaluate::Mode::Ignore
                 };
                 if mode == crate::engine::evaluate::Mode::Ignore
-                    || spec_clone.applicability.resolve(&host).applies
+                    || spec_clone.applicability.resolve(host).applies
                         != crate::model::applicability::Applies::Yes
                 {
                     return false;
                 }
-                let resolution = c.observe(&context);
+                let resolution = c.observe(context);
                 let exception = if let Some(pol) = &loaded_policy {
                     if let Some(ex) = pol.exceptions.iter().find(|e| e.control == c.spec.id) {
                         if resolution.state.as_ref().map(|s| s.0.as_str()) == Some(&ex.accepted) {
@@ -1017,7 +1032,7 @@ fn handle_tools_call_with_check_context(
                     &spec_clone,
                     mode,
                     &resolution,
-                    &host,
+                    host,
                     exception,
                 );
                 eval.outcome == crate::model::outcome::Outcome::Drift
@@ -1026,6 +1041,13 @@ fn handle_tools_call_with_check_context(
             });
 
             if elevate && !is_elevated && requires_elevation {
+                if is_inline_policy {
+                    return tool_error(
+                        "Elevated apply does not support inline policies; write the custom policy to a file and pass its path as 'policy'."
+                            .to_owned(),
+                    );
+                }
+
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default();
@@ -1153,12 +1175,12 @@ fn handle_tools_call_with_check_context(
                     crate::engine::evaluate::Mode::Ignore
                 };
                 let resolution = if mode == crate::engine::evaluate::Mode::Ignore
-                    || spec_clone.applicability.resolve(&host).applies
+                    || spec_clone.applicability.resolve(host).applies
                         != crate::model::applicability::Applies::Yes
                 {
                     crate::engine::evaluate::Resolution::skipped()
                 } else {
-                    c.observe(&context)
+                    c.observe(context)
                 };
                 let exception = if let Some(pol) = &loaded_policy {
                     if let Some(ex) = pol.exceptions.iter().find(|e| e.control == c.spec.id) {
@@ -1177,7 +1199,7 @@ fn handle_tools_call_with_check_context(
                     &spec_clone,
                     mode,
                     &resolution,
-                    &host,
+                    host,
                     exception,
                 );
                 if eval.outcome == crate::model::outcome::Outcome::Drift {
@@ -1212,7 +1234,7 @@ fn handle_tools_call_with_check_context(
                             ElevationDecision::NotRequired => {}
                         }
 
-                        match c.apply(&context) {
+                        match c.apply(context) {
                             Some(Ok(op)) => {
                                 journal.operations.push(crate::journal::OperationJournal {
                                     control_id: c.spec.id.clone(),
@@ -2818,5 +2840,85 @@ expires = "2029-01-01"
             .expect("privr_clean tool");
         let clean_props = &clean_tool["inputSchema"]["properties"];
         assert!(clean_props.get("accept_risk").is_some());
+    }
+
+    #[test]
+    fn test_tool_schemas_advertise_valid_profiles() {
+        let tools_val = handle_tools_list(true);
+        let tools_arr = tools_val["tools"].as_array().expect("tools array");
+        let profile_tools = ["privr_check", "privr_plan", "privr_simulate", "privr_apply"];
+
+        for tool_name in &profile_tools {
+            let tool = tools_arr
+                .iter()
+                .find(|t| t["name"] == *tool_name)
+                .unwrap_or_else(|| panic!("missing tool {tool_name}"));
+            let profile_prop = &tool["inputSchema"]["properties"]["profile"];
+            assert!(profile_prop.is_object(), "{tool_name} profile property");
+
+            let desc = profile_prop["description"].as_str().expect("description");
+            assert!(
+                !desc.contains("standard"),
+                "{tool_name} profile description should not mention 'standard': {desc}"
+            );
+            assert!(
+                desc.contains("baseline, strict, restrictive"),
+                "{tool_name} profile description must list valid profiles: {desc}"
+            );
+
+            let enum_values = profile_prop["enum"].as_array().expect("enum array");
+            let enum_strs: Vec<&str> = enum_values.iter().filter_map(|v| v.as_str()).collect();
+            assert_eq!(
+                enum_strs,
+                vec!["baseline", "strict", "restrictive"],
+                "{tool_name} profile enum"
+            );
+
+            for val in enum_strs {
+                assert!(
+                    parse_profile(val).is_ok(),
+                    "advertised profile '{val}' in {tool_name} must parse"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn plugin_json_version_matches_cargo_pkg_version() {
+        let manifest = include_str!("../plugin.json");
+        let parsed: Value = serde_json::from_str(manifest).expect("valid json in plugin.json");
+        assert_eq!(
+            parsed["version"].as_str(),
+            Some(env!("CARGO_PKG_VERSION")),
+            "plugin.json version must match CARGO_PKG_VERSION"
+        );
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn privr_apply_rejects_inline_policy_when_elevation_is_required() {
+        let mut host = crate::platform::discover();
+        host.elevated = crate::model::host::Fact::Known(false);
+        let context = crate::catalog::Context::live(&host);
+
+        let req = json!({
+            "name": "privr_apply",
+            "arguments": {
+                "yes": true,
+                "elevate": true,
+                "control": "windows.security.llmnr",
+                "policy": "{\"schema\":1,\"extends\":\"baseline\"}"
+            }
+        });
+        let mut err = Vec::new();
+        let resp =
+            super::handle_tools_call_with_check_context(Some(&req), true, &mut err, Some(&context))
+                .expect("response");
+        assert_eq!(resp["isError"], true);
+        let error_msg = resp["content"][0]["text"].as_str().expect("text");
+        assert!(
+            error_msg.contains("Elevated apply does not support inline policies"),
+            "unexpected error message: {error_msg}"
+        );
     }
 }

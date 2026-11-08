@@ -860,3 +860,38 @@ fn legacy_cleanup_history_is_unknown_and_never_a_reversible_transaction() {
         record
     );
 }
+
+#[test]
+fn no_input_flag_is_accepted_globally() {
+    let mut command = Command::cargo_bin("privr").expect("binary");
+    command
+        .args(["check", "--no-input"])
+        .assert()
+        .code(predicate::in_iter([0, 1, 3]));
+
+    let mut apply_cmd = Command::cargo_bin("privr").expect("binary");
+    apply_cmd
+        .args(["apply", "--no-input"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("no terminal for approval"));
+
+    let storage = DoctorStorage::new();
+    storage
+        .command()
+        .args(["rollback", "tx-test-id", "--no-input"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("no terminal for approval"));
+
+    let mut clean_cmd = Command::cargo_bin("privr").expect("binary");
+    clean_cmd.args(["clean", "--no-input"]).assert().success();
+
+    let storage_history = DoctorStorage::new();
+    storage_history
+        .command()
+        .args(["history", "--purge", "--no-input"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("no terminal for approval"));
+}

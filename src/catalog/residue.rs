@@ -589,6 +589,7 @@ fn macos_targets() -> Vec<ResidueSpec> {
 pub fn matches_category_filter(category: ResidueCategory, filter: &str) -> bool {
     let f = filter.trim().to_lowercase();
     match f.as_str() {
+        "all" => true,
         "system" => matches!(
             category,
             ResidueCategory::TemporaryFiles
@@ -609,6 +610,69 @@ pub fn matches_category_filter(category: ResidueCategory, filter: &str) -> bool 
         }
         _ => false,
     }
+}
+
+pub fn is_known_category_filter(filter: &str) -> bool {
+    matches!(
+        filter.trim().to_ascii_lowercase().as_str(),
+        "all"
+            | "system"
+            | "temp"
+            | "temporary"
+            | "crash"
+            | "dumps"
+            | "thumbnail"
+            | "thumbnails"
+            | "shader"
+            | "shaders"
+            | "browser"
+            | "browsers"
+            | "app"
+            | "apps"
+            | "ai"
+            | "agent"
+            | "agents"
+            | "recent"
+            | "activity"
+            | "dev"
+            | "developer"
+            | "package"
+            | "packages"
+    )
+}
+
+/// Validate `--control` and `--category` selectors against compiled residue targets.
+pub fn validate_residue_selectors(
+    control_filters: &[String],
+    category_filters: &[String],
+) -> Result<(), String> {
+    let targets = compiled_residue_targets();
+    for cat in category_filters {
+        if !is_known_category_filter(cat) {
+            return Err(format!(
+                "unknown residue category '{cat}'. Valid categories: system, temp, crash, thumbnails, shaders, browsers, apps, ai, recent, dev, all."
+            ));
+        }
+        if !targets
+            .iter()
+            .any(|spec| matches_category_filter(spec.category, cat))
+        {
+            return Err(format!(
+                "no residue targets on this platform match category '{cat}'."
+            ));
+        }
+    }
+    for sel in control_filters {
+        if !targets
+            .iter()
+            .any(|spec| spec.id == *sel || spec.id.starts_with(sel))
+        {
+            return Err(format!(
+                "no residue target matching '{sel}'. Run privr clean --preview to see available residue targets."
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Filter target specs by selection criteria and purge mode.
@@ -760,5 +824,14 @@ mod tests {
                 assert!(!selected);
             }
         }
+    }
+
+    #[test]
+    fn test_validate_residue_selectors_rejects_unknown_categories_and_targets() {
+        assert!(validate_residue_selectors(&[], &["all".to_owned()]).is_ok());
+        assert!(validate_residue_selectors(&[], &["browsers".to_owned()]).is_ok());
+        assert!(validate_residue_selectors(&[], &["bogus".to_owned()]).is_err());
+        assert!(validate_residue_selectors(&["nonexistent.target".to_owned()], &[]).is_err());
+        assert!(validate_residue_selectors(&["browser.residue".to_owned()], &[]).is_ok());
     }
 }

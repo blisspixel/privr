@@ -58,6 +58,9 @@ const RESOLVED_DBUS_URL: &str =
 /// and off after it says yes. The package default says a missing option
 /// defaults to no, but that default is not in the file this probe reads.
 fn probe_debian_popcon(ctx: &Context) -> Resolution {
+    if let Some(files) = ctx.linux.popcon() {
+        return crate::platform::linux::exposure::popcon(&files);
+    }
     match ctx.linux.text(Target::DebianPopcon) {
         Ok(_) => popcon_not_established(),
         Err(reason) => Resolution::uncertain(reason, ManagementSource::User),

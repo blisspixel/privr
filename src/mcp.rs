@@ -687,17 +687,17 @@ fn handle_tools_call_with_check_context(
             let profile = parse_profile(profile_str)?;
 
             let recommended_ids: Option<std::collections::BTreeSet<String>> = workload.map(|w| {
-                crate::engine::recommend::generate_recommendations(
-                    &all_controls,
-                    &context,
-                    &host,
-                    w,
-                    max_friction,
-                    None,
-                )
-                .into_iter()
-                .map(|r| r.control_id)
-                .collect()
+                all_controls
+                    .iter()
+                    .filter(|c| {
+                        crate::engine::recommend::is_control_recommended_for_workload(
+                            &c.spec,
+                            w,
+                            max_friction,
+                        )
+                    })
+                    .map(|c| c.spec.id.clone())
+                    .collect()
             });
 
             let loaded_policy = if let Some(pol_arg) =
@@ -742,11 +742,6 @@ fn handle_tools_call_with_check_context(
                 {
                     continue;
                 }
-                if let Some(recs) = &recommended_ids
-                    && !recs.contains(&c.spec.id)
-                {
-                    continue;
-                }
                 let mut spec_clone = c.spec.clone();
                 let override_opt = loaded_policy
                     .as_ref()
@@ -756,18 +751,27 @@ fn handle_tools_call_with_check_context(
                 {
                     spec_clone.desired = crate::engine::evaluate::SemanticState::new(desired_val);
                 }
-                let resolution = c.observe(&context);
                 let mode = if let Some(ov) = override_opt
                     && let Some(m) = ov.mode
                 {
                     m
                 } else if filter.is_some()
-                    || recommended_ids.is_some()
-                    || c.spec.min_profile <= plan_profile
+                    || recommended_ids
+                        .as_ref()
+                        .is_some_and(|recs| recs.contains(&c.spec.id))
+                    || (recommended_ids.is_none() && c.spec.min_profile <= plan_profile)
                 {
                     crate::engine::evaluate::Mode::Enforce
                 } else {
                     crate::engine::evaluate::Mode::Ignore
+                };
+                let resolution = if mode == crate::engine::evaluate::Mode::Ignore
+                    || spec_clone.applicability.resolve(&host).applies
+                        != crate::model::applicability::Applies::Yes
+                {
+                    crate::engine::evaluate::Resolution::skipped()
+                } else {
+                    c.observe(&context)
                 };
 
                 let exception = if let Some(pol) = &loaded_policy {
@@ -933,17 +937,17 @@ fn handle_tools_call_with_check_context(
             let today = crate::policy::today_iso();
 
             let recommended_ids: Option<std::collections::BTreeSet<String>> = workload.map(|w| {
-                crate::engine::recommend::generate_recommendations(
-                    &all_controls,
-                    &context,
-                    &host,
-                    w,
-                    max_friction,
-                    None,
-                )
-                .into_iter()
-                .map(|r| r.control_id)
-                .collect()
+                all_controls
+                    .iter()
+                    .filter(|c| {
+                        crate::engine::recommend::is_control_recommended_for_workload(
+                            &c.spec,
+                            w,
+                            max_friction,
+                        )
+                    })
+                    .map(|c| c.spec.id.clone())
+                    .collect()
             });
 
             let requires_elevation = all_controls.iter().any(|c| {
@@ -963,11 +967,6 @@ fn handle_tools_call_with_check_context(
                 {
                     return false;
                 }
-                if let Some(recs) = &recommended_ids
-                    && !recs.contains(&c.spec.id)
-                {
-                    return false;
-                }
                 if !c.spec.requires_elevation || c.apply.is_none() {
                     return false;
                 }
@@ -980,19 +979,27 @@ fn handle_tools_call_with_check_context(
                 {
                     spec_clone.desired = crate::engine::evaluate::SemanticState::new(desired_val);
                 }
-                let resolution = c.observe(&context);
                 let mode = if let Some(ov) = override_opt
                     && let Some(m) = ov.mode
                 {
                     m
                 } else if filter.is_some()
-                    || recommended_ids.is_some()
-                    || c.spec.min_profile <= profile_val
+                    || recommended_ids
+                        .as_ref()
+                        .is_some_and(|recs| recs.contains(&c.spec.id))
+                    || (recommended_ids.is_none() && c.spec.min_profile <= profile_val)
                 {
                     crate::engine::evaluate::Mode::Enforce
                 } else {
                     crate::engine::evaluate::Mode::Ignore
                 };
+                if mode == crate::engine::evaluate::Mode::Ignore
+                    || spec_clone.applicability.resolve(&host).applies
+                        != crate::model::applicability::Applies::Yes
+                {
+                    return false;
+                }
+                let resolution = c.observe(&context);
                 let exception = if let Some(pol) = &loaded_policy {
                     if let Some(ex) = pol.exceptions.iter().find(|e| e.control == c.spec.id) {
                         if resolution.state.as_ref().map(|s| s.0.as_str()) == Some(&ex.accepted) {
@@ -1122,11 +1129,6 @@ fn handle_tools_call_with_check_context(
                 {
                     continue;
                 }
-                if let Some(recs) = &recommended_ids
-                    && !recs.contains(&c.spec.id)
-                {
-                    continue;
-                }
                 let override_opt = loaded_policy
                     .as_ref()
                     .and_then(|pol| pol.controls.get(&c.spec.id));
@@ -1136,18 +1138,27 @@ fn handle_tools_call_with_check_context(
                 {
                     spec_clone.desired = crate::engine::evaluate::SemanticState::new(desired_val);
                 }
-                let resolution = c.observe(&context);
                 let mode = if let Some(ov) = override_opt
                     && let Some(m) = ov.mode
                 {
                     m
                 } else if filter.is_some()
-                    || recommended_ids.is_some()
-                    || c.spec.min_profile <= profile_val
+                    || recommended_ids
+                        .as_ref()
+                        .is_some_and(|recs| recs.contains(&c.spec.id))
+                    || (recommended_ids.is_none() && c.spec.min_profile <= profile_val)
                 {
                     crate::engine::evaluate::Mode::Enforce
                 } else {
                     crate::engine::evaluate::Mode::Ignore
+                };
+                let resolution = if mode == crate::engine::evaluate::Mode::Ignore
+                    || spec_clone.applicability.resolve(&host).applies
+                        != crate::model::applicability::Applies::Yes
+                {
+                    crate::engine::evaluate::Resolution::skipped()
+                } else {
+                    c.observe(&context)
                 };
                 let exception = if let Some(pol) = &loaded_policy {
                     if let Some(ex) = pol.exceptions.iter().find(|e| e.control == c.spec.id) {
@@ -1628,6 +1639,13 @@ fn handle_tools_call_with_check_context(
                 crate::model::residue::PurgeMode::Aggressive
             };
 
+            if let Err(msg) = crate::catalog::residue::validate_residue_selectors(
+                &control_filter,
+                &category_filter,
+            ) {
+                return tool_error(msg);
+            }
+
             let target_specs = crate::catalog::residue::select_residue_targets(
                 mode,
                 &control_filter,
@@ -1699,6 +1717,21 @@ fn handle_tools_call_with_check_context(
                     .into_iter()
                     .filter_map(|(spec, selected, _)| selected.then_some(spec))
                     .collect();
+                if selected.is_empty() && !trim {
+                    let report = crate::model::residue::PurgeReport {
+                        schema: 1,
+                        mode,
+                        dry_run: false,
+                        status: Some(crate::model::residue::CleanupStatus::Completed),
+                        transaction_id: None,
+                        journal_error: None,
+                        total_files_affected: 0,
+                        total_bytes_affected: 0,
+                        items: Vec::new(),
+                        trim: None,
+                    };
+                    return tool_success(serde_json::to_string_pretty(&report).unwrap_or_default());
+                }
                 let root = match crate::journal::transactions_dir() {
                     Ok(root) => root,
                     Err(error) => return tool_error(error.to_string()),

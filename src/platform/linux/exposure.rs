@@ -77,12 +77,34 @@ pub enum ThumbnailRecord {
     Present(u64),
 }
 
+#[derive(Clone, Debug)]
+pub struct PopconFiles {
+    pub installed: bool,
+    pub default_conf: LayerBody,
+    pub etc_main: LayerBody,
+    pub etc_dropin: LayerBody,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct ExposureRecords {
     pub network_manager: Option<NmFiles>,
     pub avahi: Option<AvahiFiles>,
     pub resolved: Option<ResolvedRecord>,
     pub thumbnails: Option<ThumbnailRecord>,
+    pub popcon: Option<PopconFiles>,
+}
+
+pub fn popcon(files: &PopconFiles) -> Resolution {
+    if !files.installed {
+        return noted(
+            Resolution::determined(disabled(), ManagementSource::Default),
+            "popularity-contest command is absent; daily survey submission does not run.",
+        );
+    }
+    match popcon_participation(files) {
+        Ok(state) => state,
+        Err(reason) => Resolution::uncertain(reason, ManagementSource::LocalPolicy),
+    }
 }
 
 pub fn network_manager(reader: &Reader) -> Resolution {
@@ -553,6 +575,142 @@ fn parse_bool(value: &str) -> Result<bool, Uncertainty> {
     }
 }
 
+fn popcon_participation(files: &PopconFiles) -> Result<Resolution, Uncertainty> {
+    match &files.default_conf {
+        LayerBody::Absent | LayerBody::File(ConfigurationFile::Absent) => {
+            return Err(Uncertainty::Undetermined);
+        }
+        LayerBody::File(ConfigurationFile::Mask) => return Err(Uncertainty::Malformed),
+        LayerBody::Unreadable(reason) | LayerBody::File(ConfigurationFile::Uncertain(reason)) => {
+            return Err(*reason);
+        }
+        LayerBody::Directory { .. } => return Err(Uncertainty::Malformed),
+        LayerBody::File(ConfigurationFile::Regular(_)) => {}
+    }
+
+    let mut ordered = Vec::new();
+    push_file(&mut ordered, &files.default_conf, ManagementSource::Default)?;
+    push_file(&mut ordered, &files.etc_main, ManagementSource::LocalPolicy)?;
+    push_directory(
+        &mut ordered,
+        &files.etc_dropin,
+        &BTreeSet::new(),
+        ManagementSource::LocalPolicy,
+    )?;
+
+    let mut participate: Option<(String, ManagementSource)> = None;
+    for (file, source) in ordered {
+        if matches!(file, ConfigurationFile::Mask) {
+            return Err(Uncertainty::Malformed);
+        }
+        for (key, value) in popcon_assignments(&file)? {
+            if key == "PARTICIPATE" {
+                participate = Some((value, source));
+            }
+        }
+    }
+
+    let Some((value, source)) = participate else {
+        return Err(Uncertainty::Undetermined);
+    };
+    match value.as_str() {
+        "no" => Ok(noted(
+            Resolution::determined(disabled(), source),
+            "merged PARTICIPATE is no",
+        )),
+        "" => Ok(noted(
+            Resolution::determined(disabled(), source),
+            "merged PARTICIPATE is empty",
+        )),
+        "yes" => Ok(noted(
+            Resolution::determined(enabled(), source),
+            "merged PARTICIPATE is yes",
+        )),
+        _ => Err(Uncertainty::Malformed),
+    }
+}
+
+fn popcon_assignments(file: &ConfigurationFile) -> Result<Vec<(String, String)>, Uncertainty> {
+    let ConfigurationFile::Regular(value) = file else {
+        return Ok(Vec::new());
+    };
+    if value.kind != ValueKind::String {
+        return Err(Uncertainty::Malformed);
+    }
+    let text = std::str::from_utf8(&value.bytes).map_err(|_| Uncertainty::Malformed)?;
+    if text
+        .chars()
+        .any(|ch| ch == '\0' || (ch.is_control() && !matches!(ch, '\n' | '\r' | '\t')))
+    {
+        return Err(Uncertainty::Malformed);
+    }
+    let mut found = Vec::new();
+    for line in text.split('\n') {
+        if line.len() > 4096 {
+            return Err(Uncertainty::Undetermined);
+        }
+        let line = line.strip_suffix('\r').unwrap_or(line);
+        if line.contains('\r') {
+            return Err(Uncertainty::Malformed);
+        }
+        let line = line.trim_matches([' ', '\t']);
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if line.ends_with('\\') {
+            return Err(Uncertainty::Malformed);
+        }
+        let Some((key, raw)) = line.split_once('=') else {
+            return Err(Uncertainty::Malformed);
+        };
+        if key.is_empty()
+            || !key.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+            || key.as_bytes()[0].is_ascii_digit()
+        {
+            return Err(Uncertainty::Malformed);
+        }
+        let parsed = parse_shell_literal(raw)?;
+        found.push((key.to_owned(), parsed.to_owned()));
+    }
+    Ok(found)
+}
+
+fn parse_shell_literal(raw: &str) -> Result<&str, Uncertainty> {
+    if raw.chars().any(|ch| {
+        matches!(
+            ch,
+            ';' | '|' | '&' | '$' | '`' | '(' | ')' | '<' | '>' | '\\'
+        )
+    }) {
+        return Err(Uncertainty::Malformed);
+    }
+    if let Some(rest) = raw.strip_prefix('"') {
+        let Some(inner) = rest.strip_suffix('"') else {
+            return Err(Uncertainty::Malformed);
+        };
+        if inner.contains('"') {
+            return Err(Uncertainty::Malformed);
+        }
+        return Ok(inner);
+    }
+    if let Some(rest) = raw.strip_prefix('\'') {
+        let Some(inner) = rest.strip_suffix('\'') else {
+            return Err(Uncertainty::Malformed);
+        };
+        if inner.contains('\'') {
+            return Err(Uncertainty::Malformed);
+        }
+        return Ok(inner);
+    }
+    if raw
+        .chars()
+        .any(|ch| ch.is_whitespace() || matches!(ch, '"' | '\''))
+    {
+        return Err(Uncertainty::Malformed);
+    }
+    Ok(raw)
+}
+
 fn parse_u32(value: &str) -> Result<u32, Uncertainty> {
     let value = value.trim();
     if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
@@ -758,6 +916,34 @@ pub fn read_live_thumbnails() -> Option<ThumbnailRecord> {
             Err(_) => ThumbnailRecord::Unreadable(Uncertainty::Undetermined),
         },
         Err(reason) => ThumbnailRecord::Unreadable(reason),
+    })
+}
+
+pub fn read_live_popcon() -> Option<PopconFiles> {
+    let installed = match installed(&["/usr/sbin/popularity-contest"]) {
+        Ok(false) => {
+            return Some(PopconFiles {
+                installed: false,
+                default_conf: LayerBody::Absent,
+                etc_main: LayerBody::Absent,
+                etc_dropin: LayerBody::Absent,
+            });
+        }
+        Ok(true) => true,
+        Err(reason) => {
+            return Some(PopconFiles {
+                installed: true,
+                default_conf: LayerBody::Unreadable(reason),
+                etc_main: LayerBody::Absent,
+                etc_dropin: LayerBody::Absent,
+            });
+        }
+    };
+    Some(PopconFiles {
+        installed,
+        default_conf: live_file("/usr/share/popularity-contest/default.conf"),
+        etc_main: live_file("/etc/popularity-contest.conf"),
+        etc_dropin: live_directory("/etc/popularity-contest.d"),
     })
 }
 
@@ -1505,5 +1691,119 @@ mod tests {
             },
         );
         assert_eq!(unknown, Outcome::Unknown);
+    }
+
+    #[test]
+    fn popcon_fixtures_cover_absent_command_merged_layers_and_false_pass_guards() {
+        let host = crate::test_context::host("ubuntu", "hyprland");
+        let check_popcon = |popcon: PopconFiles| -> (Outcome, Option<String>) {
+            let reader = crate::test_context::reader_with_exposure(
+                [],
+                ExposureRecords {
+                    popcon: Some(popcon),
+                    ..ExposureRecords::default()
+                },
+            );
+            let context = crate::test_context::context(&host, &reader);
+            let report = Report::build_with_context(
+                &context,
+                Some("baseline"),
+                None,
+                &["debian.popularity-contest.participation".to_owned()],
+                &[],
+            );
+            assert_eq!(report.results.len(), 1);
+            let result = &report.results[0];
+            (result.outcome, result.note.clone())
+        };
+
+        let (outcome, note) = check_popcon(PopconFiles {
+            installed: false,
+            default_conf: LayerBody::Absent,
+            etc_main: LayerBody::Absent,
+            etc_dropin: LayerBody::Absent,
+        });
+        assert_eq!(outcome, Outcome::Pass);
+        assert!(note.unwrap().contains("command is absent"));
+
+        let default_no = || text_file(b"# Default config\nPARTICIPATE=\"no\"\nUSEHTTP=\"yes\"\n");
+        let (outcome, note) = check_popcon(PopconFiles {
+            installed: true,
+            default_conf: default_no(),
+            etc_main: LayerBody::Absent,
+            etc_dropin: LayerBody::Absent,
+        });
+        assert_eq!(outcome, Outcome::Pass);
+        assert!(note.unwrap().contains("merged PARTICIPATE is no"));
+
+        let (outcome, note) = check_popcon(PopconFiles {
+            installed: true,
+            default_conf: default_no(),
+            etc_main: text_file(b"PARTICIPATE=\"yes\"\n"),
+            etc_dropin: LayerBody::Absent,
+        });
+        assert_eq!(outcome, Outcome::Drift);
+        assert!(note.unwrap().contains("merged PARTICIPATE is yes"));
+
+        let (outcome, _) = check_popcon(PopconFiles {
+            installed: true,
+            default_conf: default_no(),
+            etc_main: text_file(b"PARTICIPATE=\"no\"\n"),
+            etc_dropin: dropin("10-enable.conf", b"PARTICIPATE=\"yes\"\n"),
+        });
+        assert_eq!(outcome, Outcome::Drift);
+
+        let (outcome, _) = check_popcon(PopconFiles {
+            installed: true,
+            default_conf: default_no(),
+            etc_main: text_file(b"PARTICIPATE=\"yes\"\n"),
+            etc_dropin: dropin("20-disable.conf", b"PARTICIPATE='no'\n"),
+        });
+        assert_eq!(outcome, Outcome::Pass);
+
+        let (outcome, note) = check_popcon(PopconFiles {
+            installed: true,
+            default_conf: default_no(),
+            etc_main: text_file(b"PARTICIPATE=\"\"\n"),
+            etc_dropin: LayerBody::Absent,
+        });
+        assert_eq!(outcome, Outcome::Pass);
+        assert!(note.unwrap().contains("merged PARTICIPATE is empty"));
+
+        // False-pass guards: missing default.conf, unreadable drop-in, or non-literal shell syntax stay Unknown.
+        let (outcome, _) = check_popcon(PopconFiles {
+            installed: true,
+            default_conf: LayerBody::Absent,
+            etc_main: text_file(b"PARTICIPATE=\"no\"\n"),
+            etc_dropin: LayerBody::Absent,
+        });
+        assert_eq!(outcome, Outcome::Unknown);
+        assert_ne!(outcome, Outcome::Pass);
+
+        let (outcome, _) = check_popcon(PopconFiles {
+            installed: true,
+            default_conf: default_no(),
+            etc_main: text_file(b"PARTICIPATE=\"no\"\n"),
+            etc_dropin: LayerBody::Unreadable(Uncertainty::Denied),
+        });
+        assert_eq!(outcome, Outcome::Unknown);
+        assert_ne!(outcome, Outcome::Pass);
+
+        for bad_etc in [
+            b"PARTICIPATE=\"NO\"\n".as_slice(),
+            b"PARTICIPATE=\"maybe\"\n".as_slice(),
+            b"PARTICIPATE = \"no\"\n".as_slice(),
+            b"PARTICIPATE=$(echo no)\n".as_slice(),
+            b"PARTICIPATE=no; echo hi\n".as_slice(),
+        ] {
+            let (outcome, _) = check_popcon(PopconFiles {
+                installed: true,
+                default_conf: default_no(),
+                etc_main: text_file(bad_etc),
+                etc_dropin: LayerBody::Absent,
+            });
+            assert_eq!(outcome, Outcome::Unknown);
+            assert_ne!(outcome, Outcome::Pass);
+        }
     }
 }

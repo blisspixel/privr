@@ -30,9 +30,12 @@ designed to be driven by an agent harness as readily as by a person.
   The FreeDesktop directory stores generated previews. Plasma stores
   `FeedbackLevel` in `PlasmaUserFeedback`, and the administrator force-off
   file is separate. Neither reading is treated as caching or telemetry off.
-- **One popularity-contest file does not pass**. The daily job also reads
-  the package default and the drop-in directory. `PARTICIPATE=no`, a missing
-  key, and a missing file stay unknown.
+- **Popularity-contest merges the full 1.79 configuration chain**. When
+  `/usr/sbin/popularity-contest` is absent, the daily job exits without
+  submitting and the control passes. When installed, `PARTICIPATE` is merged
+  across `/usr/share/popularity-contest/default.conf`,
+  `/etc/popularity-contest.conf`, and `/etc/popularity-contest.d/*.conf`; a
+  single file without the package default and drop-in layers stays unknown.
 - **A masked fstrim unit does not pass**. A wants symlink is enablement only
   when the unit file systemd would load is non-empty. An empty unit file,
   including a link to the null device, stays drift.

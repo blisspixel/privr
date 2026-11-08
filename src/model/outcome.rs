@@ -406,25 +406,29 @@ pub struct Summary {
 }
 
 impl Summary {
+    pub fn record(&mut self, result: &ControlResult) {
+        if result.exception == Exception::Active {
+            self.active_exceptions += 1;
+        } else if result.exception == Exception::Expired {
+            self.expired_exceptions += 1;
+        }
+        let slot = match result.outcome {
+            Outcome::Pass => &mut self.pass,
+            Outcome::Drift => &mut self.drift,
+            Outcome::Review => &mut self.review,
+            Outcome::Unknown => &mut self.unknown,
+            Outcome::NotApplicable => &mut self.not_applicable,
+            Outcome::NotSelected => &mut self.not_selected,
+            Outcome::NotChecked => &mut self.not_checked,
+            Outcome::Error => &mut self.error,
+        };
+        *slot += 1;
+    }
+
     pub fn of<'a>(results: impl IntoIterator<Item = &'a ControlResult>) -> Self {
         let mut summary = Self::default();
         for result in results {
-            if result.exception == Exception::Active {
-                summary.active_exceptions += 1;
-            } else if result.exception == Exception::Expired {
-                summary.expired_exceptions += 1;
-            }
-            let slot = match result.outcome {
-                Outcome::Pass => &mut summary.pass,
-                Outcome::Drift => &mut summary.drift,
-                Outcome::Review => &mut summary.review,
-                Outcome::Unknown => &mut summary.unknown,
-                Outcome::NotApplicable => &mut summary.not_applicable,
-                Outcome::NotSelected => &mut summary.not_selected,
-                Outcome::NotChecked => &mut summary.not_checked,
-                Outcome::Error => &mut summary.error,
-            };
-            *slot += 1;
+            summary.record(result);
         }
         summary
     }

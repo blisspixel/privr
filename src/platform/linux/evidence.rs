@@ -5,7 +5,7 @@ use std::io::Read;
 use std::path::PathBuf;
 
 use super::exposure::{
-    self, AvahiFiles, ExposureRecords, NmFiles, ResolvedRecord, ThumbnailRecord,
+    self, AvahiFiles, ExposureRecords, NmFiles, PopconFiles, ResolvedRecord, ThumbnailRecord,
 };
 use super::systemd::{self, ConfigurationEvidence, ConfigurationFamily};
 use crate::engine::evaluate::Uncertainty;
@@ -143,6 +143,13 @@ impl Reader {
         match self {
             Self::Live => exposure::read_live_thumbnails(),
             Self::Recorded(recording) => recording.exposure.thumbnails.clone(),
+        }
+    }
+
+    pub fn popcon(&self) -> Option<PopconFiles> {
+        match self {
+            Self::Live => exposure::read_live_popcon(),
+            Self::Recorded(recording) => recording.exposure.popcon.clone(),
         }
     }
 

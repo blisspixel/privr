@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand, ValueEnum};
 
-#[derive(Debug, Parser)]
+#[derive(Debug, Parser, Default)]
 #[command(
     name = "privr",
     version,
@@ -35,6 +35,9 @@ pub struct Cli {
     /// When to colour output. An explicit choice overrides NO_COLOR.
     #[arg(long, global = true, value_enum, default_value_t = ColorWhen::Auto)]
     pub color: ColorWhen,
+    /// Never prompt. Any operation that would require confirmation fails closed.
+    #[arg(long = "no-input", global = true)]
+    pub no_input: bool,
     #[command(subcommand)]
     pub command: Option<Command>,
 }

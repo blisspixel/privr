@@ -19,6 +19,7 @@ impl Fixture {
             "override/cache",
             "override/config",
             "override/data",
+            "override/state",
         ] {
             std::fs::create_dir_all(fixture.0.join(name)).expect("create isolated roots");
         }
@@ -40,6 +41,7 @@ impl Fixture {
             ("XDG_CACHE_HOME", "cache"),
             ("XDG_CONFIG_HOME", "config"),
             ("XDG_DATA_HOME", "data"),
+            ("XDG_STATE_HOME", "state"),
         ] {
             match value {
                 None => {
@@ -94,6 +96,11 @@ fn cleanup_and_journals_never_resolve_invalid_xdg_values_against_cwd() {
                 fixture.0.join("home/.local/share"),
             ]
         };
+        let state_root = if value == Some("absolute") {
+            fixture.0.join("override/state")
+        } else {
+            fixture.0.join("home/.local/state")
+        };
         let selected = [
             roots[0].join("pip/canary"),
             roots[1].join("Code/Cache/canary"),
@@ -105,6 +112,7 @@ fn cleanup_and_journals_never_resolve_invalid_xdg_values_against_cwd() {
                 "pip/canary",
                 "Code/Cache/canary",
                 "recently-used.xbel",
+                "privr/transactions/sentinel.json",
                 "privr/state/transactions/sentinel.json",
             ] {
                 let path = base.join(suffix);
@@ -150,7 +158,7 @@ fn cleanup_and_journals_never_resolve_invalid_xdg_values_against_cwd() {
             assert!(!path.exists(), "selected residue must be removed");
         }
         assert_preserved(&canaries);
-        let journals = roots[2].join("privr/state/transactions");
+        let journals = state_root.join("privr/transactions");
         assert_eq!(
             std::fs::read_dir(&journals).expect("journal root").count(),
             1
@@ -178,6 +186,7 @@ fn missing_absolute_home_and_data_root_refuses_before_any_deletion() {
             let fixture = Fixture::new();
             let canaries = [
                 fixture.0.join("cwd/pip/canary"),
+                fixture.0.join("cwd/privr/transactions/sentinel.json"),
                 fixture.0.join("cwd/privr/state/transactions/sentinel.json"),
             ];
             for path in &canaries {
@@ -202,7 +211,7 @@ fn missing_absolute_home_and_data_root_refuses_before_any_deletion() {
                     .assert()
                     .code(5)
                     .stderr(predicate::str::contains(
-                        "set an absolute XDG_DATA_HOME or HOME",
+                        "set an absolute XDG_STATE_HOME or HOME",
                     ));
                 assert_preserved(&canaries);
             }
@@ -364,7 +373,7 @@ fn interrupted_cleanup(signal: Option<&str>, mcp: bool) {
     } else {
         drop(child.0.as_mut().unwrap().stdin.take());
     }
-    let root = fixture.0.join("override/data/privr/state/transactions");
+    let root = fixture.0.join("override/state/privr/transactions");
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     loop {
         assert!(
@@ -524,7 +533,7 @@ fn successive_mcp_cleanups_have_independent_completed_receipts() {
             &std::fs::read(
                 fixture
                     .0
-                    .join("override/data/privr/state/transactions")
+                    .join("override/state/privr/transactions")
                     .join(format!("{id}.json")),
             )
             .unwrap(),

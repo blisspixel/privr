@@ -136,6 +136,8 @@ pub struct ResiduePurgeItem {
     pub files_removed: usize,
     pub bytes_reclaimed: u64,
     pub files_retained: usize,
+    #[serde(default)]
+    pub files_denied: usize,
     pub error: Option<String>,
 }
 
@@ -199,6 +201,8 @@ pub struct CleanupTarget {
     pub files_removed: usize,
     pub bytes_removed: u64,
     pub files_retained: usize,
+    #[serde(default)]
+    pub files_denied: usize,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

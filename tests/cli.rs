@@ -22,6 +22,7 @@ impl DoctorStorage {
     fn isolate(&self, command: &mut Command) {
         command
             .env("XDG_DATA_HOME", &self.0)
+            .env("XDG_STATE_HOME", &self.0)
             .env("LOCALAPPDATA", &self.0);
     }
 }
@@ -264,6 +265,21 @@ fn simulate_cli_projects_counterfactual_posture() {
         .stdout(predicate::str::contains("\"schema\": 1"))
         .stdout(predicate::str::contains("\"current_posture\""))
         .stdout(predicate::str::contains("\"simulated_posture\""));
+}
+
+#[test]
+fn simulate_text_output_uses_dimension_display_names_and_legend() {
+    let mut command = Command::cargo_bin("privr").expect("binary");
+    command
+        .args(["simulate", "--profile", "baseline"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Posture Comparison"))
+        .stdout(predicate::str::contains("Diagnostic & Crash"))
+        .stdout(predicate::str::contains(
+            "c/d/c = compliant / drift / could not tell",
+        ))
+        .stdout(predicate::str::contains("diagnostic_crash").not());
 }
 
 #[test]

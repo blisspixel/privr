@@ -1825,7 +1825,7 @@ fn run_with_check_context(
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default();
-            let timestamp = format!("{}.{:03}", now.as_secs(), now.subsec_millis());
+            let timestamp = crate::report::format_rfc3339_utc(std::time::SystemTime::now());
             let tx_id = format!("tx-{}-{}", now.as_secs(), now.subsec_millis());
             let profile_name = if let Some(pol) = &loaded_policy {
                 format!("custom (extends {})", pol.extends)
@@ -2501,6 +2501,8 @@ fn run_with_check_context(
                                                 cleanup.status.as_str()
                                             );
                                             for target in &cleanup.targets {
+                                                let not_removed =
+                                                    target.files_retained + target.files_denied;
                                                 let _ = writeln!(
                                                     out,
                                                     "          {}: {}, {} files removed, {} bytes removed, {} not removed",
@@ -2508,7 +2510,7 @@ fn run_with_check_context(
                                                     target.status.as_str(),
                                                     target.files_removed,
                                                     target.bytes_removed,
-                                                    target.files_retained
+                                                    not_removed
                                                 );
                                             }
                                             if cleanup.status
@@ -2542,7 +2544,11 @@ fn run_with_check_context(
                                 } else {
                                     let _ = write!(out, "{block}");
                                 }
-                                let meta = format!("{}  profile: {}", tx.timestamp, tx.profile);
+                                let meta = format!(
+                                    "{}  profile: {}",
+                                    crate::report::format_timestamp_display(&tx.timestamp),
+                                    tx.profile
+                                );
                                 let _ = writeln!(
                                     out,
                                     "{}{}\n",
@@ -2943,11 +2949,12 @@ Run privr explain without arguments for the posture overview, or privr list to s
                         let _ = writeln!(
                             out,
                             "  {:<26}  {:<16}  {:<16}",
-                            dim.as_str(),
+                            dim.display_name(),
                             cur_str,
                             sim_str
                         );
                     }
+                    let _ = writeln!(out, "\n  c/d/c = compliant / drift / could not tell");
 
                     if !simulation.friction_breakdown.is_empty() {
                         let _ = writeln!(
@@ -3114,6 +3121,7 @@ Run privr explain without arguments for the posture overview, or privr list to s
                                     files_removed: i.file_count,
                                     bytes_reclaimed: i.size_bytes,
                                     files_retained: 0,
+                                    files_denied: 0,
                                     error: None,
                                 })
                                 .collect(),
@@ -4488,7 +4496,7 @@ desired = "disabled"
         assert!(stdout.contains("Transaction History"));
         assert!(stdout.contains("verified  1 of 1 changes on Windows, transaction tx-10-2"));
         assert!(stdout.contains("undo: privr rollback tx-10-2"));
-        assert!(stdout.contains("2026-10-20T00:00:00Z  profile: baseline"));
+        assert!(stdout.contains("2026-10-20 00:00:00 UTC  profile: baseline"));
         assert!(!stdout.contains("SecretUser"));
         assert!(!stdout.contains("HKCU"));
         assert!(!stdout.contains("--yes"));

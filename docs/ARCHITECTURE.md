@@ -271,10 +271,12 @@ checks turn races into visible conflicts instead of silent overwrites.
 
 ## Transaction journal
 
-Proposed Windows storage roots are:
+Fixed platform storage roots are:
 
-- `%LocalAppData%\privr\state` for user-scope transactions;
-- `%ProgramData%\privr\state` for machine-scope transactions.
+- `%LocalAppData%\privr\state\transactions` for Windows user-scope transactions;
+- `%ProgramData%\privr\state\transactions` for Windows machine-scope transactions;
+- `$XDG_STATE_HOME/privr/transactions` (default `~/.local/state/privr/transactions`) for Linux transactions;
+- `$XDG_DATA_HOME/privr/state/transactions` (default `~/.local/share/privr/state/transactions`) for macOS transactions.
 
 The process responsible for a scope creates the fixed root with an explicit
 user, Administrators, and SYSTEM access policy as appropriate. It rejects

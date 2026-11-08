@@ -255,9 +255,10 @@ Options:
 - `-c, --control <id>`: Simulate changes only for specific control(s).
 
 It computes the exact transition from current posture to simulated posture across
-all five posture dimensions (`behavioral-commercial`, `forensic-residue`,
-`network-exposure`, `diagnostic-crash`, `ambient-sensor`), distinguishing automated
-remediation candidates from unautomated drift. Active policy exceptions remain respected
+all five posture dimensions (`Behavioral & Commercial`, `Forensic Residue`,
+`Network Exposure`, `Diagnostic & Crash`, `Sensor & Perimeter`), distinguishing automated
+remediation candidates from unautomated drift. Text output displays dimension columns as
+`c/d/c` (`compliant / drift / could not tell`). Active policy exceptions remain respected
 and are excluded from counterfactual remediation.
 
 ## `clean` (alias: `purge`)
@@ -339,8 +340,8 @@ Rollback is verified and best-effort, not globally atomic.
 
 History stores mutation transactions, not full audit reports. It contains the
 minimum state required for conflict detection and rollback. Default output shows
-transaction ID, time, policy digest, control IDs, scope, reversibility, and
-result.
+transaction ID, human-readable UTC time, policy digest, control IDs, scope, reversibility,
+and result. Entries are ordered newest first in text output and chronologically in JSON output.
 
 `history purge` deletes transaction records the operator no longer wants to
 keep. It is the operator's own record and they may destroy it. Purging a

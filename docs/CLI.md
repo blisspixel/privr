@@ -284,7 +284,8 @@ as needing additional acknowledgement.
 as recent activity and thumbnails. `--control` and `--category` narrow scope.
 The text preview shows IDs, metadata counts, and tradeoffs. JSON preview and
 execution items include an additive `trade_off` string; older items without it
-remain readable. Selector validation still has known gaps tracked in issue 53.
+remain readable. Unknown `--control` or `--category` selectors fail with exit
+code `2` without mutating or writing a transaction journal.
 
 Deletion cannot be rolled back. Close affected applications first: open shells
 and desktop applications can recreate records. The PowerShell target does not

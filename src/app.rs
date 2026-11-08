@@ -249,6 +249,98 @@ fn verified_block_for(
     )
 }
 
+fn validate_control_selectors(
+    controls: &[String],
+    all_controls: &[crate::catalog::Control],
+    err: &mut impl Write,
+) -> bool {
+    for sel in controls {
+        let matches = all_controls
+            .iter()
+            .any(|c| c.spec.id == *sel || c.spec.id.starts_with(sel));
+        if !matches {
+            let _ = writeln!(err, "privr: no control matching '{sel}'");
+            let suggestions = crate::explain::suggestions(sel);
+            if !suggestions.is_empty() {
+                let _ = writeln!(err, "\nDid you mean:");
+                for item in suggestions {
+                    let _ = writeln!(err, "  {item}");
+                }
+            }
+            let _ = writeln!(err, "\nRun privr list to see every control in this build.");
+            return false;
+        }
+    }
+    true
+}
+
+fn zero_planned_changes_line(
+    unautomated_drift: usize,
+    summary: &crate::model::outcome::Summary,
+) -> String {
+    if unautomated_drift > 0 {
+        "Planned changes: 0 (drift exists with no automatic remediation; run privr check to review)"
+            .to_owned()
+    } else if summary.evaluated() == 0 {
+        if summary.concealed() > 0 {
+            format!(
+                "Planned changes: 0 (nothing could be evaluated; {} could not be established; run privr check)",
+                summary.concealed()
+            )
+        } else {
+            "Planned changes: 0 (nothing could be evaluated in the selected scope; run privr check)"
+                .to_owned()
+        }
+    } else if summary.concealed() > 0 {
+        format!(
+            "Planned changes: 0 ({} evaluated, {} could not be established; run privr check)",
+            summary.evaluated(),
+            summary.concealed()
+        )
+    } else if summary.review > 0 {
+        "Planned changes: 0 (selected controls were evaluated; review items require operator judgment)"
+            .to_owned()
+    } else {
+        "Planned changes: 0 (machine matches policy)".to_owned()
+    }
+}
+
+fn zero_applied_changes_line(
+    requires_elevation_drift: usize,
+    unautomated_drift: usize,
+    summary: &crate::model::outcome::Summary,
+) -> String {
+    if requires_elevation_drift > 0 {
+        format!(
+            "No user-scope changes to apply ({requires_elevation_drift} change(s) require administrative privileges; pass --elevate or run as Administrator)."
+        )
+    } else if unautomated_drift > 0 {
+        "No automated changes to apply (drift exists with no automatic remediation; run privr check to review)."
+            .to_owned()
+    } else if summary.evaluated() == 0 {
+        if summary.concealed() > 0 {
+            format!(
+                "No changes to apply (nothing could be evaluated; {} could not be established; run privr check).",
+                summary.concealed()
+            )
+        } else {
+            "No changes to apply (nothing could be evaluated in the selected scope; run privr check)."
+                .to_owned()
+        }
+    } else if summary.concealed() > 0 {
+        format!(
+            "No drifted controls to apply ({} evaluated, {} could not be established; run privr check).",
+            summary.evaluated(),
+            summary.concealed()
+        )
+    } else if summary.review > 0 {
+        "No automated changes to apply (selected controls were evaluated; review items require operator judgment)."
+            .to_owned()
+    } else {
+        "No drifted controls to apply. Machine matches policy.".to_owned()
+    }
+}
+
 fn run_with_journal_dir(
     cli: Cli,
     out: &mut impl Write,
@@ -303,6 +395,9 @@ fn run_with_check_context(
             all,
             compare,
         } => {
+            if !validate_control_selectors(&controls, &crate::catalog::all(), err) {
+                return 2;
+            }
             let loaded_policy = match policy {
                 Some(ref p) => match crate::policy::CustomPolicy::from_file(p) {
                     Ok(pol) => Some(pol),
@@ -656,6 +751,10 @@ fn run_with_check_context(
             controls,
             sections,
         } => {
+            let all_controls = crate::catalog::all();
+            if !validate_control_selectors(&controls, &all_controls, err) {
+                return 2;
+            }
             let loaded_policy = match policy {
                 Some(ref p) => match crate::policy::CustomPolicy::from_file(p) {
                     Ok(pol) => Some(pol),
@@ -670,9 +769,15 @@ fn run_with_check_context(
                 "Evaluating posture and planning eligible remediations...",
                 format,
             );
-            let host = crate::platform::discover();
-            let context = crate::catalog::Context::live(&host);
-            let all_controls = crate::catalog::all();
+            let discovered_host;
+            let live_context;
+            let (host, context) = if let Some(ctx) = check_context {
+                (ctx.host, ctx)
+            } else {
+                discovered_host = crate::platform::discover();
+                live_context = crate::catalog::Context::live(&discovered_host);
+                (&discovered_host, &live_context)
+            };
             let (workload, max_friction) =
                 if profile.is_none() && workload.is_none() && loaded_policy.is_none() {
                     (
@@ -689,22 +794,23 @@ fn run_with_check_context(
             };
 
             let recommended_ids: Option<std::collections::BTreeSet<String>> = workload.map(|w| {
-                crate::engine::recommend::generate_recommendations(
-                    &all_controls,
-                    &context,
-                    &host,
-                    w,
-                    max_friction,
-                    None,
-                )
-                .into_iter()
-                .map(|r| r.control_id)
-                .collect()
+                all_controls
+                    .iter()
+                    .filter(|c| {
+                        crate::engine::recommend::is_control_recommended_for_workload(
+                            &c.spec,
+                            w,
+                            max_friction,
+                        )
+                    })
+                    .map(|c| c.spec.id.clone())
+                    .collect()
             });
 
             let mut planned = Vec::new();
             let mut unautomated_drift = 0;
             let mut requires_elevation_drift = 0;
+            let mut summary = crate::model::outcome::Summary::default();
 
             for c in &all_controls {
                 let matches_control = controls.is_empty()
@@ -722,11 +828,6 @@ fn run_with_check_context(
                 if !matches_control || !matches_section {
                     continue;
                 }
-                if let Some(recs) = &recommended_ids
-                    && !recs.contains(&c.spec.id)
-                {
-                    continue;
-                }
                 let override_opt = loaded_policy
                     .as_ref()
                     .and_then(|pol| pol.controls.get(&c.spec.id));
@@ -736,18 +837,27 @@ fn run_with_check_context(
                 {
                     spec_clone.desired = crate::engine::evaluate::SemanticState::new(desired_val);
                 }
-                let resolution = c.observe(&context);
                 let mode = if let Some(ov) = override_opt
                     && let Some(m) = ov.mode
                 {
                     m
                 } else if !controls.is_empty()
-                    || recommended_ids.is_some()
-                    || c.spec.min_profile <= profile_val
+                    || recommended_ids
+                        .as_ref()
+                        .is_some_and(|recs| recs.contains(&c.spec.id))
+                    || (recommended_ids.is_none() && c.spec.min_profile <= profile_val)
                 {
                     crate::engine::evaluate::Mode::Enforce
                 } else {
                     crate::engine::evaluate::Mode::Ignore
+                };
+                let resolution = if mode == crate::engine::evaluate::Mode::Ignore
+                    || spec_clone.applicability.resolve(host).applies
+                        != crate::model::applicability::Applies::Yes
+                {
+                    crate::engine::evaluate::Resolution::skipped()
+                } else {
+                    c.observe(context)
                 };
                 let today = crate::policy::today_iso();
                 let exception = if let Some(pol) = &loaded_policy {
@@ -767,9 +877,10 @@ fn run_with_check_context(
                     &spec_clone,
                     mode,
                     &resolution,
-                    &host,
+                    host,
                     exception,
                 );
+                summary.record(&eval);
                 if eval.outcome == crate::model::outcome::Outcome::Drift {
                     // Active policy exception suppresses planning remediation
                     if eval.exception == crate::model::outcome::Exception::Active {
@@ -842,14 +953,11 @@ fn run_with_check_context(
                         ui.wrap_after(crate::ui::platform_name(&plan_report.platform), width + 1)
                     );
                     if plan_report.planned_changes == 0 {
-                        if plan_report.unautomated_drift > 0 {
-                            let _ = writeln!(
-                                out,
-                                "Planned changes: 0 (drift exists with no automatic remediation; run privr check to review)"
-                            );
-                        } else {
-                            let _ = writeln!(out, "Planned changes: 0 (machine matches policy)");
-                        }
+                        let _ = writeln!(
+                            out,
+                            "{}",
+                            zero_planned_changes_line(plan_report.unautomated_drift, &summary)
+                        );
                     } else {
                         let _ = writeln!(
                             out,
@@ -966,7 +1074,7 @@ fn run_with_check_context(
             elevated_output: _,
         } => {
             if dry_run {
-                return run_with_journal_dir(
+                return run_with_check_context(
                     Cli {
                         format,
                         color: cli.color,
@@ -982,7 +1090,12 @@ fn run_with_check_context(
                     out,
                     err,
                     journal_dir,
+                    check_context,
                 );
+            }
+            let all_controls = crate::catalog::all();
+            if !validate_control_selectors(&controls, &all_controls, err) {
+                return 2;
             }
             let loaded_policy = match policy {
                 Some(ref p) => match crate::policy::CustomPolicy::from_file(p) {
@@ -1010,7 +1123,6 @@ fn run_with_check_context(
             let host = crate::platform::discover();
             let is_elevated = host.elevated == crate::model::host::Fact::Known(true);
             let context = crate::catalog::Context::live(&host);
-            let all_controls = crate::catalog::all();
             let profile_val = if let Some(pol) = &loaded_policy {
                 pol.extends
             } else {
@@ -1019,17 +1131,17 @@ fn run_with_check_context(
             let mut approved_sections: Option<std::collections::BTreeSet<String>> = None;
 
             let recommended_ids: Option<std::collections::BTreeSet<String>> = workload.map(|w| {
-                crate::engine::recommend::generate_recommendations(
-                    &all_controls,
-                    &context,
-                    &host,
-                    w,
-                    max_friction,
-                    None,
-                )
-                .into_iter()
-                .map(|r| r.control_id)
-                .collect()
+                all_controls
+                    .iter()
+                    .filter(|c| {
+                        crate::engine::recommend::is_control_recommended_for_workload(
+                            &c.spec,
+                            w,
+                            max_friction,
+                        )
+                    })
+                    .map(|c| c.spec.id.clone())
+                    .collect()
             });
 
             use std::io::IsTerminal;
@@ -1048,6 +1160,7 @@ fn run_with_check_context(
                 let mut planned_items = Vec::new();
                 let mut unautomated_count = 0;
                 let mut elevation_count = 0;
+                let mut preview_summary = crate::model::outcome::Summary::default();
 
                 for c in &all_controls {
                     let matches_control = controls.is_empty()
@@ -1065,11 +1178,6 @@ fn run_with_check_context(
                     if !matches_control || !matches_section {
                         continue;
                     }
-                    if let Some(recs) = &recommended_ids
-                        && !recs.contains(&c.spec.id)
-                    {
-                        continue;
-                    }
                     let override_opt = loaded_policy
                         .as_ref()
                         .and_then(|pol| pol.controls.get(&c.spec.id));
@@ -1080,18 +1188,27 @@ fn run_with_check_context(
                         spec_clone.desired =
                             crate::engine::evaluate::SemanticState::new(desired_val);
                     }
-                    let resolution = c.observe(&context);
                     let mode = if let Some(ov) = override_opt
                         && let Some(m) = ov.mode
                     {
                         m
                     } else if !controls.is_empty()
-                        || recommended_ids.is_some()
-                        || c.spec.min_profile <= profile_val
+                        || recommended_ids
+                            .as_ref()
+                            .is_some_and(|recs| recs.contains(&c.spec.id))
+                        || (recommended_ids.is_none() && c.spec.min_profile <= profile_val)
                     {
                         crate::engine::evaluate::Mode::Enforce
                     } else {
                         crate::engine::evaluate::Mode::Ignore
+                    };
+                    let resolution = if mode == crate::engine::evaluate::Mode::Ignore
+                        || spec_clone.applicability.resolve(&host).applies
+                            != crate::model::applicability::Applies::Yes
+                    {
+                        crate::engine::evaluate::Resolution::skipped()
+                    } else {
+                        c.observe(&context)
                     };
                     let today = crate::policy::today_iso();
                     let exception = if let Some(pol) = &loaded_policy {
@@ -1115,6 +1232,7 @@ fn run_with_check_context(
                         &host,
                         exception,
                     );
+                    preview_summary.record(&eval);
                     if eval.outcome == crate::model::outcome::Outcome::Drift {
                         if eval.exception == crate::model::outcome::Exception::Active {
                             continue;
@@ -1148,14 +1266,11 @@ fn run_with_check_context(
                 eval_progress.finish();
 
                 if planned_items.is_empty() {
-                    if unautomated_count > 0 {
-                        let _ = writeln!(
-                            out,
-                            "Planned changes: 0 (drift exists with no automatic remediation; run privr check to review)"
-                        );
-                    } else {
-                        let _ = writeln!(out, "Planned changes: 0 (machine matches policy)");
-                    }
+                    let _ = writeln!(
+                        out,
+                        "{}",
+                        zero_planned_changes_line(unautomated_count, &preview_summary)
+                    );
                     return 0;
                 }
 
@@ -1732,6 +1847,7 @@ fn run_with_check_context(
             let mut unautomated_drift = 0;
             let mut requires_elevation_drift_applied = 0;
             let mut explicit_elevation_failure = None;
+            let mut apply_summary = crate::model::outcome::Summary::default();
 
             let mut apply_progress = ui.spinner_for("Applying privacy remediations...", format);
             for c in &all_controls {
@@ -1755,11 +1871,6 @@ fn run_with_check_context(
                 {
                     continue;
                 }
-                if let Some(recs) = &recommended_ids
-                    && !recs.contains(&c.spec.id)
-                {
-                    continue;
-                }
                 let override_opt = loaded_policy
                     .as_ref()
                     .and_then(|pol| pol.controls.get(&c.spec.id));
@@ -1769,18 +1880,27 @@ fn run_with_check_context(
                 {
                     spec_clone.desired = crate::engine::evaluate::SemanticState::new(desired_val);
                 }
-                let resolution = c.observe(&context);
                 let mode = if let Some(ov) = override_opt
                     && let Some(m) = ov.mode
                 {
                     m
                 } else if !controls.is_empty()
-                    || recommended_ids.is_some()
-                    || c.spec.min_profile <= profile_val
+                    || recommended_ids
+                        .as_ref()
+                        .is_some_and(|recs| recs.contains(&c.spec.id))
+                    || (recommended_ids.is_none() && c.spec.min_profile <= profile_val)
                 {
                     crate::engine::evaluate::Mode::Enforce
                 } else {
                     crate::engine::evaluate::Mode::Ignore
+                };
+                let resolution = if mode == crate::engine::evaluate::Mode::Ignore
+                    || spec_clone.applicability.resolve(&host).applies
+                        != crate::model::applicability::Applies::Yes
+                {
+                    crate::engine::evaluate::Resolution::skipped()
+                } else {
+                    c.observe(&context)
                 };
                 let today = crate::policy::today_iso();
                 let exception = if let Some(pol) = &loaded_policy {
@@ -1803,6 +1923,7 @@ fn run_with_check_context(
                     &host,
                     exception,
                 );
+                apply_summary.record(&eval);
                 if eval.outcome == crate::model::outcome::Outcome::Drift {
                     if eval.exception == crate::model::outcome::Exception::Active {
                         continue;
@@ -1900,23 +2021,15 @@ fn run_with_check_context(
                 let _ = std::fs::remove_file(initial_path);
                 match format {
                     OutputFormat::Text => {
-                        if requires_elevation_drift_applied > 0 {
-                            let _ = writeln!(
-                                out,
-                                "No user-scope changes to apply ({} change(s) require administrative privileges; pass --elevate or run as Administrator).",
-                                requires_elevation_drift_applied
-                            );
-                        } else if unautomated_drift > 0 {
-                            let _ = writeln!(
-                                out,
-                                "No automated changes to apply (drift exists with no automatic remediation; run privr check to review)."
-                            );
-                        } else {
-                            let _ = writeln!(
-                                out,
-                                "No drifted controls to apply. Machine matches policy."
-                            );
-                        }
+                        let _ = writeln!(
+                            out,
+                            "{}",
+                            zero_applied_changes_line(
+                                requires_elevation_drift_applied,
+                                unautomated_drift,
+                                &apply_summary,
+                            )
+                        );
                     }
                     OutputFormat::Json => {
                         let rep = ApplyReport {
@@ -2704,6 +2817,10 @@ Run privr explain without arguments for the posture overview, or privr list to s
             controls,
             sections,
         } => {
+            let all_controls = crate::catalog::all();
+            if !validate_control_selectors(&controls, &all_controls, err) {
+                return 2;
+            }
             let loaded_policy = if let Some(path) = &policy {
                 match crate::policy::CustomPolicy::from_file(path) {
                     Ok(p) => Some(p),
@@ -2720,7 +2837,6 @@ Run privr explain without arguments for the posture overview, or privr list to s
                 ui.spinner_for("Simulating counterfactual posture changes...", format);
             let host = crate::platform::discover();
             let context = crate::catalog::Context::live(&host);
-            let all_controls = crate::catalog::all();
             let simulation = if let Some(pol) = &loaded_policy {
                 crate::engine::simulate::simulate_with_policy(
                     &all_controls,
@@ -2911,6 +3027,13 @@ Run privr explain without arguments for the posture overview, or privr list to s
                 None
             };
 
+            if let Err(msg) =
+                crate::catalog::residue::validate_residue_selectors(&controls, &categories)
+            {
+                let _ = writeln!(err, "privr: {msg}");
+                return 2;
+            }
+
             let target_specs =
                 crate::catalog::residue::select_residue_targets(mode, &controls, &categories);
             if target_specs.is_empty() && !trim {
@@ -3047,6 +3170,30 @@ Run privr explain without arguments for the posture overview, or privr list to s
                 .into_iter()
                 .filter_map(|(spec, selected, _)| selected.then_some(spec))
                 .collect();
+            if selected.is_empty() && !trim {
+                match cli.format {
+                    OutputFormat::Json => {
+                        let report = crate::model::residue::PurgeReport {
+                            schema: 1,
+                            mode,
+                            dry_run: false,
+                            status: Some(crate::model::residue::CleanupStatus::Completed),
+                            transaction_id: None,
+                            journal_error: None,
+                            total_files_affected: 0,
+                            total_bytes_affected: 0,
+                            items: Vec::new(),
+                            trim: None,
+                        };
+                        let json = serde_json::to_string_pretty(&report).unwrap_or_default();
+                        let _ = writeln!(out, "{}", json);
+                    }
+                    OutputFormat::Text => {
+                        let _ = writeln!(out, "Nothing to clean in selected scope.");
+                    }
+                }
+                return 0;
+            }
             let report = match crate::cleanup::execute(mode, &selected, trim, journal_dir) {
                 Ok(report) => report,
                 Err(reason) => {
@@ -3401,12 +3548,19 @@ mod tests {
 
     #[test]
     fn plan_is_safe_and_reports_planned_changes() {
+        let control_id = if cfg!(windows) {
+            "windows.advertising.id"
+        } else if cfg!(target_os = "macos") {
+            "macos.analytics.share-mac"
+        } else {
+            "debian.popularity-contest.participation"
+        };
         let (code, stdout, _) = run_for_test(Some(Command::Plan {
             profile: Some(Profile::Baseline),
             workload: None,
             max_friction: None,
             policy: None,
-            controls: vec!["windows.advertising.id".to_owned()],
+            controls: vec![control_id.to_owned()],
             sections: Vec::new(),
         }));
         assert_eq!(code, 0);
@@ -4316,5 +4470,190 @@ desired = "disabled"
         assert!(!stdout.contains("SecretUser"));
         assert!(!stdout.contains("HKCU"));
         assert!(!stdout.contains("--yes"));
+    }
+
+    #[test]
+    fn unknown_control_and_category_selectors_fail_with_exit_code_2_and_write_no_journal() {
+        let directory = crate::journal::TestDirectory::new();
+        for cmd in [
+            Command::Check {
+                profile: Some(Profile::Baseline),
+                policy: None,
+                workload: None,
+                controls: vec!["nonexistent.control.id".to_owned()],
+                sections: Vec::new(),
+                all: false,
+                compare: None,
+            },
+            Command::Plan {
+                profile: Some(Profile::Baseline),
+                policy: None,
+                workload: None,
+                max_friction: None,
+                controls: vec!["nonexistent.control.id".to_owned()],
+                sections: Vec::new(),
+            },
+            Command::Apply {
+                profile: Some(Profile::Baseline),
+                policy: None,
+                workload: None,
+                max_friction: None,
+                dry_run: false,
+                yes: true,
+                interactive_sections: false,
+                accept_risk: Vec::new(),
+                force: false,
+                controls: vec!["nonexistent.control.id".to_owned()],
+                sections: Vec::new(),
+                elevate: false,
+                elevated_output: None,
+            },
+            Command::Simulate {
+                profile: Some(Profile::Baseline),
+                policy: None,
+                controls: vec!["nonexistent.control.id".to_owned()],
+                sections: Vec::new(),
+            },
+            Command::Clean {
+                polite: false,
+                preview: true,
+                dry_run: false,
+                yes: false,
+                categories: vec!["bogus".to_owned()],
+                controls: Vec::new(),
+                accept_risks: Vec::new(),
+                trim: false,
+            },
+            Command::Clean {
+                polite: false,
+                preview: false,
+                dry_run: false,
+                yes: true,
+                categories: vec!["bogus".to_owned()],
+                controls: Vec::new(),
+                accept_risks: Vec::new(),
+                trim: false,
+            },
+            Command::Clean {
+                polite: false,
+                preview: false,
+                dry_run: false,
+                yes: true,
+                categories: Vec::new(),
+                controls: vec!["nonexistent.residue.target".to_owned()],
+                accept_risks: Vec::new(),
+                trim: false,
+            },
+        ] {
+            let mut out = Vec::new();
+            let mut err = Vec::new();
+            let code = run_with_journal_dir(
+                Cli {
+                    color: crate::cli::ColorWhen::Never,
+                    format: OutputFormat::Text,
+                    command: Some(cmd),
+                },
+                &mut out,
+                &mut err,
+                &directory.0,
+            );
+            assert_eq!(code, 2);
+            assert!(out.is_empty());
+            assert!(!err.is_empty());
+        }
+        assert!(
+            crate::journal::list_transactions_in(&directory.0).is_empty(),
+            "failed selector validation must never write a transaction journal"
+        );
+    }
+
+    #[test]
+    fn zero_change_plan_and_apply_lines_require_complete_evaluation_before_claiming_compliance() {
+        let empty = crate::model::outcome::Summary::default();
+        let empty_plan = zero_planned_changes_line(0, &empty);
+        assert!(!empty_plan.contains("machine matches policy"));
+        assert!(empty_plan.contains("nothing could be evaluated"));
+
+        let empty_apply = zero_applied_changes_line(0, 0, &empty);
+        assert!(!empty_apply.contains("Machine matches policy"));
+        assert!(empty_apply.contains("nothing could be evaluated"));
+
+        let unknown_only = crate::model::outcome::Summary {
+            unknown: 3,
+            ..Default::default()
+        };
+        let unknown_plan = zero_planned_changes_line(0, &unknown_only);
+        assert!(!unknown_plan.contains("machine matches policy"));
+        assert!(unknown_plan.contains("3 could not be established"));
+
+        let partial = crate::model::outcome::Summary {
+            pass: 2,
+            unknown: 1,
+            ..Default::default()
+        };
+        let partial_plan = zero_planned_changes_line(0, &partial);
+        assert!(!partial_plan.contains("machine matches policy"));
+        assert!(partial_plan.contains("2 evaluated, 1 could not be established"));
+
+        let complete_pass = crate::model::outcome::Summary {
+            pass: 2,
+            ..Default::default()
+        };
+        assert_eq!(
+            zero_planned_changes_line(0, &complete_pass),
+            "Planned changes: 0 (machine matches policy)"
+        );
+        assert_eq!(
+            zero_applied_changes_line(0, 0, &complete_pass),
+            "No drifted controls to apply. Machine matches policy."
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn issue52_plan_on_unevaluated_linux_scope_never_claims_machine_matches_policy() {
+        let host = crate::test_context::host("arch", "hyprland");
+        let reader = crate::test_context::reader([]);
+        let context = crate::test_context::context(&host, &reader);
+        let directory = crate::journal::TestDirectory::new();
+        for cmd in [
+            Command::Plan {
+                profile: None,
+                policy: None,
+                workload: None,
+                max_friction: None,
+                controls: Vec::new(),
+                sections: Vec::new(),
+            },
+            Command::Plan {
+                profile: Some(Profile::Strict),
+                policy: None,
+                workload: None,
+                max_friction: None,
+                controls: Vec::new(),
+                sections: Vec::new(),
+            },
+        ] {
+            let mut out = Vec::new();
+            let mut err = Vec::new();
+            let code = run_with_check_context(
+                Cli {
+                    color: crate::cli::ColorWhen::Never,
+                    format: OutputFormat::Text,
+                    command: Some(cmd),
+                },
+                &mut out,
+                &mut err,
+                &directory.0,
+                Some(&context),
+            );
+            assert_eq!(code, 0);
+            let stdout = String::from_utf8(out).expect("utf-8");
+            assert!(
+                !stdout.contains("machine matches policy"),
+                "unevaluated plan must not claim compliance: {stdout}"
+            );
+            assert!(stdout.contains("nothing could be evaluated"));
+        }
     }
 }

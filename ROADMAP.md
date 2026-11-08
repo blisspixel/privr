@@ -37,7 +37,7 @@ milestone and its results should not be trusted.
 | Windows `plan`, `apply`, `rollback` | Implemented and tested. 27 controls carry live, verified apply and rollback routines with pre/postimage validation. Native in-place elevation (-e, --elevate) invokes UAC/sudo with typed CLI argument serialization. Interactive approval defaults to no with whole-batch [y], section-by-section review [s], detailed diff [d], or cancelling [q]. Section-by-section approval (-i, --interactive-sections) treats an intentional stop as verified success (stopped X sections applied, Y deferred). Section-granular rollback (-s, --section) restores only specified sections with postimage collision safety. Noninteractive mode requires `--yes` after a plan review, and noninteractive apply of Tier 2/3 friction controls requires explicit risk acceptance (--accept-risk <id> or --force). No-argument apply stays within Tier 0 and Tier 1. |
 | Posture vectors and personas | Implemented and tested. 5 posture dimensions, 4 friction tiers, 5 workload personas across `check`, `recommend`, `simulate`, `plan`, and `apply`. |
 | Post-update revalidation & comparison | Implemented and tested. `privr check --compare <SAVED_REPORT.json>` evaluates live machine state against a saved historical report, detecting regression drift, newly applicable controls, and OS platform update deltas (Issue 48). |
-| Linux `check` | Experimental. Discovery and 17 controls (GNOME, Ubuntu, Debian, Fedora, KDE, FreeDesktop, systemd, NetworkManager, Avahi, systemd-resolved) with elevation metadata. Typed recorded Context tests exercise the file probes, the shared drop-in merge, the resolved property parser, and thumbnail presence. Ubuntu Insights, Ubuntu Report, and Fedora ABRT do not treat a missing file as opted out. A missing FreeDesktop thumbnail directory, an empty thumbnail directory, and the legacy KDE UserFeedback file do not pass. One popularity-contest file does not establish participation, because the daily job also reads the package default and drop-ins. An fstrim wants symlink does not pass when the unit file systemd would load is empty. A stopped avahi-daemon does not establish that publishing is off: `is-active` is the process state, and the default publish settings still announce the host. Desktop-environment controls remain unchecked against a full session. |
+| Linux `check` | Experimental. Discovery and 17 controls (GNOME, Ubuntu, Debian, Fedora, KDE, FreeDesktop, systemd, NetworkManager, Avahi, systemd-resolved) with elevation metadata. Typed recorded Context tests exercise the file probes, the shared drop-in merge, the resolved property parser, and thumbnail presence. Ubuntu Insights, Ubuntu Report, and Fedora ABRT do not treat a missing file as opted out. A missing FreeDesktop thumbnail directory, an empty thumbnail directory, and the legacy KDE UserFeedback file do not pass. Debian popularity-contest checks `/usr/sbin/popularity-contest` and merges the package default, `/etc/popularity-contest.conf`, and `/etc/popularity-contest.d/*.conf`; a single file without those layers stays unknown. An fstrim wants symlink does not pass when the unit file systemd would load is empty. A stopped avahi-daemon does not establish that publishing is off: `is-active` is the process state, and the default publish settings still announce the host. Desktop-environment controls remain unchecked against a full session. |
 | macOS `check` | Experimental. Discovery and 6 controls with elevation metadata. Compiled and tested in CI; never checked against a real Mac. |
 | Agent server (`mcp`) | Implemented and tested. Synchronous stdio server with read-only tools and gated mutation. Conforms to Model Context Protocol and Agent Plugins v1.0.0. Exposes post-update comparison (`privr_check --compare`), workload personas, friction budgets, residue inspection/cleanup (`privr_clean`), and transaction history (`privr_history`). |
 | `doctor` | Implemented and tested. Reports non-identifying OS facts, authoritative Linux effective privilege, compiled adapters with live capability unverified, storage integrity, reparse-point verification, dynamic catalogue staleness, and schema versions. Rolling-distribution IDs remain visible without inventing a numeric version or Windows edition. |
@@ -192,13 +192,13 @@ Linux and macOS probes (block 0.3.0 and 0.4.0), each a false-pass risk:
   telemetry in applications, so absence is not a pass.)
 - [x] Debian popularity-contest treats a missing
   `/etc/popularity-contest.conf`, a missing participation key, or
-  `PARTICIPATE=no` as opted out. (Fixed: popularity-contest 1.79 exits when
-  its command is absent. Otherwise the daily job unsets participation,
-  sources the package default, then that etc file, then each
-  `popularity-contest.d` drop-in, and submits unless the merged value is
-  `no` or empty. The probe reads only the etc file, so yes, no, a missing
-  key, and a missing file stay unknown. A denied, malformed, or unsupported
-  read keeps its own reason.)
+  `PARTICIPATE=no` in one file alone as opted out. (Fixed: popularity-contest
+  1.79 exits when `/usr/sbin/popularity-contest` is absent, and otherwise
+  unsets participation, sources `/usr/share/popularity-contest/default.conf`,
+  `/etc/popularity-contest.conf`, and `/etc/popularity-contest.d/*.conf`, and
+  submits unless the merged value is `no` or empty. A single file without
+  those layers stays unknown; a denied, malformed, or unsupported read keeps
+  its own reason.)
 - [x] `systemd.fstrim.timer` treats any `timers.target.wants` symlink as the
   timer running. (Fixed: systemd treats an empty unit file, including a
   link to `/dev/null`, as masked, and a masked unit cannot start. The probe

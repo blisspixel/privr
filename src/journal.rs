@@ -67,7 +67,7 @@ pub fn transactions_dir() -> Result<PathBuf, std::io::Error> {
             PathBuf::from(r"C:\ProgramData\privr\state\transactions")
         })
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
     {
         crate::platform::xdg::user_root("XDG_DATA_HOME", ".local/share")
             .map(|root| root.join("privr/state/transactions"))
@@ -78,6 +78,71 @@ pub fn transactions_dir() -> Result<PathBuf, std::io::Error> {
                 )
             })
     }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        crate::platform::xdg::user_root("XDG_STATE_HOME", ".local/state")
+            .map(|root| root.join("privr/transactions"))
+            .ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "Cannot resolve journal storage: set an absolute XDG_STATE_HOME or HOME",
+                )
+            })
+    }
+}
+
+/// The legacy directory where Linux transaction journals were previously stored.
+#[cfg(not(any(windows, target_os = "macos")))]
+pub fn legacy_transactions_dir() -> Option<PathBuf> {
+    crate::platform::xdg::user_root("XDG_DATA_HOME", ".local/share")
+        .map(|root| root.join("privr/state/transactions"))
+}
+
+#[cfg(any(windows, target_os = "macos"))]
+pub fn legacy_transactions_dir() -> Option<PathBuf> {
+    None
+}
+
+/// Migrate legacy transaction journals from $XDG_DATA_HOME to $XDG_STATE_HOME on Linux.
+pub fn migrate_legacy_transactions() -> Result<usize, std::io::Error> {
+    let primary = transactions_dir()?;
+    let Some(legacy) = legacy_transactions_dir() else {
+        return Ok(0);
+    };
+    if legacy == primary || !legacy.exists() {
+        return Ok(0);
+    }
+    let mut count = 0;
+    if let Ok(entries) = fs::read_dir(&legacy) {
+        let _ = fs::create_dir_all(&primary);
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file()
+                && path.extension().is_some_and(|ext| ext == "json")
+                && !path.is_symlink()
+                && let Some(name) = path.file_name()
+            {
+                let dest = primary.join(name);
+                if !dest.exists() {
+                    if fs::copy(&path, &dest).is_ok() {
+                        let _ = fs::remove_file(&path);
+                        count += 1;
+                    }
+                } else {
+                    let _ = fs::remove_file(&path);
+                }
+            }
+        }
+    }
+    if let Ok(mut entries) = fs::read_dir(&legacy)
+        && entries.next().is_none()
+    {
+        let _ = fs::remove_dir(&legacy);
+        if let Some(parent) = legacy.parent() {
+            let _ = fs::remove_dir(parent);
+        }
+    }
+    Ok(count)
 }
 
 /// Write a transaction to disk atomically.
@@ -169,6 +234,14 @@ pub(crate) fn load_transaction_in(
         ));
     }
     if !path.exists() {
+        if let Ok(primary) = transactions_dir()
+            && dir == primary
+            && let Some(legacy) = legacy_transactions_dir()
+            && legacy != primary
+            && legacy.join(format!("{id}.json")).exists()
+        {
+            return load_transaction_in(&legacy, id);
+        }
         return Err(std::io::Error::new(
             std::io::ErrorKind::NotFound,
             format!("Transaction record '{id}' not found"),
@@ -198,22 +271,45 @@ pub fn list_transactions() -> Result<Vec<TransactionJournal>, std::io::Error> {
 }
 
 pub(crate) fn list_transactions_in(dir: &Path) -> Vec<TransactionJournal> {
-    let entries = match fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return Vec::new(),
-    };
     let mut txs = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_file()
-            && path.extension().is_some_and(|ext| ext == "json")
-            && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
-            && let Ok(tx) = load_transaction_in(dir, stem)
-        {
-            txs.push(tx);
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file()
+                && path.extension().is_some_and(|ext| ext == "json")
+                && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+                && let Ok(tx) = load_transaction_in(dir, stem)
+            {
+                txs.push(tx);
+            }
         }
     }
-    txs.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+    if let Ok(primary) = transactions_dir()
+        && dir == primary
+        && let Some(legacy) = legacy_transactions_dir()
+        && legacy != primary
+        && legacy.exists()
+        && let Ok(legacy_entries) = fs::read_dir(&legacy)
+    {
+        let existing_ids: std::collections::HashSet<_> =
+            txs.iter().map(|t| t.transaction_id.clone()).collect();
+        for entry in legacy_entries.flatten() {
+            let path = entry.path();
+            if path.is_file()
+                && path.extension().is_some_and(|ext| ext == "json")
+                && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+                && !existing_ids.contains(stem)
+                && let Ok(tx) = load_transaction_in(&legacy, stem)
+            {
+                txs.push(tx);
+            }
+        }
+    }
+    txs.sort_by(|a, b| {
+        crate::report::parse_timestamp_order(&a.timestamp)
+            .cmp(&crate::report::parse_timestamp_order(&b.timestamp))
+            .then_with(|| a.transaction_id.cmp(&b.transaction_id))
+    });
     txs
 }
 
@@ -228,17 +324,29 @@ pub fn purge_transactions() -> Result<usize, std::io::Error> {
 }
 
 pub(crate) fn purge_transactions_in(dir: &Path) -> Result<usize, std::io::Error> {
-    let entries = match fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
-        Err(e) => return Err(e),
-    };
     let mut count = 0;
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_file() && path.extension().is_some_and(|ext| ext == "json") {
-            fs::remove_file(&path)?;
-            count += 1;
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() && path.extension().is_some_and(|ext| ext == "json") {
+                fs::remove_file(&path)?;
+                count += 1;
+            }
+        }
+    }
+    if let Ok(primary) = transactions_dir()
+        && dir == primary
+        && let Some(legacy) = legacy_transactions_dir()
+        && legacy != primary
+        && legacy.exists()
+        && let Ok(legacy_entries) = fs::read_dir(&legacy)
+    {
+        for entry in legacy_entries.flatten() {
+            let path = entry.path();
+            if path.is_file() && path.extension().is_some_and(|ext| ext == "json") {
+                fs::remove_file(&path)?;
+                count += 1;
+            }
         }
     }
     Ok(count)

@@ -82,8 +82,15 @@ Mutation (blocks 0.2.0):
 - [x] Cleanup help listed Windows-only locations on Linux and omitted application
   caches (issue 60). Categories now derive from the compiled platform targets,
   including aliases. Text uses thorough; JSON retains the stable aggressive mode.
-
-The remaining Linux playtest findings are tracked in [issue 65](https://github.com/blisspixel/privr/issues/65).
+- [x] Linux playtest defects and interface contract issues tracked in [issue 65](https://github.com/blisspixel/privr/issues/65)
+  are resolved:
+  - Honest reporting: `plan` on unevaluated Linux scope never claims policy match (issue 52).
+  - Selector validation: unknown control and residue selectors fail with exit code 2 and write no journal (issues 53, 62).
+  - Contract alignment: MCP tool schemas advertise valid profiles (issue 54); inline policies are caught before elevation (issue 70); plugin manifest version matches package version (issue 61); global `--no-input` flag suppresses prompts (issue 55).
+  - Cleanup diagnostics: permission-denied files are distinguished from in-use retentions in reports and failure gates (issue 59).
+  - State roots: Linux transaction journals reside under `$XDG_STATE_HOME/privr/transactions`, with fallback support for legacy paths (issue 63).
+  - Timestamps and display: RFC 3339 UTC format for JSON reports and human-readable UTC display for history, with documented ordering (issue 58).
+  - Simulate output: text view uses dimension display names with an explicit `c/d/c` legend (issue 64).
 
 - [x] `apply` writes before journaling, and a failed journal write only warns
   and continues. (Fixed: transaction journal establishes writability before

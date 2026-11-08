@@ -131,6 +131,7 @@ pub fn purge_residue_target(
             files_removed: 0,
             bytes_reclaimed: 0,
             files_retained: 0,
+            files_denied: 0,
             error: Some("Platform does not support residue purge".to_owned()),
         }
     }

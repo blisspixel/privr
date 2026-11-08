@@ -740,22 +740,23 @@ fn purge_path(
     is_target_root: bool,
     max_depth: usize,
     cancellation: &crate::platform::cancellation::Cancellation,
-) -> (usize, u64, usize) {
+) -> (usize, u64, usize, usize) {
     if cancellation.requested() {
-        return (0, 0, 0);
+        return (0, 0, 0, 0);
     }
     if max_depth == 0 {
-        return (0, 0, 1);
+        return (0, 0, 1, 0);
     }
 
     let meta = match fs::symlink_metadata(path) {
         Ok(m) => m,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return (0, 0, 0),
-        Err(_) => return (0, 0, 1),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return (0, 0, 0, 0),
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => return (0, 0, 0, 1),
+        Err(_) => return (0, 0, 1, 0),
     };
 
     if is_reparse_point_or_symlink(&meta) {
-        return (0, 0, 0);
+        return (0, 0, 0, 0);
     }
 
     if meta.is_file() {
@@ -763,29 +764,32 @@ fn purge_path(
             let parent = path.parent().unwrap_or(path);
             let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
             if !f(parent, name) {
-                return (0, 0, 0);
+                return (0, 0, 0, 0);
             }
         }
         let len = meta.len();
         if fs::remove_file(path).is_ok() {
-            return (1, len, 0);
+            return (1, len, 0, 0);
         }
         // Attempt resetting readonly attribute before declaring locked/retained
         clear_readonly_if_set(&meta, path);
-        if fs::remove_file(path).is_ok() {
-            return (1, len, 0);
+        match fs::remove_file(path) {
+            Ok(()) => return (1, len, 0, 0),
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => return (0, 0, 0, 1),
+            Err(_) => return (0, 0, 1, 0),
         }
-        return (0, 0, 1);
     }
 
     if meta.is_dir() {
         let mut removed = 0;
         let mut bytes = 0;
         let mut retained = 0;
+        let mut denied = 0;
 
         let entries = match fs::read_dir(path) {
             Ok(e) => e,
-            Err(_) => return (0, 0, 1),
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => return (0, 0, 0, 1),
+            Err(_) => return (0, 0, 1, 0),
         };
 
         for entry in entries {
@@ -794,6 +798,10 @@ fn purge_path(
             }
             let entry = match entry {
                 Ok(entry) => entry,
+                Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                    denied += 1;
+                    continue;
+                }
                 Err(_) => {
                     retained += 1;
                     continue;
@@ -802,6 +810,10 @@ fn purge_path(
             let entry_path = entry.path();
             let entry_meta = match fs::symlink_metadata(&entry_path) {
                 Ok(m) => m,
+                Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                    denied += 1;
+                    continue;
+                }
                 Err(_) => {
                     retained += 1;
                     continue;
@@ -826,12 +838,19 @@ fn purge_path(
                     bytes += len;
                 } else {
                     clear_readonly_if_set(&entry_meta, &entry_path);
-                    if fs::remove_file(&entry_path).is_ok() {
-                        removed += 1;
-                        bytes += len;
-                        continue;
+                    match fs::remove_file(&entry_path) {
+                        Ok(()) => {
+                            removed += 1;
+                            bytes += len;
+                            continue;
+                        }
+                        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                            denied += 1;
+                        }
+                        Err(_) => {
+                            retained += 1;
+                        }
                     }
-                    retained += 1;
                 }
             } else if entry_meta.is_dir() {
                 let allow_recurse = match recurse_filter {
@@ -839,7 +858,7 @@ fn purge_path(
                     None => filter.is_none(),
                 };
                 if allow_recurse {
-                    let (sub_rem, sub_bytes, sub_ret) = purge_path(
+                    let (sub_rem, sub_bytes, sub_ret, sub_den) = purge_path(
                         &entry_path,
                         filter,
                         recurse_filter,
@@ -850,6 +869,7 @@ fn purge_path(
                     removed += sub_rem;
                     bytes += sub_bytes;
                     retained += sub_ret;
+                    denied += sub_den;
                     // Attempt to clean up directory if it's now empty
                     if !cancellation.requested() {
                         let _ = fs::remove_dir(&entry_path);
@@ -859,14 +879,19 @@ fn purge_path(
         }
 
         // Never delete the target root directory itself (e.g. %TEMP% or Explorer)
-        if !cancellation.requested() && !is_target_root && filter.is_none() && retained == 0 {
+        if !cancellation.requested()
+            && !is_target_root
+            && filter.is_none()
+            && retained == 0
+            && denied == 0
+        {
             let _ = fs::remove_dir(path);
         }
 
-        return (removed, bytes, retained);
+        return (removed, bytes, retained, denied);
     }
 
-    (0, 0, 0)
+    (0, 0, 0, 0)
 }
 
 /// Executes the purge operation for a single target spec.
@@ -881,13 +906,15 @@ pub fn purge_target(
             let mut total_removed = 0;
             let mut total_bytes = 0;
             let mut total_retained = 0;
+            let mut total_denied = 0;
 
             for p in paths {
-                let (rem, b, ret) =
+                let (rem, b, ret, den) =
                     purge_path(&p, r.file_filter, r.recurse_filter, true, 8, cancellation);
                 total_removed += rem;
                 total_bytes += b;
                 total_retained += ret;
+                total_denied += den;
             }
 
             ResiduePurgeItem {
@@ -898,6 +925,7 @@ pub fn purge_target(
                 files_removed: total_removed,
                 bytes_reclaimed: total_bytes,
                 files_retained: total_retained,
+                files_denied: total_denied,
                 error: None,
             }
         }
@@ -909,6 +937,7 @@ pub fn purge_target(
             files_removed: 0,
             bytes_reclaimed: 0,
             files_retained: 0,
+            files_denied: 0,
             error: Some("No adapter rule configured for target".to_owned()),
         },
     }
@@ -1127,7 +1156,7 @@ mod tests {
         assert_eq!(count, 3, "should count exactly 3 disposable files");
         assert!(bytes > 0);
 
-        let (rem, rem_bytes, ret) = purge_path(
+        let (rem, rem_bytes, ret, den) = purge_path(
             &root,
             Some(codex_log_filter),
             Some(codex_recurse_filter),
@@ -1138,6 +1167,7 @@ mod tests {
         assert_eq!(rem, 3);
         assert_eq!(rem_bytes, bytes);
         assert_eq!(ret, 0);
+        assert_eq!(den, 0);
 
         assert!(!disposable_tmp_file.exists());
         assert!(!disposable_cache_file.exists());

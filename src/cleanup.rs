@@ -28,7 +28,7 @@ pub(crate) fn execute(
             now.subsec_nanos(),
             std::process::id()
         ),
-        timestamp: format!("{}.{:03}", now.as_secs(), now.subsec_millis()),
+        timestamp: crate::report::format_rfc3339_utc(std::time::SystemTime::now()),
         platform: crate::model::host::Platform::current().as_str().to_owned(),
         profile: format!("clean:{}", mode.as_str()),
         operations: Vec::new(),
@@ -42,6 +42,7 @@ pub(crate) fn execute(
                     files_removed: 0,
                     bytes_removed: 0,
                     files_retained: 0,
+                    files_denied: 0,
                 })
                 .collect(),
             trim: trim.then_some(CleanupStatus::Pending),
@@ -105,7 +106,7 @@ fn run_with(
         let item = purge(spec, cancellation);
         let status = if cancellation.requested() {
             CleanupStatus::Interrupted
-        } else if item.error.is_some() || item.files_retained > 0 {
+        } else if item.error.is_some() || item.files_retained > 0 || item.files_denied > 0 {
             CleanupStatus::Failed
         } else {
             CleanupStatus::Completed
@@ -116,6 +117,7 @@ fn run_with(
             files_removed: item.files_removed,
             bytes_removed: item.bytes_reclaimed,
             files_retained: item.files_retained,
+            files_denied: item.files_denied,
         };
         items.push(item);
         if status != CleanupStatus::Completed {
@@ -209,6 +211,7 @@ mod tests {
                         files_removed: 0,
                         bytes_removed: 0,
                         files_retained: 0,
+                        files_denied: 0,
                     })
                     .collect(),
                 trim: trim.then_some(CleanupStatus::Pending),
@@ -226,6 +229,7 @@ mod tests {
             files_removed: 2,
             bytes_reclaimed: 20,
             files_retained: 0,
+            files_denied: 0,
             error: None,
         }
     }
@@ -409,6 +413,29 @@ mod tests {
         .unwrap();
         assert_eq!(report.status, Some(CleanupStatus::Failed));
         assert_eq!(report.items.len(), 1);
+    }
+
+    #[test]
+    fn permission_denied_files_fail_the_run_and_stop_later_targets() {
+        let (targets, journal) = fixtures(false);
+        let report = run_with(
+            journal,
+            PurgeMode::Aggressive,
+            &targets,
+            &Cancellation::default(),
+            |_| Ok(()),
+            |spec, cancellation| {
+                assert_eq!(spec.id, "first");
+                let mut item = removed(spec, cancellation);
+                item.files_denied = 1;
+                item
+            },
+            no_trim,
+        )
+        .unwrap();
+        assert_eq!(report.status, Some(CleanupStatus::Failed));
+        assert_eq!(report.items.len(), 1);
+        assert_eq!(report.items[0].files_denied, 1);
     }
 
     #[test]

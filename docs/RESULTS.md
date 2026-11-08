@@ -340,3 +340,13 @@ unknown. An interrupted or failed current report can include known removals even
 if persisting the last checkpoint failed. `journal_error` makes that distinction
 explicit. Cleanup receipts provide accounting, not rollback material or proof
 of physical-media sanitization.
+
+## Timestamps and history ordering
+
+Audit reports and transaction journals record timestamps in RFC 3339 UTC format
+(for example, `2026-11-03T14:10:27Z`). Deserialization accepts both RFC 3339
+strings and legacy float epoch timestamps.
+
+`privr history` renders human-readable dates in UTC (`YYYY-MM-DD HH:MM:SS UTC`).
+History records are ordered chronologically (oldest to newest) in JSON output,
+and newest-first in interactive text output to present recent activity first.

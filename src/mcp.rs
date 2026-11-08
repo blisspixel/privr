@@ -1114,7 +1114,7 @@ fn handle_tools_call_with_check_context(
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default();
-            let timestamp = format!("{}.{:03}", now.as_secs(), now.subsec_millis());
+            let timestamp = crate::report::format_rfc3339_utc(std::time::SystemTime::now());
             let tx_id = format!("tx-{}-{}", now.as_secs(), now.subsec_millis());
             let mut journal = crate::journal::TransactionJournal {
                 schema: crate::journal::JOURNAL_SCHEMA,
@@ -1719,6 +1719,7 @@ fn handle_tools_call_with_check_context(
                             files_removed: i.file_count,
                             bytes_reclaimed: i.size_bytes,
                             files_retained: 0,
+                            files_denied: 0,
                             error: None,
                         })
                         .collect(),

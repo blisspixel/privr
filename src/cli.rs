@@ -263,7 +263,8 @@ pub enum Command {
         about = "Counterfactually simulate applying a profile or controls without modifying machine state",
         long_about = "Project privacy score and compliance outcomes if specific controls were applied.\n\n\
                       Allows testing hypothetical changes and evaluating compliance impact\n\
-                      without altering any machine state.\n\n\
+                      without altering any machine state. Posture dimension columns show\n\
+                      c/d/c (compliant / drift / could not tell).\n\n\
                       Examples:\n  \
                         privr simulate --profile strict  Simulate applying strict profile\n  \
                         privr simulate --control windows.security.llmnr  Simulate one control"

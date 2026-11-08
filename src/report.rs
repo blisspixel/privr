@@ -52,12 +52,104 @@ fn completed_scope_status(summary: &Summary) -> &'static str {
 /// confidence flag. Schema 1 readers must not parse schema 2 as schema 1.
 pub const SCHEMA: u8 = 2;
 
-/// Default timestamp provider for backward-compatible deserialization of historical reports.
-fn default_timestamp() -> String {
-    let now = std::time::SystemTime::now()
+/// Civil date and time in UTC: year, month, day, hour, minute, second.
+pub fn civil_from_seconds(total_secs: u64) -> (i64, u8, u8, u8, u8, u8) {
+    let day_secs = total_secs % 86400;
+    let hour = (day_secs / 3600) as u8;
+    let min = ((day_secs % 3600) / 60) as u8;
+    let sec = (day_secs % 60) as u8;
+
+    let z = (total_secs / 86400) as i64 + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = (z - era * 146097) as u32;
+    let yoe = (doe - doe / 1024 + doe / 1460 - doe / 36524) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u8;
+    let m = (if mp < 10 { mp + 3 } else { mp - 9 }) as u8;
+    let year = if m <= 2 { y + 1 } else { y };
+
+    (year, m, d, hour, min, sec)
+}
+
+/// Seconds since 1970-01-01 00:00:00 UTC for civil date and time.
+pub fn seconds_from_civil(y: i64, m: u8, d: u8, h: u8, min: u8, s: u8) -> u64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = (y - era * 400) as u32;
+    let mp = if m > 2 { m - 3 } else { m + 9 } as u32;
+    let doy = (153 * mp + 2) / 5 + d as u32 - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146097 + doe as i64 - 719468;
+    (days.max(0) as u64) * 86400 + (h as u64) * 3600 + (min as u64) * 60 + (s as u64)
+}
+
+/// Format a SystemTime as an RFC 3339 UTC string (e.g. 2026-11-08T15:24:30Z).
+pub fn format_rfc3339_utc(time: std::time::SystemTime) -> String {
+    let duration = time
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default();
-    format!("{}.{:03}", now.as_secs(), now.subsec_millis())
+    let (year, month, day, hour, min, sec) = civil_from_seconds(duration.as_secs());
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{min:02}:{sec:02}Z")
+}
+
+/// Format any stored timestamp (RFC 3339 or legacy float epoch) as human-readable UTC text.
+pub fn format_timestamp_display(raw: &str) -> String {
+    let raw = raw.trim();
+    if let Some((date, time)) = raw.split_once('T') {
+        let clean_time = time.trim_end_matches('Z');
+        let time_part = clean_time.split('.').next().unwrap_or(clean_time);
+        return format!("{date} {time_part} UTC");
+    }
+    if let Ok(epoch_f) = raw.parse::<f64>() {
+        let secs = epoch_f as u64;
+        let (year, m, d, hour, min, sec) = civil_from_seconds(secs);
+        return format!("{year:04}-{m:02}-{d:02} {hour:02}:{min:02}:{sec:02} UTC");
+    }
+    raw.to_string()
+}
+
+/// Parse a timestamp string into sortable (seconds, nanoseconds) components.
+pub fn parse_timestamp_order(ts: &str) -> (u64, u32) {
+    let ts = ts.trim();
+    if let Ok(epoch_f) = ts.parse::<f64>() {
+        let secs = epoch_f as u64;
+        let nanos = (epoch_f.fract() * 1_000_000_000.0) as u32;
+        return (secs, nanos);
+    }
+    if let Some((date, rest)) = ts.split_once('T') {
+        let parts: Vec<&str> = date.split('-').collect();
+        if parts.len() == 3
+            && let Ok(y) = parts[0].parse::<i64>()
+            && let Ok(m) = parts[1].parse::<u8>()
+            && let Ok(d) = parts[2].parse::<u8>()
+        {
+            let clean_rest = rest.trim_end_matches('Z');
+            let (time_str, subsec_str) = clean_rest.split_once('.').unwrap_or((clean_rest, "0"));
+            let time_parts: Vec<&str> = time_str.split(':').collect();
+            if time_parts.len() == 3
+                && let Ok(h) = time_parts[0].parse::<u8>()
+                && let Ok(min) = time_parts[1].parse::<u8>()
+                && let Ok(s) = time_parts[2].parse::<u8>()
+            {
+                let secs = seconds_from_civil(y, m, d, h, min, s);
+                let subsec_millis: u32 = subsec_str
+                    .chars()
+                    .take(3)
+                    .collect::<String>()
+                    .parse()
+                    .unwrap_or(0);
+                return (secs, subsec_millis * 1_000_000);
+            }
+        }
+    }
+    (0, 0)
+}
+
+/// Default timestamp provider for backward-compatible deserialization of historical reports.
+fn default_timestamp() -> String {
+    format_rfc3339_utc(std::time::SystemTime::now())
 }
 
 /// Default tool version provider for backward-compatible deserialization of historical reports.
@@ -259,10 +351,7 @@ impl Report {
             profile.unwrap_or("baseline").to_owned()
         };
 
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default();
-        let timestamp = format!("{}.{:03}", now.as_secs(), now.subsec_millis());
+        let timestamp = format_rfc3339_utc(std::time::SystemTime::now());
 
         Self {
             schema: SCHEMA,
@@ -368,10 +457,7 @@ impl Report {
 
         let profile_str = format!("custom (extends {})", selected_profile.as_str());
 
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default();
-        let timestamp = format!("{}.{:03}", now.as_secs(), now.subsec_millis());
+        let timestamp = format_rfc3339_utc(std::time::SystemTime::now());
 
         Self {
             schema: SCHEMA,
@@ -1051,7 +1137,11 @@ pub fn render_purge_report(
         Vec<&crate::model::residue::ResiduePurgeItem>,
     > = std::collections::BTreeMap::new();
     for item in &report.items {
-        if item.files_removed > 0 || item.files_retained > 0 || item.error.is_some() {
+        if item.files_removed > 0
+            || item.files_retained > 0
+            || item.files_denied > 0
+            || item.error.is_some()
+        {
             let key = (item.category.group_rank(), item.category.group_title());
             group_map.entry(key).or_default().push(item);
         }
@@ -1061,22 +1151,46 @@ pub fn render_purge_report(
         out.push_str(&format!("  {}\n", ui.paint(style::HEADING, group_title)));
         for item in group_items {
             let bullet = if ui.unicode() { "•" } else { "*" };
-            let outcome = if item.error.is_some() || item.files_retained > 0 {
-                Outcome::Error
-            } else {
-                Outcome::Pass
-            };
+            let outcome =
+                if item.error.is_some() || item.files_retained > 0 || item.files_denied > 0 {
+                    Outcome::Error
+                } else {
+                    Outcome::Pass
+                };
             let tag = ui.paint(style::outcome_style(outcome), bullet);
             if let Some(error) = &item.error {
                 out.push_str(&format!("    {tag} {}: {error}\n", item.title));
             }
-            if item.files_retained > 0 {
+            if item.files_retained > 0 || item.files_denied > 0 {
+                let mut reasons = Vec::new();
+                if item.files_retained > 0 {
+                    let files_word = if item.files_retained == 1 {
+                        "file"
+                    } else {
+                        "files"
+                    };
+                    reasons.push(format!(
+                        "{} in-use {files_word} retained",
+                        item.files_retained
+                    ));
+                }
+                if item.files_denied > 0 {
+                    let files_word = if item.files_denied == 1 {
+                        "file"
+                    } else {
+                        "files"
+                    };
+                    reasons.push(format!(
+                        "{} {files_word} could not be removed (permission denied)",
+                        item.files_denied
+                    ));
+                }
                 out.push_str(&format!(
-                    "    {tag} {}: {} reclaimed ({} files removed, {} files not removed)\n",
+                    "    {tag} {}: {} reclaimed ({} files removed, {})\n",
                     item.title,
                     format_byte_size(item.bytes_reclaimed),
                     item.files_removed,
-                    item.files_retained
+                    reasons.join(", ")
                 ));
             } else {
                 out.push_str(&format!(
@@ -2865,5 +2979,80 @@ mod tests {
         );
         assert!(rendered.contains("windows.ai.recall-snapshot"));
         assert!(rendered.contains("Summary: 1 regressed drift, 0 remediated, 1 newly applicable, 1 unchanged pass, 0 unchanged drift."));
+    }
+
+    #[test]
+    fn render_purge_report_distinguishes_in_use_and_permission_denied() {
+        use crate::model::residue::*;
+        let report = PurgeReport {
+            schema: 1,
+            mode: PurgeMode::Aggressive,
+            items: vec![
+                ResiduePurgeItem {
+                    id: "target.retained".to_owned(),
+                    title: "In-use target".to_owned(),
+                    category: ResidueCategory::TemporaryFiles,
+                    trade_off: "none".to_owned(),
+                    files_removed: 2,
+                    bytes_reclaimed: 1024,
+                    files_retained: 1,
+                    files_denied: 0,
+                    error: None,
+                },
+                ResiduePurgeItem {
+                    id: "target.denied".to_owned(),
+                    title: "Permission-denied target".to_owned(),
+                    category: ResidueCategory::TemporaryFiles,
+                    trade_off: "none".to_owned(),
+                    files_removed: 1,
+                    bytes_reclaimed: 512,
+                    files_retained: 0,
+                    files_denied: 2,
+                    error: None,
+                },
+            ],
+            total_files_affected: 3,
+            total_bytes_affected: 1536,
+            dry_run: false,
+            trim: None,
+            status: None,
+            journal_error: None,
+            transaction_id: None,
+        };
+
+        let rendered = render_purge_report(&Ui::plain(), &report, None);
+        assert!(rendered.contains(
+            "In-use target: 1.00 KB reclaimed (2 files removed, 1 in-use file retained)"
+        ));
+        assert!(rendered.contains("Permission-denied target: 512 B reclaimed (1 files removed, 2 files could not be removed (permission denied))"));
+    }
+
+    #[test]
+    fn civil_calendar_and_timestamp_formatting_roundtrips() {
+        let (y, m, d, h, min, s) = civil_from_seconds(0);
+        assert_eq!((y, m, d, h, min, s), (1970, 1, 1, 0, 0, 0));
+        assert_eq!(seconds_from_civil(1970, 1, 1, 0, 0, 0), 0);
+
+        let (y, m, d, h, min, s) = civil_from_seconds(1793715027);
+        assert_eq!((y, m, d, h, min, s), (2026, 11, 3, 14, 10, 27));
+        assert_eq!(seconds_from_civil(2026, 11, 3, 14, 10, 27), 1793715027);
+
+        assert_eq!(
+            format_timestamp_display("1793715027.096"),
+            "2026-11-03 14:10:27 UTC"
+        );
+        assert_eq!(
+            format_timestamp_display("2026-11-03T14:10:27Z"),
+            "2026-11-03 14:10:27 UTC"
+        );
+        assert_eq!(
+            format_timestamp_display("2026-11-03T14:10:27.096Z"),
+            "2026-11-03 14:10:27 UTC"
+        );
+
+        let (secs_a, _) = parse_timestamp_order("1793715027.096");
+        let (secs_b, _) = parse_timestamp_order("2026-11-03T14:10:27.096Z");
+        assert_eq!(secs_a, 1793715027);
+        assert_eq!(secs_b, 1793715027);
     }
 }

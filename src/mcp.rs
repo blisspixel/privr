@@ -2897,24 +2897,25 @@ expires = "2029-01-01"
     #[test]
     #[cfg(windows)]
     fn privr_apply_rejects_inline_policy_when_elevation_is_required() {
+        let mut host = crate::platform::discover();
+        host.elevated = crate::model::host::Fact::Known(false);
+        let context = crate::catalog::Context::live(&host);
+
         let req = json!({
-            "jsonrpc": "2.0",
-            "id": 88,
-            "method": "tools/call",
-            "params": {
-                "name": "privr_apply",
-                "arguments": {
-                    "yes": true,
-                    "elevate": true,
-                    "control": "windows.security.llmnr",
-                    "policy": "{\"schema\":1,\"extends\":\"baseline\"}"
-                }
+            "name": "privr_apply",
+            "arguments": {
+                "yes": true,
+                "elevate": true,
+                "control": "windows.security.llmnr",
+                "policy": "{\"schema\":1,\"extends\":\"baseline\"}"
             }
         });
         let mut err = Vec::new();
-        let resp = handle_message(&req, true, &mut err).expect("response");
-        assert_eq!(resp["result"]["isError"], true);
-        let error_msg = resp["result"]["content"][0]["text"].as_str().expect("text");
+        let resp =
+            super::handle_tools_call_with_check_context(Some(&req), true, &mut err, Some(&context))
+                .expect("response");
+        assert_eq!(resp["isError"], true);
+        let error_msg = resp["content"][0]["text"].as_str().expect("text");
         assert!(
             error_msg.contains("Elevated apply does not support inline policies"),
             "unexpected error message: {error_msg}"

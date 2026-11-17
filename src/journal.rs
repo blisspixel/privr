@@ -80,22 +80,83 @@ pub fn transactions_dir() -> Result<PathBuf, std::io::Error> {
     }
     #[cfg(not(any(windows, target_os = "macos")))]
     {
-        crate::platform::xdg::user_root("XDG_STATE_HOME", ".local/state")
+        let primary = crate::platform::xdg::user_root("XDG_STATE_HOME", ".local/state")
             .map(|root| root.join("privr/transactions"))
             .ok_or_else(|| {
                 std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
                     "Cannot resolve journal storage: set an absolute XDG_STATE_HOME or HOME",
                 )
-            })
+            })?;
+        #[cfg(target_os = "linux")]
+        {
+            check_journal_root(&primary, 2)?;
+            if let Some(legacy) = legacy_path() {
+                // An absent legacy root is never created by the compatibility reader.
+                match fs::symlink_metadata(&legacy) {
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => return Err(e),
+                    Ok(_) => check_journal_root(&legacy, 3)?,
+                }
+            }
+        }
+        Ok(primary)
     }
+}
+
+/// Validate from the filesystem root so an untrusted ancestor cannot replace
+/// a checked child. A sticky system directory can hold an existing user root.
+#[cfg(target_os = "linux")]
+fn check_journal_root(dir: &Path, app_components: usize) -> std::io::Result<()> {
+    use std::os::unix::fs::MetadataExt;
+    use std::path::Component;
+    let denied = || {
+        std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "unsafe journal directory ownership or permissions",
+        )
+    };
+    let uid = nix::unistd::geteuid().as_raw();
+    let base = dir.ancestors().nth(app_components).ok_or_else(denied)?;
+    let mut path = PathBuf::new();
+    let mut sticky_parent = false;
+    for component in dir.components() {
+        if !matches!(component, Component::RootDir | Component::Normal(_)) {
+            return Err(denied());
+        }
+        path.push(component);
+        let meta = match fs::symlink_metadata(&path) {
+            Ok(meta) => meta,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound && !sticky_parent => continue,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Err(denied()),
+            Err(err) => return Err(err),
+        };
+        let user_component = path.starts_with(base);
+        let sticky_system = !user_component && meta.uid() == 0 && meta.mode() & 0o1000 != 0;
+        if !meta.is_dir()
+            || (meta.uid() != uid && (user_component || meta.uid() != 0))
+            || (meta.mode() & 0o022 != 0 && !sticky_system)
+        {
+            return Err(denied());
+        }
+        sticky_parent = sticky_system;
+    }
+    Ok(())
 }
 
 /// The legacy directory where Linux transaction journals were previously stored.
 #[cfg(not(any(windows, target_os = "macos")))]
-pub fn legacy_transactions_dir() -> Option<PathBuf> {
+fn legacy_path() -> Option<PathBuf> {
     crate::platform::xdg::user_root("XDG_DATA_HOME", ".local/share")
         .map(|root| root.join("privr/state/transactions"))
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+pub fn legacy_transactions_dir() -> Option<PathBuf> {
+    let path = legacy_path()?;
+    #[cfg(target_os = "linux")]
+    check_journal_root(&path, 3).ok()?;
+    Some(path)
 }
 
 #[cfg(any(windows, target_os = "macos"))]
@@ -114,7 +175,7 @@ pub fn migrate_legacy_transactions() -> Result<usize, std::io::Error> {
     }
     let mut count = 0;
     if let Ok(entries) = fs::read_dir(&legacy) {
-        let _ = fs::create_dir_all(&primary);
+        create_journal_directory(&primary)?;
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_file()
@@ -145,6 +206,16 @@ pub fn migrate_legacy_transactions() -> Result<usize, std::io::Error> {
     Ok(count)
 }
 
+fn create_journal_directory(dir: &Path) -> std::io::Result<()> {
+    let mut builder = fs::DirBuilder::new();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    builder.recursive(true).create(dir)
+}
+
 /// Write a transaction to disk atomically.
 pub fn save_transaction(tx: &TransactionJournal) -> Result<PathBuf, std::io::Error> {
     save_transaction_in(&transactions_dir()?, tx)
@@ -160,7 +231,7 @@ pub(crate) fn save_transaction_in(
             "Invalid transaction identifier",
         ));
     }
-    fs::create_dir_all(dir)?;
+    create_journal_directory(dir)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;

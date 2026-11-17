@@ -340,6 +340,7 @@ dependencies = [
  "clap",
  "colorchoice",
  "ctrlc",
+ "nix",
  "predicates",
  "serde",
  "serde_json",

@@ -52,7 +52,13 @@ struct RollbackReport {
 }
 
 pub fn run(cli: Cli, out: &mut impl Write, err: &mut impl Write) -> i32 {
-    match crate::journal::transactions_dir() {
+    let root = match cli.command {
+        Some(Command::List { .. } | Command::Explain { .. }) => {
+            crate::journal::resolve_transactions_dir()
+        }
+        _ => crate::journal::transactions_dir(),
+    };
+    match root {
         Ok(root) => run_with_journal_dir(cli, out, err, &root),
         Err(error) => {
             let _ = writeln!(err, "privr: {error}");
@@ -235,7 +241,9 @@ fn verified_block_for(
         .map(|operation| operation.control_id.clone())
         .collect();
     let mut total = journal.operations.len();
-    if let Some(id) = failed {
+    if let Some(id) = failed
+        && !unverified.iter().any(|item| item == id)
+    {
         unverified.push(id.to_owned());
         total += 1;
     }
@@ -1826,7 +1834,7 @@ fn run_with_check_context(
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default();
             let timestamp = crate::report::format_rfc3339_utc(std::time::SystemTime::now());
-            let tx_id = format!("tx-{}-{}", now.as_secs(), now.subsec_millis());
+            let tx_id = format!("tx-{}-{}", now.as_nanos(), std::process::id());
             let profile_name = if let Some(pol) = &loaded_policy {
                 format!("custom (extends {})", pol.extends)
             } else if let Some(w) = workload {
@@ -1845,7 +1853,7 @@ fn run_with_check_context(
             };
 
             // Verify journal storage is writable before mutating system state.
-            if let Err(e) = crate::journal::save_transaction_in(journal_dir, &journal) {
+            if let Err(e) = crate::journal::initialize_transaction(journal_dir, &journal) {
                 let _ = writeln!(
                     err,
                     "privr: failed to initialize transaction journal: {e}. Halting apply."
@@ -1963,50 +1971,31 @@ fn run_with_check_context(
                             continue;
                         }
 
-                        match c.apply(&context) {
-                            Some(Ok(op)) => {
-                                journal.operations.push(crate::journal::OperationJournal {
-                                    control_id: c.spec.id.clone(),
-                                    target_key: op.target_key,
-                                    preimage: op.preimage,
-                                    postimage: op.postimage,
-                                    verified: true,
-                                });
-                                if let Err(e) =
-                                    crate::journal::save_transaction_in(journal_dir, &journal)
-                                {
-                                    let _ =
-                                        write!(out, "{}", verified_block_for(&ui, &journal, None));
-                                    let _ = writeln!(
-                                        err,
-                                        "privr: fatal error writing transaction journal: {e}. Applied {} change(s) (transaction {tx_id}). Halting apply.",
-                                        journal.operations.len()
-                                    );
-                                    return 4;
-                                }
+                        if let Some(apply) = c.apply
+                            && let Err(e) = journal.apply_operation(
+                                &c.spec.id,
+                                |tx| crate::journal::save_transaction_in(journal_dir, tx),
+                                |prepare| apply(&context, prepare),
+                            )
+                        {
+                            if !journal.operations.is_empty() {
+                                let _ = write!(
+                                    out,
+                                    "{}",
+                                    verified_block_for(&ui, &journal, Some(&c.spec.id))
+                                );
+                                let _ = writeln!(
+                                    err,
+                                    "privr: failed to apply {}: {e}. Applied {} prior change(s) (transaction {}). To rollback: privr rollback {}",
+                                    c.spec.id,
+                                    journal.operations.iter().filter(|op| op.verified).count(),
+                                    tx_id,
+                                    tx_id,
+                                );
+                            } else {
+                                let _ = writeln!(err, "privr: failed to apply {}: {e}", c.spec.id);
                             }
-                            Some(Err(e)) => {
-                                if !journal.operations.is_empty() {
-                                    let _ = write!(
-                                        out,
-                                        "{}",
-                                        verified_block_for(&ui, &journal, Some(&c.spec.id))
-                                    );
-                                    let _ = writeln!(
-                                        err,
-                                        "privr: failed to apply {}: {e}. Applied {} prior change(s) (transaction {}). To rollback: privr rollback {}",
-                                        c.spec.id,
-                                        journal.operations.len(),
-                                        tx_id,
-                                        tx_id,
-                                    );
-                                } else {
-                                    let _ =
-                                        writeln!(err, "privr: failed to apply {}: {e}", c.spec.id);
-                                }
-                                return 4;
-                            }
-                            None => {}
+                            return 4;
                         }
                     } else {
                         unautomated_drift += 1;
@@ -2017,7 +2006,9 @@ fn run_with_check_context(
 
             if let Some(failed_id) = explicit_elevation_failure {
                 let initial_path = journal_dir.join(format!("{tx_id}.json"));
-                let _ = std::fs::remove_file(initial_path);
+                if journal.operations.is_empty() {
+                    let _ = std::fs::remove_file(initial_path);
+                }
                 let _ = writeln!(
                     err,
                     "privr: failed to apply {failed_id}: applying this control requires administrative privileges (pass --elevate or run as Administrator)"
@@ -2361,9 +2352,9 @@ fn run_with_check_context(
                     .iter()
                     .find(|item| item.spec.id == op.control_id)
                 {
-                    match c.rollback(&context, &op.preimage, &op.postimage) {
-                        Some(Ok(())) => {
-                            restored += 1;
+                    match c.rollback(&context, op) {
+                        Some(Ok(changed)) => {
+                            restored += usize::from(changed);
                         }
                         Some(Err(e)) => {
                             let _ = writeln!(

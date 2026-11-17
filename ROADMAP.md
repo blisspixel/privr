@@ -93,8 +93,10 @@ Mutation (blocks 0.2.0):
   - Simulate output: text view uses dimension display names with an explicit `c/d/c` legend (issue 64).
 
 - [x] `apply` writes before journaling, and a failed journal write only warns
-  and continues. (Fixed: transaction journal establishes writability before
-  mutation, and failed journal writes immediately halt apply).
+  and continues. (Fixed: CLI and MCP persist each preimage and intended postimage before
+  mutation and record verification separately. An interruption preserves the prepared
+  record for conflict-aware rollback. Journal files are synced before rename and
+  Unix directory entries after rename. Sudden power loss is filesystem-dependent).
 - [x] `rollback` receives only the recorded prior value, so it cannot refuse
   when current state no longer equals the recorded postimage. (Fixed: rollback
   takes recorded postimage and refuses with conflict error if state changed

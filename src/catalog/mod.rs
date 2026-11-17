@@ -85,8 +85,9 @@ pub struct AppliedOp {
     pub postimage: RawValue,
 }
 
-pub type ApplyFn = fn(&Context) -> Result<AppliedOp, String>;
-pub type RollbackFn = fn(&Context, &Option<RawValue>, &RawValue) -> Result<(), String>;
+pub type PrepareOperation<'a> = dyn FnMut(AppliedOp) -> Result<(), String> + 'a;
+pub type ApplyFn = fn(&Context, &mut PrepareOperation<'_>) -> Result<(), String>;
+pub type RollbackFn = fn(&Context, &crate::journal::OperationJournal) -> Result<bool, String>;
 
 /// A compiled control definition.
 pub struct Control {
@@ -117,17 +118,12 @@ impl Control {
         (self.probe)(context)
     }
 
-    pub fn apply(&self, context: &Context) -> Option<Result<AppliedOp, String>> {
-        self.apply.map(|f| f(context))
-    }
-
     pub fn rollback(
         &self,
         context: &Context,
-        preimage: &Option<RawValue>,
-        postimage: &RawValue,
-    ) -> Option<Result<(), String>> {
-        self.rollback.map(|f| f(context, preimage, postimage))
+        op: &crate::journal::OperationJournal,
+    ) -> Option<Result<bool, String>> {
+        self.rollback.map(|f| f(context, op))
     }
 
     pub fn requires_elevation(&self) -> bool {

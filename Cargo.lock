@@ -331,7 +331,7 @@ dependencies = [
 
 [[package]]
 name = "privr"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "anstream",
  "anstyle",

@@ -337,8 +337,8 @@ fn advertising_id() -> Control {
             reviewed: "2026-10-07",
         }],
         probe: probe_advertising_id,
-        apply: Some(|ctx| ADVERTISING_TOGGLE.apply(ctx)),
-        rollback: Some(|ctx, pre, post| ADVERTISING_TOGGLE.rollback(ctx, pre, post)),
+        apply: Some(|ctx, prepare| ADVERTISING_TOGGLE.apply(ctx, prepare)),
+        rollback: Some(|ctx, op| ADVERTISING_TOGGLE.rollback(ctx, op)),
     }
 }
 
@@ -403,7 +403,7 @@ impl Toggle {
         }
     }
 
-    fn apply(&self, ctx: &Context) -> Result<super::AppliedOp, String> {
+    fn apply(&self, ctx: &Context, prepare: &mut super::PrepareOperation) -> Result<(), String> {
         let current = ctx.registry.read(&self.target, self.source());
         let preimage = match current {
             Evidence::Present { value, .. } => {
@@ -422,6 +422,11 @@ impl Toggle {
             _ => return Err("Target state undetermined".to_owned()),
         };
         let postimage = RawValue::u32(self.private_value);
+        prepare(super::AppliedOp {
+            target_key: crate::platform::windows::registry::key(&self.target),
+            preimage,
+            postimage: postimage.clone(),
+        })?;
         if let Err(code) = crate::platform::windows::registry::write_raw(&self.target, &postimage) {
             if code == 5 {
                 return Err(
@@ -435,20 +440,26 @@ impl Toggle {
         if verification.state != Some(SemanticState::new(self.desired_state)) {
             return Err("Verification failed after writing setting".to_owned());
         }
-        Ok(super::AppliedOp {
-            target_key: crate::platform::windows::registry::key(&self.target),
-            preimage,
-            postimage,
-        })
+        Ok(())
     }
 
     fn rollback(
         &self,
         ctx: &Context,
-        preimage: &Option<RawValue>,
-        postimage: &RawValue,
-    ) -> Result<(), String> {
+        op: &crate::journal::OperationJournal,
+    ) -> Result<bool, String> {
+        let preimage = &op.preimage;
+        let postimage = &op.postimage;
         let current = ctx.registry.read(&self.target, self.source());
+        if !op.verified
+            && match (&current, preimage) {
+                (Evidence::Present { value, .. }, Some(expected)) => value == expected,
+                (Evidence::Absent { .. }, None) => true,
+                _ => false,
+            }
+        {
+            return Ok(false);
+        }
         let current_matches = match current {
             Evidence::Present { value, .. } => value == *postimage,
             _ => false,
@@ -484,7 +495,7 @@ impl Toggle {
         if !verified {
             return Err("Verification failed after restoring setting during rollback".to_owned());
         }
-        Ok(())
+        Ok(true)
     }
 }
 
@@ -522,7 +533,7 @@ impl StringToggle {
         }
     }
 
-    fn apply(&self, ctx: &Context) -> Result<super::AppliedOp, String> {
+    fn apply(&self, ctx: &Context, prepare: &mut super::PrepareOperation) -> Result<(), String> {
         let current = ctx.registry.read(&self.target, ManagementSource::User);
         let preimage = match current {
             Evidence::Present { value, .. } => {
@@ -546,6 +557,11 @@ impl StringToggle {
             _ => return Err("Target state undetermined".to_owned()),
         };
         let postimage = RawValue::string_utf16(self.private_value);
+        prepare(super::AppliedOp {
+            target_key: crate::platform::windows::registry::key(&self.target),
+            preimage,
+            postimage: postimage.clone(),
+        })?;
         if let Err(code) = crate::platform::windows::registry::write_raw(&self.target, &postimage) {
             return Err(format!("Registry write failed with error code {code}"));
         }
@@ -553,20 +569,26 @@ impl StringToggle {
         if verification.state != Some(disabled()) {
             return Err("Verification failed after writing setting".to_owned());
         }
-        Ok(super::AppliedOp {
-            target_key: crate::platform::windows::registry::key(&self.target),
-            preimage,
-            postimage,
-        })
+        Ok(())
     }
 
     fn rollback(
         &self,
         ctx: &Context,
-        preimage: &Option<RawValue>,
-        postimage: &RawValue,
-    ) -> Result<(), String> {
+        op: &crate::journal::OperationJournal,
+    ) -> Result<bool, String> {
+        let preimage = &op.preimage;
+        let postimage = &op.postimage;
         let current = ctx.registry.read(&self.target, ManagementSource::User);
+        if !op.verified
+            && match (&current, preimage) {
+                (Evidence::Present { value, .. }, Some(expected)) => value == expected,
+                (Evidence::Absent { .. }, None) => true,
+                _ => false,
+            }
+        {
+            return Ok(false);
+        }
         let current_matches = match current {
             Evidence::Present { value, .. } => value == *postimage,
             _ => false,
@@ -596,7 +618,7 @@ impl StringToggle {
         if !verified {
             return Err("Verification failed after restoring setting during rollback".to_owned());
         }
-        Ok(())
+        Ok(true)
     }
 }
 
@@ -698,8 +720,8 @@ fn security_llmnr() -> Control {
             reviewed: "2026-09-21",
         }],
         probe: probe_llmnr,
-        apply: Some(|ctx| LLMNR.apply(ctx)),
-        rollback: Some(|ctx, pre, post| LLMNR.rollback(ctx, pre, post)),
+        apply: Some(|ctx, prepare| LLMNR.apply(ctx, prepare)),
+        rollback: Some(|ctx, op| LLMNR.rollback(ctx, op)),
     }
 }
 
@@ -1485,8 +1507,8 @@ pub fn controls() -> Vec<Control> {
                 reviewed: "2026-09-22",
             }],
             |ctx| COPILOT_SHELL.probe(ctx),
-            Some(|ctx| COPILOT_SHELL.apply(ctx)),
-            Some(|ctx, pre, post| COPILOT_SHELL.rollback(ctx, pre, post)),
+            Some(|ctx, prepare| COPILOT_SHELL.apply(ctx, prepare)),
+            Some(|ctx, op| COPILOT_SHELL.rollback(ctx, op)),
         ),
         toggle_control(
             "windows.ai.recall-snapshot",
@@ -1502,8 +1524,8 @@ pub fn controls() -> Vec<Control> {
                 reviewed: "2026-09-22",
             }],
             probe_recall_snapshots,
-            Some(|ctx| RECALL_SNAPSHOTS.apply(ctx)),
-            Some(|ctx, pre, post| RECALL_SNAPSHOTS.rollback(ctx, pre, post)),
+            Some(|ctx, prepare| RECALL_SNAPSHOTS.apply(ctx, prepare)),
+            Some(|ctx, op| RECALL_SNAPSHOTS.rollback(ctx, op)),
         ),
         toggle_control(
             "windows.capability.account-info",
@@ -1520,8 +1542,8 @@ pub fn controls() -> Vec<Control> {
                 reviewed: "2026-09-21",
             }],
             |ctx| ACCOUNT_INFO_ACCESS.probe(ctx),
-            Some(|ctx| ACCOUNT_INFO_ACCESS.apply(ctx)),
-            Some(|ctx, pre, post| ACCOUNT_INFO_ACCESS.rollback(ctx, pre, post)),
+            Some(|ctx, prepare| ACCOUNT_INFO_ACCESS.apply(ctx, prepare)),
+            Some(|ctx, op| ACCOUNT_INFO_ACCESS.rollback(ctx, op)),
         ),
         toggle_control(
             "windows.capability.activity",
@@ -1538,8 +1560,8 @@ pub fn controls() -> Vec<Control> {
                 reviewed: "2026-09-21",
             }],
             |ctx| APP_ACTIVITY_ACCESS.probe(ctx),
-            Some(|ctx| APP_ACTIVITY_ACCESS.apply(ctx)),
-            Some(|ctx, pre, post| APP_ACTIVITY_ACCESS.rollback(ctx, pre, post)),
+            Some(|ctx, prepare| APP_ACTIVITY_ACCESS.apply(ctx, prepare)),
+            Some(|ctx, op| APP_ACTIVITY_ACCESS.rollback(ctx, op)),
         ),
         toggle_control(
             "windows.capability.wifi-data",
@@ -1560,8 +1582,8 @@ pub fn controls() -> Vec<Control> {
                 reviewed: "2026-09-21",
             }],
             |ctx| WIFI_DATA_ACCESS.probe(ctx),
-            Some(|ctx| WIFI_DATA_ACCESS.apply(ctx)),
-            Some(|ctx, pre, post| WIFI_DATA_ACCESS.rollback(ctx, pre, post)),
+            Some(|ctx, prepare| WIFI_DATA_ACCESS.apply(ctx, prepare)),
+            Some(|ctx, op| WIFI_DATA_ACCESS.rollback(ctx, op)),
         ),
         toggle_control(
             "windows.diagnostics.crash-dump-scope",
@@ -1602,8 +1624,8 @@ pub fn controls() -> Vec<Control> {
                 reviewed: "2026-10-01",
             }],
             probe_error_reporting,
-            Some(|ctx| ERROR_REPORTING.apply(ctx)),
-            Some(|ctx, pre, post| ERROR_REPORTING.rollback(ctx, pre, post)),
+            Some(|ctx, prepare| ERROR_REPORTING.apply(ctx, prepare)),
+            Some(|ctx, op| ERROR_REPORTING.rollback(ctx, op)),
         ),
         toggle_control(
             "windows.diagnostics.feedback",
@@ -1620,8 +1642,8 @@ pub fn controls() -> Vec<Control> {
                 reviewed: "2026-09-21",
             }],
             |ctx| FEEDBACK_FREQUENCY.probe(ctx),
-            Some(|ctx| FEEDBACK_FREQUENCY.apply(ctx)),
-            Some(|ctx, pre, post| FEEDBACK_FREQUENCY.rollback(ctx, pre, post)),
+            Some(|ctx, prepare| FEEDBACK_FREQUENCY.apply(ctx, prepare)),
+            Some(|ctx, op| FEEDBACK_FREQUENCY.rollback(ctx, op)),
         ),
         toggle_control(
             "windows.diagnostics.inventory-collector",
@@ -1641,8 +1663,8 @@ pub fn controls() -> Vec<Control> {
                 reviewed: "2026-09-22",
             }],
             probe_inventory_collector,
-            Some(|ctx| INVENTORY_COLLECTOR.apply(ctx)),
-            Some(|ctx, pre, post| INVENTORY_COLLECTOR.rollback(ctx, pre, post)),
+            Some(|ctx, prepare| INVENTORY_COLLECTOR.apply(ctx, prepare)),
+            Some(|ctx, op| INVENTORY_COLLECTOR.rollback(ctx, op)),
         ),
         toggle_control(
             "windows.clipboard.cloud-sync",
@@ -1659,8 +1681,8 @@ pub fn controls() -> Vec<Control> {
                 reviewed: "2026-09-21",
             }],
             |ctx| CLOUD_CLIPBOARD_SYNC.probe(ctx),
-            Some(|ctx| CLOUD_CLIPBOARD_SYNC.apply(ctx)),
-            Some(|ctx, pre, post| CLOUD_CLIPBOARD_SYNC.rollback(ctx, pre, post)),
+            Some(|ctx, prepare| CLOUD_CLIPBOARD_SYNC.apply(ctx, prepare)),
+            Some(|ctx, op| CLOUD_CLIPBOARD_SYNC.rollback(ctx, op)),
         ),
         toggle_control(
             "windows.clipboard.cross-device",
@@ -1681,8 +1703,8 @@ pub fn controls() -> Vec<Control> {
                 reviewed: "2026-09-07",
             }],
             |ctx| CLOUD_CLIPBOARD.probe(ctx),
-            Some(|ctx| CLOUD_CLIPBOARD.apply(ctx)),
-            Some(|ctx, pre, post| CLOUD_CLIPBOARD.rollback(ctx, pre, post)),
+            Some(|ctx, prepare| CLOUD_CLIPBOARD.apply(ctx, prepare)),
+            Some(|ctx, op| CLOUD_CLIPBOARD.rollback(ctx, op)),
         ),
         diagnostics_level(),
         toggle_control(
@@ -1700,8 +1722,8 @@ pub fn controls() -> Vec<Control> {
                 reviewed: "2026-09-21",
             }],
             |ctx| START_SUGGESTIONS.probe(ctx),
-            Some(|ctx| START_SUGGESTIONS.apply(ctx)),
-            Some(|ctx, pre, post| START_SUGGESTIONS.rollback(ctx, pre, post)),
+            Some(|ctx, prepare| START_SUGGESTIONS.apply(ctx, prepare)),
+            Some(|ctx, op| START_SUGGESTIONS.rollback(ctx, op)),
         ),
         toggle_control(
             "windows.experience.suggested-apps",
@@ -1719,8 +1741,8 @@ pub fn controls() -> Vec<Control> {
                 reviewed: "2026-09-07",
             }],
             |ctx| SUGGESTED_APPS.probe(ctx),
-            Some(|ctx| SUGGESTED_APPS.apply(ctx)),
-            Some(|ctx, pre, post| SUGGESTED_APPS.rollback(ctx, pre, post)),
+            Some(|ctx, prepare| SUGGESTED_APPS.apply(ctx, prepare)),
+            Some(|ctx, op| SUGGESTED_APPS.rollback(ctx, op)),
         ),
         toggle_control(
             "windows.experience.system-suggestions",
@@ -1737,8 +1759,8 @@ pub fn controls() -> Vec<Control> {
                 reviewed: "2026-09-21",
             }],
             |ctx| SYSTEM_SUGGESTIONS.probe(ctx),
-            Some(|ctx| SYSTEM_SUGGESTIONS.apply(ctx)),
-            Some(|ctx, pre, post| SYSTEM_SUGGESTIONS.rollback(ctx, pre, post)),
+            Some(|ctx, prepare| SYSTEM_SUGGESTIONS.apply(ctx, prepare)),
+            Some(|ctx, op| SYSTEM_SUGGESTIONS.rollback(ctx, op)),
         ),
         toggle_control(
             "windows.experience.tailored",
@@ -1760,8 +1782,8 @@ pub fn controls() -> Vec<Control> {
                 reviewed: "2026-09-07",
             }],
             |ctx| TAILORED_EXPERIENCES.probe(ctx),
-            Some(|ctx| TAILORED_EXPERIENCES.apply(ctx)),
-            Some(|ctx, pre, post| TAILORED_EXPERIENCES.rollback(ctx, pre, post)),
+            Some(|ctx, prepare| TAILORED_EXPERIENCES.apply(ctx, prepare)),
+            Some(|ctx, op| TAILORED_EXPERIENCES.rollback(ctx, op)),
         ),
         toggle_control(
             "windows.input.personalization",
@@ -1804,8 +1826,8 @@ pub fn controls() -> Vec<Control> {
                 reviewed: "2026-09-21",
             }],
             |ctx| DEVICE_SEARCH_HISTORY.probe(ctx),
-            Some(|ctx| DEVICE_SEARCH_HISTORY.apply(ctx)),
-            Some(|ctx, pre, post| DEVICE_SEARCH_HISTORY.rollback(ctx, pre, post)),
+            Some(|ctx, prepare| DEVICE_SEARCH_HISTORY.apply(ctx, prepare)),
+            Some(|ctx, op| DEVICE_SEARCH_HISTORY.rollback(ctx, op)),
         ),
         toggle_control(
             "windows.search.web",
@@ -1824,8 +1846,8 @@ pub fn controls() -> Vec<Control> {
                 reviewed: "2026-09-07",
             }],
             |ctx| WEB_SEARCH.probe(ctx),
-            Some(|ctx| WEB_SEARCH.apply(ctx)),
-            Some(|ctx, pre, post| WEB_SEARCH.rollback(ctx, pre, post)),
+            Some(|ctx, prepare| WEB_SEARCH.apply(ctx, prepare)),
+            Some(|ctx, op| WEB_SEARCH.rollback(ctx, op)),
         ),
         toggle_control(
             "windows.delivery-optimization.mode",
@@ -1843,8 +1865,8 @@ pub fn controls() -> Vec<Control> {
                 reviewed: "2026-09-22",
             }],
             probe_delivery_optimization,
-            Some(|ctx| DELIVERY_OPTIMIZATION.apply(ctx)),
-            Some(|ctx, pre, post| DELIVERY_OPTIMIZATION.rollback(ctx, pre, post)),
+            Some(|ctx, prepare| DELIVERY_OPTIMIZATION.apply(ctx, prepare)),
+            Some(|ctx, op| DELIVERY_OPTIMIZATION.rollback(ctx, op)),
         ),
         security_llmnr(),
         toggle_control(
@@ -1865,8 +1887,8 @@ pub fn controls() -> Vec<Control> {
                 reviewed: "2026-09-22",
             }],
             probe_ncsi_probing,
-            Some(|ctx| NCSI_PROBING.apply(ctx)),
-            Some(|ctx, pre, post| NCSI_PROBING.rollback(ctx, pre, post)),
+            Some(|ctx, prepare| NCSI_PROBING.apply(ctx, prepare)),
+            Some(|ctx, op| NCSI_PROBING.rollback(ctx, op)),
         ),
         toggle_control(
             "windows.security.wpad",
@@ -1886,8 +1908,8 @@ pub fn controls() -> Vec<Control> {
                 reviewed: "2026-09-22",
             }],
             probe_wpad,
-            Some(|ctx| WPAD.apply(ctx)),
-            Some(|ctx, pre, post| WPAD.rollback(ctx, pre, post)),
+            Some(|ctx, prepare| WPAD.apply(ctx, prepare)),
+            Some(|ctx, op| WPAD.rollback(ctx, op)),
         ),
         toggle_control(
             "windows.browser.edge.telemetry",
@@ -1903,8 +1925,8 @@ pub fn controls() -> Vec<Control> {
                 reviewed: "2026-10-01",
             }],
             |ctx| EDGE_METRICS.probe(ctx),
-            Some(|ctx| EDGE_METRICS.apply(ctx)),
-            Some(|ctx, pre, post| EDGE_METRICS.rollback(ctx, pre, post)),
+            Some(|ctx, prepare| EDGE_METRICS.apply(ctx, prepare)),
+            Some(|ctx, op| EDGE_METRICS.rollback(ctx, op)),
         ),
         toggle_control_with_desired(
             "windows.storage.pagefile-clear",
@@ -1923,8 +1945,8 @@ pub fn controls() -> Vec<Control> {
                 reviewed: "2026-10-01",
             }],
             probe_pagefile_clear,
-            Some(|ctx| PAGEFILE_CLEAR.apply(ctx)),
-            Some(|ctx, pre, post| PAGEFILE_CLEAR.rollback(ctx, pre, post)),
+            Some(|ctx, prepare| PAGEFILE_CLEAR.apply(ctx, prepare)),
+            Some(|ctx, op| PAGEFILE_CLEAR.rollback(ctx, op)),
         ),
         toggle_control(
             "windows.storage.thumbnail-cache",
@@ -1944,8 +1966,8 @@ pub fn controls() -> Vec<Control> {
                 reviewed: "2026-10-01",
             }],
             |ctx| THUMBNAIL_CACHE.probe(ctx),
-            Some(|ctx| THUMBNAIL_CACHE.apply(ctx)),
-            Some(|ctx, pre, post| THUMBNAIL_CACHE.rollback(ctx, pre, post)),
+            Some(|ctx, prepare| THUMBNAIL_CACHE.apply(ctx, prepare)),
+            Some(|ctx, op| THUMBNAIL_CACHE.rollback(ctx, op)),
         ),
         toggle_control_with_desired(
             "windows.storage.bitlocker-cipher",
@@ -1964,8 +1986,8 @@ pub fn controls() -> Vec<Control> {
                 reviewed: "2026-10-01",
             }],
             probe_bitlocker_cipher,
-            Some(|ctx| BITLOCKER_CIPHER.apply(ctx)),
-            Some(|ctx, pre, post| BITLOCKER_CIPHER.rollback(ctx, pre, post)),
+            Some(|ctx, prepare| BITLOCKER_CIPHER.apply(ctx, prepare)),
+            Some(|ctx, op| BITLOCKER_CIPHER.rollback(ctx, op)),
         ),
         toggle_control_with_desired(
             "windows.storage.dma-protection",
@@ -1986,8 +2008,8 @@ pub fn controls() -> Vec<Control> {
                 reviewed: "2026-10-01",
             }],
             probe_dma_protection,
-            Some(|ctx| DMA_PROTECTION.apply(ctx)),
-            Some(|ctx, pre, post| DMA_PROTECTION.rollback(ctx, pre, post)),
+            Some(|ctx, prepare| DMA_PROTECTION.apply(ctx, prepare)),
+            Some(|ctx, op| DMA_PROTECTION.rollback(ctx, op)),
         ),
         toggle_control_with_desired(
             "windows.storage.trim-notify",
@@ -2006,8 +2028,8 @@ pub fn controls() -> Vec<Control> {
                 reviewed: "2026-10-01",
             }],
             probe_trim_notify,
-            Some(|ctx| TRIM_NOTIFY.apply(ctx)),
-            Some(|ctx, pre, post| TRIM_NOTIFY.rollback(ctx, pre, post)),
+            Some(|ctx, prepare| TRIM_NOTIFY.apply(ctx, prepare)),
+            Some(|ctx, op| TRIM_NOTIFY.rollback(ctx, op)),
         ),
     ];
 

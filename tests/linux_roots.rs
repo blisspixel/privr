@@ -544,3 +544,23 @@ fn successive_mcp_cleanups_have_independent_completed_receipts() {
     }
     assert_ne!(ids[0], ids[1]);
 }
+
+#[test]
+fn history_refuses_writable_primary_and_legacy_roots() {
+    use std::os::unix::fs::PermissionsExt;
+    for root in [
+        "override/state/privr",
+        "override/data/privr/state/transactions",
+    ] {
+        let fixture = Fixture::new();
+        let path = fixture.0.join(root);
+        std::fs::create_dir_all(&path).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o777)).unwrap();
+        fixture
+            .command(Some("absolute"), true)
+            .arg("history")
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("unsafe journal directory"));
+    }
+}

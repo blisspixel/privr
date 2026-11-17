@@ -264,8 +264,8 @@ mod tests {
             sources: &[],
             probe,
             apply: if can_apply {
-                Some(|_| {
-                    Ok(crate::catalog::AppliedOp {
+                Some(|_, prepare| {
+                    prepare(crate::catalog::AppliedOp {
                         target_key: "test".to_owned(),
                         preimage: None,
                         postimage: crate::model::evidence::RawValue::u32(0),

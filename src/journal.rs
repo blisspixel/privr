@@ -38,6 +38,44 @@ pub struct TransactionJournal {
     pub cleanup: Option<crate::model::residue::CleanupJournal>,
 }
 
+impl TransactionJournal {
+    pub(crate) fn apply_operation(
+        &mut self,
+        control_id: &str,
+        mut persist: impl FnMut(&Self) -> std::io::Result<PathBuf>,
+        apply: impl FnOnce(&mut crate::catalog::PrepareOperation) -> Result<(), String>,
+    ) -> Result<(), String> {
+        let index = self.operations.len();
+        apply(&mut |op| {
+            if self.operations.len() != index {
+                return Err("operation was already prepared".into());
+            }
+            self.operations.push(OperationJournal {
+                control_id: control_id.to_owned(),
+                target_key: op.target_key,
+                preimage: op.preimage,
+                postimage: op.postimage,
+                verified: false,
+            });
+            if let Err(err) = persist(self) {
+                self.operations.pop();
+                return Err(format!("Failed to persist operation before apply: {err}"));
+            }
+            Ok(())
+        })?;
+        let record = self
+            .operations
+            .get_mut(index)
+            .ok_or("adapter did not prepare an operation")?;
+        record.verified = true;
+        if let Err(err) = persist(self) {
+            self.operations[index].verified = false;
+            return Err(format!("Failed to persist verified operation: {err}"));
+        }
+        Ok(())
+    }
+}
+
 /// Validate that a transaction ID contains only allowed characters and no path navigation.
 pub fn is_valid_transaction_id(id: &str) -> bool {
     if id.is_empty() || id.len() > 128 {
@@ -49,6 +87,23 @@ pub fn is_valid_transaction_id(id: &str) -> bool {
 
 /// The base directory where transaction journals are stored.
 pub fn transactions_dir() -> Result<PathBuf, std::io::Error> {
+    let primary = resolve_transactions_dir()?;
+    #[cfg(target_os = "linux")]
+    {
+        check_journal_root(&primary, 2)?;
+        if let Some(legacy) = legacy_path() {
+            // An absent legacy root is never created by the compatibility reader.
+            match fs::symlink_metadata(&legacy) {
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e),
+                Ok(_) => check_journal_root(&legacy, 3)?,
+            }
+        }
+    }
+    Ok(primary)
+}
+
+pub(crate) fn resolve_transactions_dir() -> std::io::Result<PathBuf> {
     #[cfg(windows)]
     {
         Ok(if let Ok(appdata) = std::env::var("LOCALAPPDATA") {
@@ -80,22 +135,71 @@ pub fn transactions_dir() -> Result<PathBuf, std::io::Error> {
     }
     #[cfg(not(any(windows, target_os = "macos")))]
     {
-        crate::platform::xdg::user_root("XDG_STATE_HOME", ".local/state")
+        let primary = crate::platform::xdg::user_root("XDG_STATE_HOME", ".local/state")
             .map(|root| root.join("privr/transactions"))
             .ok_or_else(|| {
                 std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
                     "Cannot resolve journal storage: set an absolute XDG_STATE_HOME or HOME",
                 )
-            })
+            })?;
+        Ok(primary)
     }
+}
+
+/// Validate from the filesystem root so an untrusted ancestor cannot replace
+/// a checked child. A sticky system directory can hold an existing user root.
+#[cfg(target_os = "linux")]
+fn check_journal_root(dir: &Path, app_components: usize) -> std::io::Result<()> {
+    use std::os::unix::fs::MetadataExt;
+    use std::path::Component;
+    let denied = || {
+        std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "unsafe journal directory ownership or permissions",
+        )
+    };
+    let uid = nix::unistd::geteuid().as_raw();
+    let base = dir.ancestors().nth(app_components).ok_or_else(denied)?;
+    let mut path = PathBuf::new();
+    let mut sticky_parent = false;
+    for component in dir.components() {
+        if !matches!(component, Component::RootDir | Component::Normal(_)) {
+            return Err(denied());
+        }
+        path.push(component);
+        let meta = match fs::symlink_metadata(&path) {
+            Ok(meta) => meta,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound && !sticky_parent => continue,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Err(denied()),
+            Err(err) => return Err(err),
+        };
+        let user_component = path.starts_with(base);
+        let sticky_system = !user_component && meta.uid() == 0 && meta.mode() & 0o1000 != 0;
+        if !meta.is_dir()
+            || (meta.uid() != uid && (user_component || meta.uid() != 0))
+            || (meta.mode() & 0o022 != 0 && !sticky_system)
+        {
+            return Err(denied());
+        }
+        sticky_parent = sticky_system;
+    }
+    Ok(())
 }
 
 /// The legacy directory where Linux transaction journals were previously stored.
 #[cfg(not(any(windows, target_os = "macos")))]
-pub fn legacy_transactions_dir() -> Option<PathBuf> {
+fn legacy_path() -> Option<PathBuf> {
     crate::platform::xdg::user_root("XDG_DATA_HOME", ".local/share")
         .map(|root| root.join("privr/state/transactions"))
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+pub fn legacy_transactions_dir() -> Option<PathBuf> {
+    let path = legacy_path()?;
+    #[cfg(target_os = "linux")]
+    check_journal_root(&path, 3).ok()?;
+    Some(path)
 }
 
 #[cfg(any(windows, target_os = "macos"))]
@@ -114,7 +218,7 @@ pub fn migrate_legacy_transactions() -> Result<usize, std::io::Error> {
     }
     let mut count = 0;
     if let Ok(entries) = fs::read_dir(&legacy) {
-        let _ = fs::create_dir_all(&primary);
+        create_journal_directory(&primary)?;
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_file()
@@ -145,6 +249,37 @@ pub fn migrate_legacy_transactions() -> Result<usize, std::io::Error> {
     Ok(count)
 }
 
+fn create_journal_directory(dir: &Path) -> std::io::Result<()> {
+    let mut builder = fs::DirBuilder::new();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    builder.recursive(true).create(dir)
+}
+
+pub(crate) fn initialize_transaction(
+    dir: &Path,
+    tx: &TransactionJournal,
+) -> std::io::Result<PathBuf> {
+    if !is_valid_transaction_id(&tx.transaction_id) {
+        return Err(std::io::Error::other("invalid transaction identifier"));
+    }
+    create_journal_directory(dir)?;
+    let path = dir.join(format!("{}.json", tx.transaction_id));
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let file = options.open(&path)?;
+    drop(file);
+    save_transaction_in(dir, tx)
+}
+
 /// Write a transaction to disk atomically.
 pub fn save_transaction(tx: &TransactionJournal) -> Result<PathBuf, std::io::Error> {
     save_transaction_in(&transactions_dir()?, tx)
@@ -160,7 +295,7 @@ pub(crate) fn save_transaction_in(
             "Invalid transaction identifier",
         ));
     }
-    fs::create_dir_all(dir)?;
+    create_journal_directory(dir)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -501,6 +636,92 @@ mod tests {
 
         let _ = fs::remove_file(p1);
         let _ = fs::remove_file(p2);
+    }
+
+    #[test]
+    fn failed_preparation_prevents_mutation_and_failed_verification_retains_preimage() {
+        let op = || crate::catalog::AppliedOp {
+            target_key: "fixture".into(),
+            preimage: Some(RawValue::u32(7)),
+            postimage: RawValue::u32(3),
+        };
+        let mut tx = empty_transaction("test-preparation");
+        let mut mutated = false;
+        let denied = tx.apply_operation(
+            "control",
+            |_| Err(std::io::Error::other("unavailable")),
+            |prepare| {
+                prepare(op())?;
+                mutated = true;
+                Ok(())
+            },
+        );
+        assert!(denied.is_err() && !mutated && tx.operations.is_empty());
+        let dir = TestDirectory::new();
+        let failed = tx.apply_operation(
+            "control",
+            |tx| save_transaction_in(&dir.0, tx),
+            |prepare| {
+                prepare(op())?;
+                let persisted = load_transaction_in(&dir.0, "test-preparation").unwrap();
+                assert_eq!(persisted.operations[0].preimage, op().preimage);
+                assert!(!persisted.operations[0].verified);
+                mutated = true;
+                Err("verification unavailable".into())
+            },
+        );
+        assert!(failed.is_err() && mutated);
+        assert_eq!(load_transaction_in(&dir.0, "test-preparation").unwrap(), tx);
+    }
+
+    #[test]
+    fn process_exit_after_a_prepared_write_preserves_recovery() {
+        const CHILD_DIR: &str = "PRIVR_TEST_INTERRUPTED_APPLY_DIR";
+        if let Some(dir) = std::env::var_os(CHILD_DIR) {
+            let dir = PathBuf::from(dir);
+            let mut tx = empty_transaction("fixture-interrupted");
+            tx.apply_operation(
+                "control",
+                |tx| save_transaction_in(&dir, tx),
+                |prepare| {
+                    prepare(crate::catalog::AppliedOp {
+                        target_key: "fixture".into(),
+                        preimage: Some(RawValue::u32(7)),
+                        postimage: RawValue::u32(3),
+                    })?;
+                    fs::write(dir.join("fixture-value"), [3]).unwrap();
+                    std::process::exit(17);
+                },
+            )
+            .unwrap();
+            unreachable!();
+        }
+        let dir = TestDirectory::new();
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "journal::tests::process_exit_after_a_prepared_write_preserves_recovery",
+            ])
+            .env(CHILD_DIR, &dir.0)
+            .status()
+            .unwrap();
+        assert_eq!(status.code(), Some(17));
+        let tx = load_transaction_in(&dir.0, "fixture-interrupted").unwrap();
+        assert_eq!(fs::read(dir.0.join("fixture-value")).unwrap(), [3]);
+        assert_eq!(tx.operations[0].preimage, Some(RawValue::u32(7)));
+        assert!(!tx.operations[0].verified);
+    }
+
+    #[test]
+    fn journal_initialization_refuses_an_existing_transaction() {
+        let dir = TestDirectory::new();
+        let tx = empty_transaction("fixture-reserved");
+        initialize_transaction(&dir.0, &tx).unwrap();
+        let mut other = tx.clone();
+        other.profile = "second invocation".into();
+        let error = initialize_transaction(&dir.0, &other).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(load_transaction_in(&dir.0, &tx.transaction_id).unwrap(), tx);
     }
 
     fn empty_transaction(id: &str) -> TransactionJournal {

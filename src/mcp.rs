@@ -1115,7 +1115,7 @@ fn handle_tools_call_with_check_context(
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default();
             let timestamp = crate::report::format_rfc3339_utc(std::time::SystemTime::now());
-            let tx_id = format!("tx-{}-{}", now.as_secs(), now.subsec_millis());
+            let tx_id = format!("tx-{}-{}", now.as_nanos(), std::process::id());
             let mut journal = crate::journal::TransactionJournal {
                 schema: crate::journal::JOURNAL_SCHEMA,
                 cleanup: None,
@@ -1127,7 +1127,9 @@ fn handle_tools_call_with_check_context(
             };
 
             // Verify journal storage is writable before mutating system state.
-            if let Err(e) = crate::journal::save_transaction(&journal) {
+            if let Err(e) = crate::journal::transactions_dir()
+                .and_then(|dir| crate::journal::initialize_transaction(&dir, &journal))
+            {
                 return tool_error(format!("Failed to initialize transaction journal: {e}"));
             }
 
@@ -1218,7 +1220,9 @@ fn handle_tools_call_with_check_context(
                         match automatic_elevation_decision(c, &eval, is_elevated, filter.is_some())
                         {
                             ElevationDecision::Refuse => {
-                                if let Ok(root) = crate::journal::transactions_dir() {
+                                if journal.operations.is_empty()
+                                    && let Ok(root) = crate::journal::transactions_dir()
+                                {
                                     let _ =
                                         std::fs::remove_file(root.join(format!("{tx_id}.json")));
                                 }
@@ -1234,31 +1238,19 @@ fn handle_tools_call_with_check_context(
                             ElevationDecision::NotRequired => {}
                         }
 
-                        match c.apply(context) {
-                            Some(Ok(op)) => {
-                                journal.operations.push(crate::journal::OperationJournal {
-                                    control_id: c.spec.id.clone(),
-                                    target_key: op.target_key,
-                                    preimage: op.preimage,
-                                    postimage: op.postimage,
-                                    verified: true,
-                                });
-                                if let Err(e) = crate::journal::save_transaction(&journal) {
-                                    return tool_error(format!(
-                                        "Fatal error writing transaction journal: {e}. Applied {} change(s). Halting apply.",
-                                        journal.operations.len()
-                                    ));
-                                }
-                            }
-                            Some(Err(e)) => {
-                                return tool_error(format!(
-                                    "Failed to apply {}: {e}. Applied {} prior changes (tx: {}).",
-                                    c.spec.id,
-                                    journal.operations.len(),
-                                    tx_id
-                                ));
-                            }
-                            None => {}
+                        if let Some(apply) = c.apply
+                            && let Err(e) = journal.apply_operation(
+                                &c.spec.id,
+                                crate::journal::save_transaction,
+                                |prepare| apply(context, prepare),
+                            )
+                        {
+                            return tool_error(format!(
+                                "Failed to apply {}: {e}. Applied {} prior changes (tx: {}).",
+                                c.spec.id,
+                                journal.operations.iter().filter(|op| op.verified).count(),
+                                tx_id
+                            ));
                         }
                     } else {
                         unautomated_drift += 1;
@@ -1377,9 +1369,9 @@ fn handle_tools_call_with_check_context(
                     .iter()
                     .find(|item| item.spec.id == op.control_id)
                 {
-                    match c.rollback(&context, &op.preimage, &op.postimage) {
-                        Some(Ok(())) => {
-                            restored += 1;
+                    match c.rollback(&context, op) {
+                        Some(Ok(changed)) => {
+                            restored += usize::from(changed);
                         }
                         Some(Err(e)) => {
                             return tool_error(format!(
@@ -2561,7 +2553,7 @@ mod tests {
         control.spec.verified_through = None;
         control.spec.remediation = Remediation::Automatic;
         control.spec.remediation_reason = None;
-        control.apply = Some(|_| panic!("synthetic mutation must never execute"));
+        control.apply = Some(|_, _| panic!("synthetic mutation must never execute"));
         let resolution = Resolution::determined(
             SemanticState::new("synthetic-different-state"),
             ManagementSource::User,
@@ -2594,7 +2586,7 @@ mod tests {
             automatic_elevation_decision(&control, &result, false, true),
             ElevationDecision::NotRequired
         );
-        control.apply = Some(|_| panic!("synthetic mutation must never execute"));
+        control.apply = Some(|_, _| panic!("synthetic mutation must never execute"));
         result.remediation = Remediation::AuditOnly;
         assert_eq!(
             automatic_elevation_decision(&control, &result, false, true),

@@ -674,6 +674,56 @@ mod tests {
         assert_eq!(load_transaction_in(&dir.0, "test-preparation").unwrap(), tx);
     }
 
+    #[test]
+    fn process_exit_after_a_prepared_write_preserves_recovery() {
+        const CHILD_DIR: &str = "PRIVR_TEST_INTERRUPTED_APPLY_DIR";
+        if let Some(dir) = std::env::var_os(CHILD_DIR) {
+            let dir = PathBuf::from(dir);
+            let mut tx = empty_transaction("fixture-interrupted");
+            tx.apply_operation(
+                "control",
+                |tx| save_transaction_in(&dir, tx),
+                |prepare| {
+                    prepare(crate::catalog::AppliedOp {
+                        target_key: "fixture".into(),
+                        preimage: Some(RawValue::u32(7)),
+                        postimage: RawValue::u32(3),
+                    })?;
+                    fs::write(dir.join("fixture-value"), [3]).unwrap();
+                    std::process::exit(17);
+                },
+            )
+            .unwrap();
+            unreachable!();
+        }
+        let dir = TestDirectory::new();
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "journal::tests::process_exit_after_a_prepared_write_preserves_recovery",
+            ])
+            .env(CHILD_DIR, &dir.0)
+            .status()
+            .unwrap();
+        assert_eq!(status.code(), Some(17));
+        let tx = load_transaction_in(&dir.0, "fixture-interrupted").unwrap();
+        assert_eq!(fs::read(dir.0.join("fixture-value")).unwrap(), [3]);
+        assert_eq!(tx.operations[0].preimage, Some(RawValue::u32(7)));
+        assert!(!tx.operations[0].verified);
+    }
+
+    #[test]
+    fn journal_initialization_refuses_an_existing_transaction() {
+        let dir = TestDirectory::new();
+        let tx = empty_transaction("fixture-reserved");
+        initialize_transaction(&dir.0, &tx).unwrap();
+        let mut other = tx.clone();
+        other.profile = "second invocation".into();
+        let error = initialize_transaction(&dir.0, &other).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(load_transaction_in(&dir.0, &tx.transaction_id).unwrap(), tx);
+    }
+
     fn empty_transaction(id: &str) -> TransactionJournal {
         TransactionJournal {
             schema: JOURNAL_SCHEMA,
